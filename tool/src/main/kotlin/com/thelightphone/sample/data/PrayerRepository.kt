@@ -97,6 +97,21 @@ class PrayerRepository private constructor(database: PrayerDatabase) {
         dao.updateEntry(entry.copy(text = text))
     }
 
+    /**
+     * Replaces an entry's text and type. Moving a REQUEST to another type
+     * clears its answered state, since only requests can be answered.
+     */
+    fun updateEntry(entryId: String, text: String, type: EntryType) {
+        val entry = dao.getEntry(entryId) ?: return
+        dao.updateEntry(
+            entry.copy(
+                text = text,
+                type = type,
+                answeredAt = if (type == EntryType.REQUEST) entry.answeredAt else null,
+            ),
+        )
+    }
+
     /** REQUEST entries only; [answeredAt] null clears the answered state. */
     fun setEntryAnswered(entryId: String, answeredAt: Long?) =
         dao.setEntryAnswered(entryId, answeredAt)
@@ -113,6 +128,43 @@ class PrayerRepository private constructor(database: PrayerDatabase) {
         SeedData.groups.forEach(dao::insertGroup)
         SeedData.people.forEach(dao::insertPerson)
         SeedData.entries(now).forEach(dao::insertEntry)
+    }
+
+    // --- JSON seed import --------------------------------------------------
+
+    /**
+     * Adds the groups and people from a parsed [SeedFile]. Additive: a group
+     * whose name already exists (case-insensitive) is reused rather than
+     * duplicated; people are always added. Blank names are skipped. The caller
+     * ([com.thelightphone.sample.SeedFileImporter]) renames the source file
+     * afterwards so this never runs twice for the same file. Returns how many
+     * people were added.
+     */
+    fun importSeed(seed: SeedFile): Int {
+        val groupIdsByName = HashMap<String, String>()
+        dao.listGroups().forEach { groupIdsByName[it.name.trim().lowercase()] = it.id }
+
+        var peopleAdded = 0
+        seed.groups.forEach { seedGroup ->
+            val groupName = seedGroup.name.trim()
+            if (groupName.isEmpty()) return@forEach
+            val key = groupName.lowercase()
+            val groupId = groupIdsByName[key] ?: addGroup(groupName).also { groupIdsByName[key] = it }
+            seedGroup.people.forEach { person ->
+                if (addSeedPerson(person, groupId)) peopleAdded++
+            }
+        }
+        seed.ungrouped.forEach { person ->
+            if (addSeedPerson(person, groupId = null)) peopleAdded++
+        }
+        return peopleAdded
+    }
+
+    private fun addSeedPerson(person: SeedPerson, groupId: String?): Boolean {
+        val name = person.name.trim()
+        if (name.isEmpty()) return false
+        addPerson(name = name, groupId = groupId, note = person.note?.trim()?.ifEmpty { null })
+        return true
     }
 
     private fun newId(): String = UUID.randomUUID().toString()

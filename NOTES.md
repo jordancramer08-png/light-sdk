@@ -48,7 +48,7 @@ own `SimpleLightScreen<String>` returning the typed value via `goBack`.
 | `LightTopBar(leftButton, center, rightButton)` | `LightTopBar.kt:40` | Fixed height 3 grid units (`LightTopBar.kt:17`). `center` is `LightTopBarCenter.Text` or `.TwoLineDetail` (`LightTopBar.kt:24`), optionally clickable. |
 | `LightBottomBar(items, …)` | `LightBottomBar.kt:31` | Action bar. **Max 5 items** (`LightBottomBar.kt:36`); **if any item is text, max 3 items** (`LightBottomBar.kt:39`). `null` entries render as spacers. |
 | `LightBarButton` sealed interface | `LightBarButton.kt:14` | `LightBarButton.Text(text, onClick)` (`:18`), `LightBarButton.Icon(painter, …)` for your own painter (`:29`), `LightBarButton.LightIcon(icon, onClick, …)` for a built-in icon (`:39`). `typealias LightTopBarButton` / `LightBottomBarItem` both = `LightBarButton` (`LightBarButton.kt:51`). |
-| **Back button** | provided by the framework | `sdk/client/README.md:64` — the SDK renders its own back bar and wires the system back gesture. **Do not build one.** |
+| **Back button** | you place it, per screen | `sdk/client/README.md:64` claims the SDK "renders a back bar" — **it does not.** `LightActivity.onCreate` (`LightActivity.kt:113-137`) renders only `Content()` plus a modal overlay; there is no back-bar composable anywhere in `sdk/ui/`. The SDK does keep the back stack and wires the system back gesture to `goBack()` (`LightActivity.kt:60,73-88,139-146`), but LightOS/the LP3 exposes no system back to apps, so every non-root screen must draw its own: `LightTopBar(leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }), …)`. This is what every example does (`examples/ui-demo/.../UiDemoSecondScreen.kt:61`, `examples/authenticator/.../AuthenticatorCodeScreen.kt:62`, `examples/weather/.../WeatherHomeScreen.kt:211`). Root/`@InitialScreen` screens omit it — `goBack()` there calls `finish()`. |
 
 ### Icons
 
@@ -199,7 +199,14 @@ Exactly one screen in the tool must be annotated `@InitialScreen`
 ### Navigation rules (from CLAUDE.md + `sdk/client/README.md:53`)
 
 - Navigate only with `navigateTo`. No Android Intents / system nav.
-- No hand-rolled back button.
+- `navigateTo` maintains the back stack automatically (`LightActivity.kt:60,65-88`);
+  `goBack(result?)` pops it. You never manage the stack yourself.
+- **Each non-root screen must draw its own back control** in the `LightTopBar`
+  left slot — the SDK does not render one despite the README. See the Back button
+  row in §1. `HomeScreen` (root) omits it.
+- Don't override `LightViewModel.onBackPressed()` (default `false`). It only
+  *consumes* the back press when it returns `true` — an unsaved-changes guard,
+  not a fix for missing navigation.
 - To hand a value back to the opener: child `goBack(result)` → opener's
   `resultCallback`. Examples: `AuthenticatorHomeScreen.kt:93` (open detail),
   `UiDemoTextInputEditorScreen.kt:39` (return typed string).
@@ -354,13 +361,19 @@ lightContext.buildDatabase(cls, name): RoomDatabase  // LightDb.kt:6 (extension)
 
 - Phase 1 "small seed dataset": just insert rows into Room on first run if the
   DB is empty (guard with a DataStore boolean or a `SELECT COUNT(*)`).
-- Phase 6 "JSON seed import from the app's external files directory": **note a
-  gap** — `SealedLightContext` exposes `filesDir` (internal) and
-  `readAsset(path)` (`LightActivity.kt:233`, reads from bundled `assets/`), but
-  **no accessor for `getExternalFilesDir(...)`**, and `android.content.Context`
-  is import-blocked (`LightSdkPlugin.kt:83`). Bundled `assets/seed.json` +
-  `readAsset` works within the sandbox; a true external-files path may need an
-  SDK addition. Flag this when we reach phase 6.
+- Phase 6 "JSON seed import from the app's external files directory": **gap
+  resolved (2026-09-07).** `SealedLightContext` exposes `filesDir` (internal)
+  and `readAsset(path)` (`LightActivity.kt:233`, bundled `assets/`) but **no
+  accessor for `getExternalFilesDir(...)`**, and `android.content.Context` is
+  import-blocked (`LightSdkPlugin.kt:83`) plus `Context` casts are a lint
+  ERROR. So a true `/sdcard/Android/data/<pkg>/files/` path is unreachable from
+  the `tool` module. Decision (user picked): use `lightContext.fileShare`
+  (`LightFileShare`, root `filesDir/shared/`) as the drop location. Import in
+  `SeedFileImporter` reads `prayer_seed.json` there, calls
+  `PrayerRepository.importSeed`, then copy+deletes it to
+  `prayer_seed.imported-<ts>.json` (LightFileShare has no rename). Groups/people
+  only; JSON via `kotlinx-serialization-json` (added to `tool/build.gradle.kts`,
+  allow-listed). Format + fillable file: `docs/prayer_seed.example.json`.
 
 ### Background work (only if ever needed)
 
@@ -378,7 +391,7 @@ List (no sync, no notifications) and comes with the two lint rules in §3B.
 | 3 PersonScreen tabs | no tab component exists — build tabs from a `Row` of `LightText`/`LightIcon` + selected-state `MutableStateFlow`; body is `LightScrollView` |
 | 4 Entry create/edit + mark-answered | dedicated `LightScreen` with `LightTextInputEditor` (`LightTextInputEditor.kt:48`) + `rememberKeyboardOptions()`; a type selector built from `LightBarButton`s; mark-answered = set `answeredAt` column |
 | 5 ManageScreen | forms of the same primitives; reorder = `sortOrder` int + `UP`/`DOWN` icons |
-| 6 JSON seed | `readAsset("seed.json")` + `kotlinx-serialization` (see §4 gap note) |
+| 6 JSON seed | `lightContext.fileShare` drop of `prayer_seed.json` + `kotlinx-serialization-json`; see §4 (done) |
 | 7 Polish | `LightGrid` units, `LightText` empty-state messages, emulator at 1080×1240 (`docs/system_app/README.md`) |
 
 ## 6. Build

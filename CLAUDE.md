@@ -18,8 +18,10 @@ environment.
   `LightScreenViewModel`. Each screen needs a direct reference to its ViewModel's class
   type and a factory method to create one. Follow `HomeScreen` as the pattern.
 - **Navigate with `navigateTo` only.** LightOS does not use Android system navigation.
-  **Do not build a back button** — one is provided. Override `onBackPressed` in the
-  ViewModel only if genuinely needed.
+- **The SDK does not render a back bar.** Every non-root screen must place its own
+  `leftButton` on `LightTopBar` using `LightBarButton.LightIcon` with `LightIcons.BACK`,
+  calling `goBack()`. The back stack is automatic — **do not override `onBackPressed()`.**
+  (`sdk/client/README.md:64` claims a back bar is provided; it is wrong.)
 - **Third-party libraries are restricted and lint-enforced.** Do not add a dependency
   without checking `lint-rules/` first. If you think you need one, stop and ask me.
 - **Offline only.** No network calls, no sync, no accounts, no analytics. All data stays

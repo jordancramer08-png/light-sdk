@@ -13,14 +13,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.viewModelScope
-import com.thelightphone.sample.data.PrayerDatabase
+import com.thelightphone.sample.data.Person
 import com.thelightphone.sample.data.PrayerRepository
-import com.thelightphone.sdk.InitialScreen
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
-import com.thelightphone.sdk.buildDatabase
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightScrollView
@@ -38,28 +36,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * One row on the home screen: a group (or the synthetic "Ungrouped" bucket,
- * where [groupId] is null) plus how many active people it holds.
- */
-data class GroupRow(
-    val groupId: String?,
-    val name: String,
-    val personCount: Int,
-)
-
-class HomeScreenViewModel(
+class GroupScreenViewModel(
     private val repository: PrayerRepository,
-    private val seedFileImporter: SeedFileImporter,
+    private val groupId: String?,
 ) : LightViewModel<Unit>() {
 
-    private val _rows = MutableStateFlow<List<GroupRow>>(emptyList())
-    val rows: StateFlow<List<GroupRow>> = _rows.asStateFlow()
-
-    /** The seed file is checked once per process, on the first load. */
-    private val seedFileChecked = AtomicBoolean(false)
+    private val _people = MutableStateFlow<List<Person>>(emptyList())
+    val people: StateFlow<List<Person>> = _people.asStateFlow()
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
@@ -68,48 +52,35 @@ class HomeScreenViewModel(
 
     private fun refresh() {
         viewModelScope.launch(Dispatchers.IO) {
-            if (seedFileChecked.compareAndSet(false, true)) {
-                seedFileImporter.runOnce(System.currentTimeMillis())
-            }
-            repository.seedIfEmpty(System.currentTimeMillis())
-
-            val groupRows = repository.listGroups().map { group ->
-                GroupRow(
-                    groupId = group.id,
-                    name = group.name,
-                    personCount = repository.listPeopleInGroup(group.id).size,
-                )
-            }
-            val ungrouped = repository.listUngroupedPeople()
-
-            _rows.value = if (ungrouped.isEmpty()) {
-                groupRows
+            _people.value = if (groupId == null) {
+                repository.listUngroupedPeople()
             } else {
-                groupRows + GroupRow(groupId = null, name = "Ungrouped", personCount = ungrouped.size)
+                repository.listPeopleInGroup(groupId)
             }
         }
     }
 }
 
-@InitialScreen
-class HomeScreen(sealedActivity: SealedLightActivity) :
-    LightScreen<Unit, HomeScreenViewModel>(sealedActivity) {
+/**
+ * The people in one group, alphabetical. A null [groupId] shows the ungrouped
+ * people instead. A back button sits in the top bar (see NOTES.md §1).
+ */
+class GroupScreen(
+    sealedActivity: SealedLightActivity,
+    private val groupId: String?,
+    private val groupName: String,
+    private val repository: PrayerRepository,
+) : LightScreen<Unit, GroupScreenViewModel>(sealedActivity) {
 
-    private val repository = PrayerRepository.getInstance {
-        lightContext.buildDatabase(PrayerDatabase::class.java, PrayerRepository.DATABASE_NAME)
-    }
+    override val viewModelClass: Class<GroupScreenViewModel>
+        get() = GroupScreenViewModel::class.java
 
-    private val seedFileImporter = SeedFileImporter(lightContext.fileShare, repository)
-
-    override val viewModelClass: Class<HomeScreenViewModel>
-        get() = HomeScreenViewModel::class.java
-
-    override fun createViewModel() = HomeScreenViewModel(repository, seedFileImporter)
+    override fun createViewModel() = GroupScreenViewModel(repository, groupId)
 
     @Composable
     override fun Content() {
         val themeColors by LightThemeController.colors.collectAsState()
-        val rows by viewModel.rows.collectAsState()
+        val people by viewModel.people.collectAsState()
 
         LightTheme(colors = themeColors) {
             Column(
@@ -118,17 +89,15 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
                     .background(LightThemeTokens.colors.background),
             ) {
                 LightTopBar(
-                    center = LightTopBarCenter.Text("Prayer List"),
-                    rightButton = LightBarButton.LightIcon(
-                        icon = LightIcons.SETTINGS,
-                        onClick = {
-                            navigateTo(screenFactory = { ManageScreen(it, repository) })
-                        },
+                    leftButton = LightBarButton.LightIcon(
+                        icon = LightIcons.BACK,
+                        onClick = { goBack() },
                     ),
+                    center = LightTopBarCenter.Text(groupName),
                     modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
                 )
 
-                if (rows.isEmpty()) {
+                if (people.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -136,7 +105,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
                         contentAlignment = Alignment.Center,
                     ) {
                         LightText(
-                            text = "No groups yet.",
+                            text = "No one in this group yet.",
                             variant = LightTextVariant.Copy,
                             lighten = true,
                             align = TextAlign.Center,
@@ -150,14 +119,14 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
                             .fillMaxWidth()
                             .padding(start = 1f.gridUnitsAsDp()),
                     ) {
-                        rows.forEach { row ->
-                            GroupRowView(
-                                row = row,
+                        people.forEach { person ->
+                            PersonRowView(
+                                person = person,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .lightClickable {
                                         navigateTo(screenFactory = {
-                                            GroupScreen(it, row.groupId, row.name, repository)
+                                            PersonScreen(it, person.id, person.name, repository)
                                         })
                                     }
                                     .padding(vertical = 0.75f.gridUnitsAsDp()),
@@ -171,16 +140,11 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
 }
 
 @Composable
-private fun GroupRowView(row: GroupRow, modifier: Modifier = Modifier) {
+private fun PersonRowView(person: Person, modifier: Modifier = Modifier) {
     Column(modifier = modifier) {
-        LightText(text = row.name, variant = LightTextVariant.Copy)
-        LightText(
-            text = personCountLabel(row.personCount),
-            variant = LightTextVariant.Detail,
-            lighten = true,
-        )
+        LightText(text = person.name, variant = LightTextVariant.Copy)
+        person.note?.let { note ->
+            LightText(text = note, variant = LightTextVariant.Detail, lighten = true)
+        }
     }
 }
-
-private fun personCountLabel(count: Int): String =
-    if (count == 1) "1 person" else "$count people"

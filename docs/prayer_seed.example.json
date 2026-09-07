@@ -1,0 +1,39 @@
+{
+  "_comment": "Prayer List seed file. Rename this to prayer_seed.json and place it where the app looks (see docs note). Imported once on launch, then the app renames it so it never imports twice. Only groups and people are imported - not requests/praises/updates. 'note' is optional. People with no group go in the top-level 'ungrouped' list.",
+
+  "groups": [
+    {
+      "name": "Small Group",
+      "people": [
+        { "name": "Dave Whitfield" },
+        { "name": "Marcus Whitfield", "note": "Dave's brother" },
+        { "name": "Priya Anand" }
+      ]
+    },
+    {
+      "name": "Bible Study",
+      "people": [
+        { "name": "Ellen Cho" },
+        { "name": "Tomasz Nowak" }
+      ]
+    },
+    {
+      "name": "Family",
+      "people": [
+        { "name": "Grandma Ruth", "note": "in the care home now" },
+        { "name": "Aunt Sue" }
+      ]
+    },
+    {
+      "name": "Church",
+      "people": [
+        { "name": "Pastor James", "note": "sabbatical through the spring" }
+      ]
+    }
+  ],
+
+  "ungrouped": [
+    { "name": "Kim next door" },
+    { "name": "Raj (work)" }
+  ]
+}

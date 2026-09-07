@@ -1,0 +1,46 @@
+{
+  "_comment": "Prayer List seed file. Place at files/shared/prayer_seed.json on the device. Imported once on launch, then archived so it never re-imports. Only groups and people are imported. Empty groups (people: []) are created as groups you can add people to later.",
+
+  "groups": [
+    {
+      "name": "Small Group",
+      "people": []
+    },
+    {
+      "name": "Bible Study",
+      "people": [
+        { "name": "Ben Bayly" },
+        { "name": "Zach Warner" },
+        { "name": "Ryan Hufford" },
+        { "name": "Kevin Zellers" },
+        { "name": "Chris Hodge" },
+        { "name": "Tyler Spotts" },
+        { "name": "Tate Foulke" },
+        { "name": "Sam Frisch" }
+      ]
+    },
+    {
+      "name": "Family",
+      "people": [
+        { "name": "Heather" },
+        { "name": "Ivy" },
+        { "name": "Audrey" },
+        { "name": "Finn" },
+        { "name": "Mom" },
+        { "name": "Dad" },
+        { "name": "Ben" },
+        { "name": "Hannah" },
+        { "name": "Mom H" },
+        { "name": "Dad H" },
+        { "name": "James" },
+        { "name": "Chloe" }
+      ]
+    },
+    {
+      "name": "Church",
+      "people": []
+    }
+  ],
+
+  "ungrouped": []
+}

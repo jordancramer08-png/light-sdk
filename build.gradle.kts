@@ -14,7 +14,7 @@ ext["compileSdk"] = 36
 ext["minSdk"] = 34
 ext["targetSdk"] = 36
 ext["jvmTarget"] = "17"
-ext["lintVersion"] = "31.12.3"
+ext["lintVersion"] = "32.4.0"
 
 val localProperties = java.util.Properties().apply {
     rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }

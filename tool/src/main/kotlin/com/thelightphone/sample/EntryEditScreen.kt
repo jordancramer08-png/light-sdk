@@ -141,7 +141,7 @@ class EntryEditScreen(
 
         LightTheme(colors = themeColors) {
             if (typing) {
-                val textState = rememberTextFieldState(viewModel.text.value)
+                val textState = rememberTextFieldState(text)
                 LightTextInputEditor(
                     title = "Note",
                     state = textState,

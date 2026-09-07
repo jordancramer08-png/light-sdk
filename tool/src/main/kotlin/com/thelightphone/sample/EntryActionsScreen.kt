@@ -46,10 +46,15 @@ class EntryActionsScreenViewModel(
     private val _entry = MutableStateFlow<Entry?>(null)
     val entry: StateFlow<Entry?> = _entry.asStateFlow()
 
+    /** False until the first load finishes, so we don't flash "not found". */
+    private val _loaded = MutableStateFlow(false)
+    val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
+
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
         viewModelScope.launch(Dispatchers.IO) {
             _entry.value = repository.getEntry(entryId)
+            _loaded.value = true
         }
     }
 
@@ -96,6 +101,7 @@ class EntryActionsScreen(
     override fun Content() {
         val themeColors by LightThemeController.colors.collectAsState()
         val entry by viewModel.entry.collectAsState()
+        val loaded by viewModel.loaded.collectAsState()
 
         LightTheme(colors = themeColors) {
             Column(
@@ -126,6 +132,12 @@ class EntryActionsScreen(
                             variant = LightTextVariant.Detail,
                             lighten = true,
                             modifier = Modifier.padding(top = 0.5f.gridUnitsAsDp()),
+                        )
+                    } else if (loaded) {
+                        LightText(
+                            text = "This entry is no longer here.",
+                            variant = LightTextVariant.Copy,
+                            lighten = true,
                         )
                     }
                 }
@@ -174,10 +186,11 @@ private fun typeLabel(type: EntryType?): String = when (type) {
     null -> "Entry"
 }
 
-private val actionsDateFormat = SimpleDateFormat("d MMM yyyy", Locale.getDefault())
+private fun formatDate(millis: Long): String =
+    SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(Date(millis))
 
 private fun statusLine(entry: Entry): String {
-    val added = "Added ${actionsDateFormat.format(Date(entry.createdAt))}"
-    return entry.answeredAt?.let { "$added  ·  Answered ${actionsDateFormat.format(Date(it))}" }
+    val added = "Added ${formatDate(entry.createdAt)}"
+    return entry.answeredAt?.let { "$added  ·  Answered ${formatDate(it)}" }
         ?: added
 }

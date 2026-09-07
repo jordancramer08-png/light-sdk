@@ -130,7 +130,7 @@ class GroupEditScreen(
 
         LightTheme(colors = themeColors) {
             if (typing) {
-                val textState = rememberTextFieldState(viewModel.name.value)
+                val textState = rememberTextFieldState(name)
                 LightTextInputEditor(
                     title = "Group name",
                     state = textState,

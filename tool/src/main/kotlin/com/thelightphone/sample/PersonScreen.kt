@@ -279,6 +279,5 @@ private fun emptyMessage(type: EntryType): String = when (type) {
     EntryType.UPDATE -> "No updates yet."
 }
 
-private val dateFormat = SimpleDateFormat("d MMM yyyy", Locale.getDefault())
-
-private fun formatDate(millis: Long): String = dateFormat.format(Date(millis))
+private fun formatDate(millis: Long): String =
+    SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(Date(millis))

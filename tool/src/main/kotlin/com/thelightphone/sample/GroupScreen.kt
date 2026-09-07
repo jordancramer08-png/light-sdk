@@ -105,7 +105,11 @@ class GroupScreen(
                         contentAlignment = Alignment.Center,
                     ) {
                         LightText(
-                            text = "No one in this group yet.",
+                            text = if (groupId == null) {
+                                "No ungrouped people."
+                            } else {
+                                "No one in this group yet."
+                            },
                             variant = LightTextVariant.Copy,
                             lighten = true,
                             align = TextAlign.Center,

@@ -174,7 +174,7 @@ class PersonEditScreen(
 
         LightTheme(colors = themeColors) {
             if (typing) {
-                val textState = rememberTextFieldState(viewModel.name.value)
+                val textState = rememberTextFieldState(name)
                 LightTextInputEditor(
                     title = "Name",
                     state = textState,

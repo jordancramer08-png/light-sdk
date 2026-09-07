@@ -18,6 +18,10 @@ out/
 ### Kotlin ###
 .kotlin
 
+### JVM crash dumps ###
+hs_err_pid*.log
+replay_pid*.log
+
 ### Eclipse ###
 .apt_generated
 .classpath

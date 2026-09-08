@@ -1,39 +1,29 @@
 {
-  "_comment": "Prayer List seed file. Rename this to prayer_seed.json and place it where the app looks (see docs note). Imported once on launch, then the app renames it so it never imports twice. Only groups and people are imported - not requests/praises/updates. 'note' is optional. People with no group go in the top-level 'ungrouped' list.",
+  "_comment": "Prayer List seed file template. Copy to prayer_seed.json (gitignored), fill in real names, and place at files/shared/prayer_seed.json on the device. Imported once on launch, then the app archives it so it never re-imports. Only groups and people are imported - not requests/praises/updates. Each person is { \"name\": \"...\", \"note\": \"optional one-line context\" }. A group with \"people\": [] is created empty so you can add people later. People with no group go in the top-level \"ungrouped\" list.",
 
   "groups": [
     {
       "name": "Small Group",
-      "people": [
-        { "name": "Dave Whitfield" },
-        { "name": "Marcus Whitfield", "note": "Dave's brother" },
-        { "name": "Priya Anand" }
-      ]
+      "people": []
     },
     {
       "name": "Bible Study",
       "people": [
-        { "name": "Ellen Cho" },
-        { "name": "Tomasz Nowak" }
+        { "name": "Example Person" },
+        { "name": "Example Person", "note": "optional one-line context" }
       ]
     },
     {
       "name": "Family",
-      "people": [
-        { "name": "Grandma Ruth", "note": "in the care home now" },
-        { "name": "Aunt Sue" }
-      ]
+      "people": []
     },
     {
       "name": "Church",
-      "people": [
-        { "name": "Pastor James", "note": "sabbatical through the spring" }
-      ]
+      "people": []
     }
   ],
 
   "ungrouped": [
-    { "name": "Kim next door" },
-    { "name": "Raj (work)" }
+    { "name": "Example Person" }
   ]
 }

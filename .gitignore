@@ -50,6 +50,9 @@ bin/
 ### Clanker ###
 .claude/
 
+### Prayer List — real seed data stays local (see docs/prayer_seed.example.json) ###
+docs/prayer_seed.json
+
 ### Python (builder/) ###
 __pycache__/
 *.py[cod]

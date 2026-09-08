@@ -2,6 +2,9 @@ package com.thelightphone.sample.data
 
 import java.util.UUID
 
+/** People and entry counts named in the group-delete confirmation. */
+data class GroupDeletionSummary(val peopleCount: Int, val entryCount: Int)
+
 /**
  * The one place the rest of the app talks to for prayer-list data. Wraps
  * [PrayerDao] with plain domain methods and generates ids for new rows.
@@ -11,6 +14,7 @@ import java.util.UUID
  */
 class PrayerRepository private constructor(database: PrayerDatabase) {
 
+    private val db = database
     private val dao = database.prayerDao()
 
     // --- Groups ------------------------------------------------------------
@@ -37,10 +41,30 @@ class PrayerRepository private constructor(database: PrayerDatabase) {
         dao.updateGroup(group.copy(sortOrder = sortOrder))
     }
 
-    /** Deleting a group leaves its people in place, just ungrouped. */
-    fun deleteGroup(groupId: String) {
-        dao.clearGroupFromPeople(groupId)
-        dao.deleteGroup(groupId)
+    /** Counts shown before a group is deleted. */
+    fun groupDeletionSummary(groupId: String): GroupDeletionSummary =
+        GroupDeletionSummary(
+            peopleCount = dao.countPeopleInGroup(groupId),
+            entryCount = dao.countEntriesInGroup(groupId),
+        )
+
+    /**
+     * Deletes a group. When [deletePeople] is false its people stay and become
+     * ungrouped, keeping every entry. When true, each person in the group and
+     * all of their entries are permanently deleted as well. Not reversible.
+     */
+    fun deleteGroup(groupId: String, deletePeople: Boolean) {
+        db.runInTransaction {
+            if (deletePeople) {
+                dao.listAllPeopleInGroup(groupId).forEach { person ->
+                    dao.deleteEntriesForPerson(person.id)
+                    dao.deletePerson(person.id)
+                }
+            } else {
+                dao.clearGroupFromPeople(groupId)
+            }
+            dao.deleteGroup(groupId)
+        }
     }
 
     // --- People ----------------------------------------------------------
@@ -54,6 +78,16 @@ class PrayerRepository private constructor(database: PrayerDatabase) {
     fun listActivePeople(): List<Person> = dao.listActivePeople()
 
     fun listArchivedPeople(): List<Person> = dao.listArchivedPeople()
+
+    fun countEntriesForPerson(personId: String): Int = dao.countEntriesForPerson(personId)
+
+    /** Permanently removes a person and every entry belonging to them. Not reversible. */
+    fun deletePerson(personId: String) {
+        db.runInTransaction {
+            dao.deleteEntriesForPerson(personId)
+            dao.deletePerson(personId)
+        }
+    }
 
     fun addPerson(name: String, groupId: String? = null, note: String? = null): String {
         val id = newId()

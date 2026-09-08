@@ -81,11 +81,46 @@ Entry
 Rules:
 
 - A person belongs to at most one group.
-- Deleting a group does not delete its people — they become ungrouped.
-- Archiving a person hides them from lists but keeps every entry.
 - Only `REQUEST` entries can be marked answered. Answered requests leave the main
   Requests list and appear in an "Answered" section at the bottom of that tab.
-- Nothing is ever hard-deleted without an explicit delete action from me.
+- Nothing is ever hard-deleted without an explicit delete action from me, and every
+  delete is confirmed first (see §4a).
+
+## 4a. Archive vs Delete
+
+These are two separate actions. **Archive** is reversible and keeps history; **Delete**
+is permanent. They are never the same control, and where both appear they must be
+visually distinct without relying on color (different position/section, wording, an
+icon, or the fact that Delete always asks for confirmation).
+
+**Archive** — people only.
+
+- Sets `Person.archived = true`. The person leaves every list (Home counts, Group
+  screens, Manage's People section) and moves to Manage's "Archived" section.
+- Every `Entry` for that person is kept, untouched. Unarchiving restores the person
+  exactly as they were.
+- Archive never asks for confirmation — it changes nothing permanently.
+
+**Delete** — permanent, not reversible, available for entries, people, and groups.
+
+- **Delete an entry** removes just that one `Entry` row. Nothing else is affected.
+- **Delete a person** removes that `Person` and *every* `Entry` belonging to them
+  (requests, praises, updates — answered or not, archived or not). Works the same for
+  an archived person.
+- **Delete a group** always asks what to do with the people in it — the app never
+  decides:
+  - *Keep them* — the people stay, become ungrouped (`groupId = null`), and keep all
+    their entries. Only the `Group` row is removed.
+  - *Delete them too* — every person in the group and all of their entries are
+    deleted as well, then the group.
+
+**Every delete shows a confirmation screen first.** The SDK has no dialog component,
+so this is a dedicated screen (`ConfirmDeleteScreen`, or `ConfirmDeleteGroupScreen`
+for the group choice). The confirmation names exactly what is being deleted and what
+goes with it, with counts — e.g. "Delete Ben Bayly and their 12 entries?" — and has
+explicit confirm and cancel actions. Cancel (and the back button) must leave
+everything untouched: the confirmation screen itself never writes; the caller only
+deletes on an affirmative result.
 
 ---
 
@@ -106,8 +141,9 @@ a new entry of the currently selected type. Tapping an entry allows edit, mark-a
 
 **EntryEditScreen** — text field, type selector, save, cancel.
 
-**ManageScreen** — create/rename/delete/reorder groups; add/rename/archive people; move a
-person between groups.
+**ManageScreen** — create/rename/delete/reorder groups; add/rename/archive/delete people;
+move a person between groups. Archive and delete follow §4a; a person's Delete is on the
+person's edit screen (reached from here, and from the Archived section).
 
 ---
 

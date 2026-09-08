@@ -61,9 +61,20 @@ interface PrayerDao {
     @Query("SELECT * FROM people WHERE archived = 1 ORDER BY name COLLATE NOCASE")
     fun listArchivedPeople(): List<Person>
 
+    /** Every person in one group, archived included - used when deleting a group. */
+    @Query("SELECT * FROM people WHERE groupId = :groupId ORDER BY name COLLATE NOCASE")
+    fun listAllPeopleInGroup(groupId: String): List<Person>
+
+    /** How many people sit in one group, archived included. */
+    @Query("SELECT COUNT(*) FROM people WHERE groupId = :groupId")
+    fun countPeopleInGroup(groupId: String): Int
+
     /** Used when a group is deleted: its people become ungrouped. */
     @Query("UPDATE people SET groupId = NULL WHERE groupId = :groupId")
     fun clearGroupFromPeople(groupId: String)
+
+    @Query("DELETE FROM people WHERE id = :personId")
+    fun deletePerson(personId: String)
 
     @Query("UPDATE people SET groupId = :groupId WHERE id = :personId")
     fun setPersonGroup(personId: String, groupId: String?)
@@ -81,6 +92,20 @@ interface PrayerDao {
 
     @Query("DELETE FROM entries WHERE id = :entryId")
     fun deleteEntry(entryId: String)
+
+    /** Every entry for one person, of any type and answered or not. */
+    @Query("SELECT COUNT(*) FROM entries WHERE personId = :personId")
+    fun countEntriesForPerson(personId: String): Int
+
+    /** Every entry belonging to anyone in one group. */
+    @Query(
+        "SELECT COUNT(*) FROM entries WHERE personId IN " +
+            "(SELECT id FROM people WHERE groupId = :groupId)"
+    )
+    fun countEntriesInGroup(groupId: String): Int
+
+    @Query("DELETE FROM entries WHERE personId = :personId")
+    fun deleteEntriesForPerson(personId: String)
 
     @Query("SELECT * FROM entries WHERE id = :entryId")
     fun getEntry(entryId: String): Entry?

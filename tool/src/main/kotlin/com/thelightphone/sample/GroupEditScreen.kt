@@ -92,14 +92,17 @@ class GroupEditScreenViewModel(
         }
     }
 
-    /** Deletes the group. Its people stay put and become ungrouped. */
-    fun delete(onDone: () -> Unit) {
+    /**
+     * Deletes the group. [deletePeople] false leaves its people in place and
+     * ungrouped; true deletes them and all of their entries too.
+     */
+    fun delete(deletePeople: Boolean, onDone: () -> Unit) {
         if (groupId == null) {
             onDone()
             return
         }
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { repository.deleteGroup(groupId) }
+            withContext(Dispatchers.IO) { repository.deleteGroup(groupId, deletePeople) }
             onDone()
         }
     }
@@ -175,11 +178,23 @@ class GroupEditScreen(
                     LightBottomBar(
                         items = buildList {
                             add(LightBarButton.Text(text = "Cancel", onClick = { goBack() }))
-                            if (!viewModel.isNew) {
+                            val editId = groupId
+                            if (editId != null) {
                                 add(
                                     LightBarButton.Text(
                                         text = "Delete",
-                                        onClick = { viewModel.delete { goBack() } },
+                                        onClick = {
+                                            navigateTo(screenFactory = {
+                                                ConfirmDeleteGroupScreen(
+                                                    it, repository, editId, name,
+                                                )
+                                            }) { choice ->
+                                                viewModel.delete(
+                                                    deletePeople =
+                                                        choice == GroupDeleteChoice.DELETE_PEOPLE,
+                                                ) { goBack() }
+                                            }
+                                        },
                                     ),
                                 )
                             }

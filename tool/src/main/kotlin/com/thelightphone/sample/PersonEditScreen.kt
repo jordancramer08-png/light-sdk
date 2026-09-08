@@ -1,7 +1,9 @@
 package com.thelightphone.sample
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,7 +13,9 @@ import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.sample.data.Group
 import com.thelightphone.sample.data.PrayerRepository
@@ -22,6 +26,7 @@ import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.rememberKeyboardOptions
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightBottomBar
+import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
@@ -64,6 +69,10 @@ class PersonEditScreenViewModel(
     private val _archived = MutableStateFlow(false)
     val archived: StateFlow<Boolean> = _archived.asStateFlow()
 
+    /** How many entries this person has; named in the delete confirmation. */
+    private val _entryCount = MutableStateFlow(0)
+    val entryCount: StateFlow<Int> = _entryCount.asStateFlow()
+
     val isNew: Boolean get() = personId == null
 
     private var loaded = personId == null
@@ -72,6 +81,9 @@ class PersonEditScreenViewModel(
         super.onScreenShow(screen)
         viewModelScope.launch(Dispatchers.IO) {
             _groups.value = repository.listGroups()
+            if (personId != null) {
+                _entryCount.value = repository.countEntriesForPerson(personId)
+            }
             if (!loaded && personId != null) {
                 repository.getPerson(personId)?.let { person ->
                     _name.value = person.name
@@ -144,6 +156,21 @@ class PersonEditScreenViewModel(
             onDone()
         }
     }
+
+    /**
+     * Permanently removes the person and every one of their entries. Separate
+     * from archiving, which only hides them. Not reversible.
+     */
+    fun delete(onDone: () -> Unit) {
+        if (personId == null) {
+            onDone()
+            return
+        }
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { repository.deletePerson(personId) }
+            onDone()
+        }
+    }
 }
 
 /**
@@ -170,6 +197,7 @@ class PersonEditScreen(
         val groups by viewModel.groups.collectAsState()
         val selectedGroupId by viewModel.groupId.collectAsState()
         val archived by viewModel.archived.collectAsState()
+        val entryCount by viewModel.entryCount.collectAsState()
         val keyboardOptionsFlow = rememberKeyboardOptions()
 
         LightTheme(colors = themeColors) {
@@ -242,6 +270,50 @@ class PersonEditScreen(
                                 )
                             }
                         }
+
+                        // Delete sits apart from Archive (which stays in the
+                        // bottom bar): its own row below a rule, with the trash
+                        // icon and "permanently" - distinct without any color.
+                        if (!viewModel.isNew) {
+                            Spacer(modifier = Modifier.height(1f.gridUnitsAsDp()))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(2.dp)
+                                    .background(LightThemeTokens.colors.contentSecondary),
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .lightClickable {
+                                        val message = personDeleteMessage(
+                                            name.ifBlank { "this person" },
+                                            entryCount,
+                                        )
+                                        navigateTo(screenFactory = {
+                                            ConfirmDeleteScreen(
+                                                it,
+                                                title = "Delete Person",
+                                                message = message,
+                                            )
+                                        }) { confirmed ->
+                                            if (confirmed) viewModel.delete { goBack() }
+                                        }
+                                    }
+                                    .padding(vertical = 0.75f.gridUnitsAsDp()),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                LightIcon(
+                                    icon = LightIcons.TRASH,
+                                    size = 1.25f,
+                                    modifier = Modifier.padding(end = 0.5f.gridUnitsAsDp()),
+                                )
+                                LightText(
+                                    text = "Delete permanently",
+                                    variant = LightTextVariant.Copy,
+                                )
+                            }
+                        }
                     }
 
                     LightBottomBar(
@@ -268,6 +340,14 @@ class PersonEditScreen(
         }
     }
 }
+
+private fun personDeleteMessage(name: String, entryCount: Int): String =
+    if (entryCount == 0) {
+        "Delete $name?\n\nThey have no entries yet. This can't be undone."
+    } else {
+        "Delete $name and their ${countEntries(entryCount)}?\n\n" +
+            "This removes everything for good and can't be undone."
+    }
 
 /** One row in the group picker. The selected row is underlined, not colored. */
 @Composable

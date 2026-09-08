@@ -168,7 +168,17 @@ class EntryActionsScreen(
                             add(
                                 LightBarButton.Text(
                                     text = "Delete",
-                                    onClick = { viewModel.delete { goBack() } },
+                                    onClick = {
+                                        navigateTo(screenFactory = {
+                                            ConfirmDeleteScreen(
+                                                it,
+                                                title = "Delete ${typeLabel(current.type)}",
+                                                message = entryDeleteMessage(current),
+                                            )
+                                        }) { confirmed ->
+                                            if (confirmed) viewModel.delete { goBack() }
+                                        }
+                                    },
                                 ),
                             )
                         },
@@ -188,6 +198,18 @@ private fun typeLabel(type: EntryType?): String = when (type) {
 
 private fun formatDate(millis: Long): String =
     SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(Date(millis))
+
+/** A one-line preview of the entry text for the confirmation message. */
+private fun entrySnippet(text: String): String {
+    val oneLine = text.replace("\n", " ").trim()
+    return if (oneLine.length <= 80) oneLine else oneLine.take(79).trimEnd() + "…"
+}
+
+private fun entryDeleteMessage(entry: Entry): String {
+    val kind = typeLabel(entry.type).lowercase(Locale.getDefault())
+    return "Delete this $kind?\n\n“${entrySnippet(entry.text)}”\n\n" +
+        "Only this entry is removed. This can't be undone."
+}
 
 private fun statusLine(entry: Entry): String {
     val added = "Added ${formatDate(entry.createdAt)}"

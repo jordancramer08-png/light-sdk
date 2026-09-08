@@ -1,5 +1,5 @@
 {
-  "_comment": "Prayer List seed file. Place at files/shared/prayer_seed.json on the device. Imported once on launch, then archived so it never re-imports. Only groups and people are imported. Empty groups (people: []) are created as groups you can add people to later.",
+  "_comment": "Prayer List seed file. Place at files/shared/prayer_seed.json on the device. Imported once on launch, then archived so it never re-imports. Only groups and people are imported. Empty groups (people: []) are created so you can add people to them later.",
 
   "groups": [
     {
@@ -21,20 +21,7 @@
     },
     {
       "name": "Family",
-      "people": [
-        { "name": "Heather" },
-        { "name": "Ivy" },
-        { "name": "Audrey" },
-        { "name": "Finn" },
-        { "name": "Mom" },
-        { "name": "Dad" },
-        { "name": "Ben" },
-        { "name": "Hannah" },
-        { "name": "Mom H" },
-        { "name": "Dad H" },
-        { "name": "James" },
-        { "name": "Chloe" }
-      ]
+      "people": []
     },
     {
       "name": "Church",

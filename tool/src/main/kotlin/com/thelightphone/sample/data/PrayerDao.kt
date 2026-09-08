@@ -97,9 +97,4 @@ interface PrayerDao {
 
     @Query("UPDATE entries SET archived = :archived WHERE id = :entryId")
     fun setEntryArchived(entryId: String, archived: Boolean)
-
-    // --- Seed guard ----------------------------------------------------------
-
-    @Query("SELECT COUNT(*) FROM people")
-    fun personCount(): Int
 }

@@ -120,16 +120,6 @@ class PrayerRepository private constructor(database: PrayerDatabase) {
 
     fun archiveEntry(entryId: String) = dao.setEntryArchived(entryId, true)
 
-    // --- First-run seed ------------------------------------------------------
-
-    /** Inserts [SeedData] the first time the app runs with an empty database. */
-    fun seedIfEmpty(now: Long) {
-        if (dao.personCount() > 0) return
-        SeedData.groups.forEach(dao::insertGroup)
-        SeedData.people.forEach(dao::insertPerson)
-        SeedData.entries(now).forEach(dao::insertEntry)
-    }
-
     // --- JSON seed import --------------------------------------------------
 
     /**

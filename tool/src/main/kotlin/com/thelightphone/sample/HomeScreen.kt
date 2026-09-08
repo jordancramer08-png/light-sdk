@@ -71,7 +71,6 @@ class HomeScreenViewModel(
             if (seedFileChecked.compareAndSet(false, true)) {
                 seedFileImporter.runOnce(System.currentTimeMillis())
             }
-            repository.seedIfEmpty(System.currentTimeMillis())
 
             val groupRows = repository.listGroups().map { group ->
                 GroupRow(

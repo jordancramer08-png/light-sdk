@@ -404,3 +404,17 @@ List (no sync, no notifications) and comes with the two lint rules in §3B.
 Needs `gpr.user` / `gpr.key` in `local.properties` (CLAUDE.md §2 — never read
 or print that file). Metadata (id/label/version/permissions) lives in
 `tool/lighttool.toml`, not the build script.
+
+---
+
+## 7. Open issues found verifying this doc for Small Group (2026-09-13)
+
+- **External files directory is still unreachable.** §4's phase-6 gap applies
+  here too: `SealedLightContext` has no `getExternalFilesDir` equivalent, and
+  `Context` is import-blocked, so a true `/sdcard/Android/data/<pkg>/files/`
+  path can't be reached from the `tool` module. CLAUDE.md §5's export
+  requirement has been reworded to use `lightContext.fileShare`
+  (`LightFileShare`) instead, matching the prayer-list project's resolution.
+- **`tool/lighttool.toml` declared `android.permission.INTERNET`** despite
+  CLAUDE.md §1 requiring the app be offline-only. Likely a leftover from the
+  prayer-list template. Removed; rebuild confirmed clean.

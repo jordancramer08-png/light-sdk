@@ -105,8 +105,12 @@ Notes on the data:
   the app with `adb install -r` must never lose them.
 - Each lesson also has a free-text **Notes** field (the book has a notes and prayer-requests
   page per lesson). Key it `L<n>NOTES`.
-- **Export:** a way to write all answers out to a single readable text file in the app's
-  external files directory, so Jordan can pull it off the phone with adb and keep it.
+- **Export:** a way to write all answers out to a single readable text file, so Jordan can
+  pull it off the phone with adb and keep it. The `tool` module cannot reach a real
+  external-files-directory path — `Context` is import-blocked and `SealedLightContext`
+  exposes no `getExternalFilesDir` equivalent. Use `lightContext.fileShare`
+  (`LightFileShare`) as the drop location instead, the same approach the prayer-list
+  project used for its JSON seed import (see `NOTES.md` §7).
 
 ---
 

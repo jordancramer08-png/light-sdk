@@ -1,4 +1,4 @@
-package com.thelightphone.sample
+package com.thelightphone.reader
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Spacer

@@ -195,11 +195,13 @@ private fun ItemBody(
                 modifier = Modifier.padding(top = 0.5f.gridUnitsAsDp()),
             )
 
+            HairlineDivider(modifier = Modifier.padding(top = 1.5f.gridUnitsAsDp()))
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .lightClickable(onClick = onEditAnswer)
-                    .padding(top = 1.5f.gridUnitsAsDp()),
+                    .padding(top = 1f.gridUnitsAsDp()),
             ) {
                 LightText(text = "Your answer", variant = LightTextVariant.Detail, lighten = true)
                 LightText(

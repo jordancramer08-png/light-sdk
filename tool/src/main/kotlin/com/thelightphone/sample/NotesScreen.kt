@@ -43,6 +43,7 @@ class NotesScreen(
 ) : SimpleLightScreen<Unit>(sealedActivity) {
 
     private val textFieldState = TextFieldState(initialText)
+    private val startedBlank = initialText.isBlank()
     private val saveScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private fun flushSave() {
@@ -87,6 +88,7 @@ class NotesScreen(
                 onSubmit = { goBack() },
                 onBack = { goBack() },
                 submitLabel = "SAVE",
+                initialCaps = startedBlank,
                 modifier = Modifier.background(LightThemeTokens.colors.background),
             )
         }

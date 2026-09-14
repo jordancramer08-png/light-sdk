@@ -218,28 +218,32 @@ private fun LessonBody(state: LessonScreenState.Loaded, onSelectItem: (Item) -> 
         }
 
         if (state.items.isNotEmpty()) {
-            Column(modifier = Modifier.padding(top = 1f.gridUnitsAsDp())) {
-                state.items.forEach { row ->
+            Column(modifier = Modifier.padding(top = 1.5f.gridUnitsAsDp())) {
+                state.items.forEachIndexed { index, row ->
                     ItemRowView(
                         row = row,
                         modifier = Modifier
                             .fillMaxWidth()
                             .lightClickable(onClick = { onSelectItem(row.item) })
-                            .padding(vertical = 0.75f.gridUnitsAsDp()),
+                            .padding(vertical = 1f.gridUnitsAsDp()),
                     )
+                    if (index != state.items.lastIndex) {
+                        HairlineDivider()
+                    }
                 }
             }
         }
 
         if (state.footnotes.isNotEmpty()) {
-            Column(modifier = Modifier.padding(top = 1f.gridUnitsAsDp())) {
+            Column(modifier = Modifier.padding(top = 1.5f.gridUnitsAsDp())) {
+                HairlineDivider(modifier = Modifier.padding(bottom = 0.75f.gridUnitsAsDp()))
                 LightText(text = "Footnotes", variant = LightTextVariant.Detail, lighten = true)
                 state.footnotes.forEach { footnote ->
                     LightText(
                         text = footnote,
                         variant = LightTextVariant.Fine,
                         lighten = true,
-                        modifier = Modifier.padding(top = 0.25f.gridUnitsAsDp()),
+                        modifier = Modifier.padding(top = 0.4f.gridUnitsAsDp()),
                     )
                 }
             }

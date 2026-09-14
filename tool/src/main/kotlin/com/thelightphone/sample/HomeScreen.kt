@@ -211,14 +211,17 @@ private fun LessonList(rows: List<LessonRow>, onSelect: (LessonRow) -> Unit) {
             .fillMaxWidth()
             .padding(horizontal = 1f.gridUnitsAsDp()),
     ) {
-        rows.forEach { row ->
+        rows.forEachIndexed { index, row ->
             LessonRowView(
                 row = row,
                 modifier = Modifier
                     .fillMaxWidth()
                     .lightClickable { onSelect(row) }
-                    .padding(vertical = 0.75f.gridUnitsAsDp()),
+                    .padding(vertical = 1f.gridUnitsAsDp()),
             )
+            if (index != rows.lastIndex) {
+                HairlineDivider()
+            }
         }
     }
 }

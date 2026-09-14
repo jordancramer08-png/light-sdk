@@ -1,6 +1,6 @@
 [tool]
-id = "com.thelightphone.smallgroup"
-label = "Small Group"
+id = "com.thelightphone.reader"
+label = "Reader"
 versionCode = 1
 versionName = "1.0.0"
 permissions = []

@@ -13,16 +13,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.viewModelScope
-import com.thelightphone.sample.data.PrayerDatabase
-import com.thelightphone.sample.data.PrayerRepository
+import com.thelightphone.sample.data.AnswersRepository
+import com.thelightphone.sample.data.Lesson
+import com.thelightphone.sample.data.StudyContentRepository
+import com.thelightphone.sample.data.StudyContentResult
 import com.thelightphone.sdk.InitialScreen
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.buildDatabase
-import com.thelightphone.sdk.ui.LightBarButton
-import com.thelightphone.sdk.ui.LightIcons
+import com.thelightphone.sample.data.AnswersDatabase
 import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
@@ -38,28 +39,30 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * One row on the home screen: a group (or the synthetic "Ungrouped" bucket,
- * where [groupId] is null) plus how many active people it holds.
- */
-data class GroupRow(
-    val groupId: String?,
-    val name: String,
-    val personCount: Int,
+/** One row on the home screen: a lesson plus how many of its questions are answered. */
+data class LessonRow(
+    val lesson: Int,
+    val title: String,
+    val passage: String,
+    val answeredCount: Int,
+    val questionCount: Int,
 )
 
+sealed interface HomeScreenState {
+    data object Loading : HomeScreenState
+    data class Loaded(val rows: List<LessonRow>) : HomeScreenState
+    data object ContentNotFound : HomeScreenState
+    data class ContentInvalid(val message: String) : HomeScreenState
+}
+
 class HomeScreenViewModel(
-    private val repository: PrayerRepository,
-    private val seedFileImporter: SeedFileImporter,
+    private val studyContentRepository: StudyContentRepository,
+    private val answersRepository: AnswersRepository,
 ) : LightViewModel<Unit>() {
 
-    private val _rows = MutableStateFlow<List<GroupRow>>(emptyList())
-    val rows: StateFlow<List<GroupRow>> = _rows.asStateFlow()
-
-    /** The seed file is checked once per process, on the first load. */
-    private val seedFileChecked = AtomicBoolean(false)
+    private val _state = MutableStateFlow<HomeScreenState>(HomeScreenState.Loading)
+    val state: StateFlow<HomeScreenState> = _state.asStateFlow()
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
@@ -68,25 +71,26 @@ class HomeScreenViewModel(
 
     private fun refresh() {
         viewModelScope.launch(Dispatchers.IO) {
-            if (seedFileChecked.compareAndSet(false, true)) {
-                seedFileImporter.runOnce(System.currentTimeMillis())
-            }
-
-            val groupRows = repository.listGroups().map { group ->
-                GroupRow(
-                    groupId = group.id,
-                    name = group.name,
-                    personCount = repository.listPeopleInGroup(group.id).size,
-                )
-            }
-            val ungrouped = repository.listUngroupedPeople()
-
-            _rows.value = if (ungrouped.isEmpty()) {
-                groupRows
-            } else {
-                groupRows + GroupRow(groupId = null, name = "Ungrouped", personCount = ungrouped.size)
+            when (val result = studyContentRepository.load()) {
+                is StudyContentResult.NotFound -> _state.value = HomeScreenState.ContentNotFound
+                is StudyContentResult.Invalid -> _state.value = HomeScreenState.ContentInvalid(result.message)
+                is StudyContentResult.Loaded -> {
+                    val rows = result.content.lessons.map { lesson -> lesson.toRow() }
+                    _state.value = HomeScreenState.Loaded(rows)
+                }
             }
         }
+    }
+
+    private fun Lesson.toRow(): LessonRow {
+        val questionIds = questions.map { it.id }
+        return LessonRow(
+            lesson = lesson,
+            title = title,
+            passage = passage,
+            answeredCount = answersRepository.countAnswered(questionIds),
+            questionCount = questionIds.size,
+        )
     }
 }
 
@@ -94,21 +98,21 @@ class HomeScreenViewModel(
 class HomeScreen(sealedActivity: SealedLightActivity) :
     LightScreen<Unit, HomeScreenViewModel>(sealedActivity) {
 
-    private val repository = PrayerRepository.getInstance {
-        lightContext.buildDatabase(PrayerDatabase::class.java, PrayerRepository.DATABASE_NAME)
-    }
+    private val studyContentRepository = StudyContentRepository(lightContext.fileShare)
 
-    private val seedFileImporter = SeedFileImporter(lightContext.fileShare, repository)
+    private val answersRepository = AnswersRepository.getInstance {
+        lightContext.buildDatabase(AnswersDatabase::class.java, AnswersRepository.DATABASE_NAME)
+    }
 
     override val viewModelClass: Class<HomeScreenViewModel>
         get() = HomeScreenViewModel::class.java
 
-    override fun createViewModel() = HomeScreenViewModel(repository, seedFileImporter)
+    override fun createViewModel() = HomeScreenViewModel(studyContentRepository, answersRepository)
 
     @Composable
     override fun Content() {
         val themeColors by LightThemeController.colors.collectAsState()
-        val rows by viewModel.rows.collectAsState()
+        val state by viewModel.state.collectAsState()
 
         LightTheme(colors = themeColors) {
             Column(
@@ -117,52 +121,29 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
                     .background(LightThemeTokens.colors.background),
             ) {
                 LightTopBar(
-                    center = LightTopBarCenter.Text("Prayer List"),
-                    rightButton = LightBarButton.LightIcon(
-                        icon = LightIcons.SETTINGS,
-                        onClick = {
-                            navigateTo(screenFactory = { ManageScreen(it, repository) })
-                        },
-                    ),
+                    center = LightTopBarCenter.Text("Small Group"),
                     modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
                 )
 
-                if (rows.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        LightText(
-                            text = "No groups yet.",
-                            variant = LightTextVariant.Copy,
-                            lighten = true,
-                            align = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp()),
-                        )
-                    }
-                } else {
-                    LightScrollView(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .padding(start = 1f.gridUnitsAsDp()),
-                    ) {
-                        rows.forEach { row ->
-                            GroupRowView(
-                                row = row,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .lightClickable {
-                                        navigateTo(screenFactory = {
-                                            GroupScreen(it, row.groupId, row.name, repository)
-                                        })
-                                    }
-                                    .padding(vertical = 0.75f.gridUnitsAsDp()),
-                            )
-                        }
-                    }
+                when (val current = state) {
+                    is HomeScreenState.Loading -> Unit
+
+                    is HomeScreenState.ContentNotFound -> EmptyMessage(
+                        "if_this_is_the_end.json hasn't been added to this phone yet.",
+                    )
+
+                    is HomeScreenState.ContentInvalid -> EmptyMessage(
+                        "The study file couldn't be read: ${current.message}",
+                    )
+
+                    is HomeScreenState.Loaded -> LessonList(
+                        rows = current.rows,
+                        onSelect = { row ->
+                            navigateTo(screenFactory = {
+                                LessonScreen(it, row.lesson, studyContentRepository, answersRepository)
+                            })
+                        },
+                    )
                 }
             }
         }
@@ -170,16 +151,58 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
 }
 
 @Composable
-private fun GroupRowView(row: GroupRow, modifier: Modifier = Modifier) {
-    Column(modifier = modifier) {
-        LightText(text = row.name, variant = LightTextVariant.Copy)
+private fun EmptyMessage(message: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 1f.gridUnitsAsDp()),
+        contentAlignment = Alignment.Center,
+    ) {
         LightText(
-            text = personCountLabel(row.personCount),
+            text = message,
+            variant = LightTextVariant.Copy,
+            lighten = true,
+            align = TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun LessonList(rows: List<LessonRow>, onSelect: (LessonRow) -> Unit) {
+    LightScrollView(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 1f.gridUnitsAsDp()),
+    ) {
+        rows.forEach { row ->
+            LessonRowView(
+                row = row,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .lightClickable { onSelect(row) }
+                    .padding(vertical = 0.75f.gridUnitsAsDp()),
+            )
+        }
+    }
+}
+
+@Composable
+private fun LessonRowView(row: LessonRow, modifier: Modifier = Modifier) {
+    Column(modifier = modifier) {
+        LightText(
+            text = "${row.lesson}. ${row.title}",
+            variant = LightTextVariant.Copy,
+            maxLines = 1,
+        )
+        LightText(
+            text = row.passage,
+            variant = LightTextVariant.Detail,
+            lighten = true,
+        )
+        LightText(
+            text = "${row.answeredCount}/${row.questionCount}",
             variant = LightTextVariant.Detail,
             lighten = true,
         )
     }
 }
-
-private fun personCountLabel(count: Int): String =
-    if (count == 1) "1 person" else "$count people"

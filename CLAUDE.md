@@ -125,9 +125,21 @@ present, then the list of items in book order. Each item row shows its question 
 (truncated if long) and whether it has an answer. Footnotes at the bottom if present.
 Access to the lesson's Notes.
 
-**ItemScreen** — one question. Full question text at the top, the answer editor filling the
-rest of the screen. Autosaves. Navigation to the next and previous item without going back
-to the lesson list — this matters when working through a lesson in one sitting.
+**ItemScreen** — one question. Full question text at the top, the current answer (or a
+"tap to write your answer" placeholder) below it. Tapping the answer opens **AnswerEditorScreen**.
+Next and previous buttons move between items without going back to the lesson list — this
+matters when working through a lesson in one sitting.
+
+Note: the SDK's only free-text input component, `LightTextInputEditor`, takes over the whole
+screen (its own top bar, embedded keyboard, submit button) and only has room for a short
+one- or two-line title — not the full question text. So the question display and the answer
+editor are two screens, not one:
+
+**AnswerEditorScreen** — `LightTextInputEditor` wrapping one item's answer, opened from
+ItemScreen. Autosaves on a short pause while typing and flushes a final save on every way of
+leaving the screen — the SAVE button, the back button, or the app being backgrounded — via
+the screen's `willHide()` / `onAppPause()` hooks, so no route out of this screen can lose an
+answer.
 
 **NotesScreen** — the lesson's free-text notes.
 

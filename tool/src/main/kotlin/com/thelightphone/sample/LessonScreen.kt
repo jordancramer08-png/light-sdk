@@ -37,6 +37,7 @@ import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
+import com.thelightphone.sdk.ui.lightClickable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -152,7 +153,14 @@ class LessonScreen(
                         )
                     }
 
-                    is LessonScreenState.Loaded -> LessonBody(current)
+                    is LessonScreenState.Loaded -> LessonBody(
+                        state = current,
+                        onSelectItem = { item ->
+                            navigateTo(screenFactory = {
+                                ItemScreen(it, lessonNumber, item.id, studyContentRepository, answersRepository)
+                            })
+                        },
+                    )
                 }
             }
         }
@@ -160,7 +168,7 @@ class LessonScreen(
 }
 
 @Composable
-private fun LessonBody(state: LessonScreenState.Loaded) {
+private fun LessonBody(state: LessonScreenState.Loaded, onSelectItem: (Item) -> Unit) {
     LightScrollView(
         modifier = Modifier
             .fillMaxWidth()
@@ -200,6 +208,7 @@ private fun LessonBody(state: LessonScreenState.Loaded) {
                         row = row,
                         modifier = Modifier
                             .fillMaxWidth()
+                            .lightClickable(onClick = { onSelectItem(row.item) })
                             .padding(vertical = 0.75f.gridUnitsAsDp()),
                     )
                 }

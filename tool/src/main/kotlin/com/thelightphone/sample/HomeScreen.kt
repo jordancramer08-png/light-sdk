@@ -13,7 +13,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.viewModelScope
+import com.thelightphone.sample.data.AnswersExporter
 import com.thelightphone.sample.data.AnswersRepository
+import com.thelightphone.sample.data.ExportResult
 import com.thelightphone.sample.data.Lesson
 import com.thelightphone.sample.data.StudyContentRepository
 import com.thelightphone.sample.data.StudyContentResult
@@ -24,6 +26,8 @@ import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.buildDatabase
 import com.thelightphone.sample.data.AnswersDatabase
+import com.thelightphone.sdk.ui.LightBarButton
+import com.thelightphone.sdk.ui.LightFullscreenModal
 import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
@@ -59,14 +63,32 @@ sealed interface HomeScreenState {
 class HomeScreenViewModel(
     private val studyContentRepository: StudyContentRepository,
     private val answersRepository: AnswersRepository,
+    private val answersExporter: AnswersExporter,
 ) : LightViewModel<Unit>() {
 
     private val _state = MutableStateFlow<HomeScreenState>(HomeScreenState.Loading)
     val state: StateFlow<HomeScreenState> = _state.asStateFlow()
 
+    private val _exportMessage = MutableStateFlow<String?>(null)
+    val exportMessage: StateFlow<String?> = _exportMessage.asStateFlow()
+
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
         refresh()
+    }
+
+    fun export() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _exportMessage.value = when (val result = answersExporter.export()) {
+                is ExportResult.Success -> "Saved your answers to ${result.fileName}."
+                is ExportResult.ContentNotFound -> "if_this_is_the_end.json hasn't been added to this phone yet."
+                is ExportResult.Failed -> "Export failed: ${result.message}"
+            }
+        }
+    }
+
+    fun dismissExportMessage() {
+        _exportMessage.value = null
     }
 
     private fun refresh() {
@@ -104,45 +126,60 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
         lightContext.buildDatabase(AnswersDatabase::class.java, AnswersRepository.DATABASE_NAME)
     }
 
+    private val answersExporter =
+        AnswersExporter(studyContentRepository, answersRepository, lightContext.fileShare)
+
     override val viewModelClass: Class<HomeScreenViewModel>
         get() = HomeScreenViewModel::class.java
 
-    override fun createViewModel() = HomeScreenViewModel(studyContentRepository, answersRepository)
+    override fun createViewModel() =
+        HomeScreenViewModel(studyContentRepository, answersRepository, answersExporter)
 
     @Composable
     override fun Content() {
         val themeColors by LightThemeController.colors.collectAsState()
         val state by viewModel.state.collectAsState()
+        val exportMessage by viewModel.exportMessage.collectAsState()
 
         LightTheme(colors = themeColors) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(LightThemeTokens.colors.background),
-            ) {
-                LightTopBar(
-                    center = LightTopBarCenter.Text("Small Group"),
-                    modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
-                )
-
-                when (val current = state) {
-                    is HomeScreenState.Loading -> Unit
-
-                    is HomeScreenState.ContentNotFound -> EmptyMessage(
-                        "if_this_is_the_end.json hasn't been added to this phone yet.",
+            Box(modifier = Modifier.fillMaxSize()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(LightThemeTokens.colors.background),
+                ) {
+                    LightTopBar(
+                        center = LightTopBarCenter.Text("Small Group"),
+                        rightButton = LightBarButton.Text("EXPORT", onClick = { viewModel.export() }),
+                        modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
                     )
 
-                    is HomeScreenState.ContentInvalid -> EmptyMessage(
-                        "The study file couldn't be read: ${current.message}",
-                    )
+                    when (val current = state) {
+                        is HomeScreenState.Loading -> Unit
 
-                    is HomeScreenState.Loaded -> LessonList(
-                        rows = current.rows,
-                        onSelect = { row ->
-                            navigateTo(screenFactory = {
-                                LessonScreen(it, row.lesson, studyContentRepository, answersRepository)
-                            })
-                        },
+                        is HomeScreenState.ContentNotFound -> EmptyMessage(
+                            "if_this_is_the_end.json hasn't been added to this phone yet.",
+                        )
+
+                        is HomeScreenState.ContentInvalid -> EmptyMessage(
+                            "The study file couldn't be read: ${current.message}",
+                        )
+
+                        is HomeScreenState.Loaded -> LessonList(
+                            rows = current.rows,
+                            onSelect = { row ->
+                                navigateTo(screenFactory = {
+                                    LessonScreen(it, row.lesson, studyContentRepository, answersRepository)
+                                })
+                            },
+                        )
+                    }
+                }
+
+                if (exportMessage != null) {
+                    LightFullscreenModal(
+                        message = exportMessage.orEmpty(),
+                        onClose = { viewModel.dismissExportMessage() },
                     )
                 }
             }

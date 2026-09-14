@@ -59,6 +59,8 @@ sealed interface LessonScreenState {
         val commentary: String,
         val items: List<ItemRow>,
         val footnotes: List<String>,
+        val notesId: String,
+        val notesText: String,
     ) : LessonScreenState
     data object NotFound : LessonScreenState
 }
@@ -101,6 +103,8 @@ class LessonScreenViewModel(
             commentary = commentary,
             items = itemRows,
             footnotes = footnotes,
+            notesId = notesId,
+            notesText = answersRepository.getText(notesId).orEmpty(),
         )
     }
 }
@@ -129,12 +133,24 @@ class LessonScreen(
                     .fillMaxSize()
                     .background(LightThemeTokens.colors.background),
             ) {
+                val loaded = state as? LessonScreenState.Loaded
+
                 LightTopBar(
                     leftButton = LightBarButton.LightIcon(
                         icon = LightIcons.BACK,
                         onClick = { goBack() },
                     ),
                     center = LightTopBarCenter.Text("Lesson $lessonNumber"),
+                    rightButton = loaded?.let {
+                        LightBarButton.Text(
+                            text = "NOTES",
+                            onClick = {
+                                navigateTo(screenFactory = {
+                                    NotesScreen(it, lessonNumber, loaded.notesId, loaded.notesText, answersRepository)
+                                })
+                            },
+                        )
+                    },
                     modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
                 )
 

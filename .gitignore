@@ -57,3 +57,6 @@ docs/prayer_seed.json
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+### Converted book text — copyrighted content, never committed ###
+/books/

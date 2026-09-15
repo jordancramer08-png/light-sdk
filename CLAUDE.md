@@ -162,9 +162,14 @@ download).**
   poetic second lines (`   and I will keep it...`). A plain `.strip()`/split
   on `" "` will not catch it; normalize NBSP to a regular space (or strip it) explicitly, or
   verse text will start with a stray character.
-- **Verse 1 is never bare.** It's always fused with the chapter number:
-  `<span class="bold" id="filepos...."><big class="calibre18">119</big>:1 </span>`. Do
-  not assume verse 1 is implied/unmarked — it has an explicit (if unusual) marker every time.
+- **Verse 1 is fused with the chapter number only at a within-book chapter transition** —
+  `<span class="bold" id="filepos...."><big class="calibre18">119</big>:1 </span>`, confirmed
+  at Psalm 119. **Corrected 2026-09-15:** this does NOT apply to a book's own opening
+  chapter — confirmed against Jude 1:1, which is plain `<span class="bold">1 </span>` with
+  no `<big>` chapter prefix. The fusion exists only to disambiguate a chapter change inside
+  a book's flowing text; a book's first chapter needs no such marker since the book heading
+  already establishes "chapter 1." Handle both forms: don't assume every verse 1 is fused,
+  and don't assume every verse 1 is bare.
 - Footnotes: the inline marker is
   `<a id="..." title="the note text" href="...split_NNNN.html#..." class="calibre4">[253]</a>`.
   The note text is duplicated in the `title` attribute — read it from there; there's no

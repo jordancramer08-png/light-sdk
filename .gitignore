@@ -60,3 +60,6 @@ __pycache__/
 
 ### Converted book text — copyrighted content, never committed ###
 /books/
+
+### Converted scripture text — copyrighted content, never committed (CLAUDE.md section 7) ###
+/bible/

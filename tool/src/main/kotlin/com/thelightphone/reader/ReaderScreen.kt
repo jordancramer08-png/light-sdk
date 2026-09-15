@@ -20,6 +20,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.reader.data.BookMeta
 import com.thelightphone.reader.data.BookRepository
@@ -64,6 +65,7 @@ sealed interface ReaderScreenState {
     data class Loaded(
         val chapterTitle: String,
         val pageText: String,
+        val isChapterStart: Boolean,
     ) : ReaderScreenState
 }
 
@@ -86,6 +88,8 @@ class ReaderScreenViewModel(
 
     private var textMeasurer: TextMeasurer? = null
     private var bodyStyle: TextStyle? = null
+    private var headingStyle: TextStyle? = null
+    private var headingGapPx: Int = 0
     private var contentWidthPx: Int = 0
     private var contentHeightPx: Int = 0
     private var layoutConfigured = false
@@ -104,10 +108,19 @@ class ReaderScreenViewModel(
      * Called once the reading area's pixel size and text style are known - pagination
      * can't happen before that (CLAUDE.md 6).
      */
-    fun configureLayout(widthPx: Int, heightPx: Int, measurer: TextMeasurer, style: TextStyle) {
+    fun configureLayout(
+        widthPx: Int,
+        heightPx: Int,
+        measurer: TextMeasurer,
+        style: TextStyle,
+        chapterHeadingStyle: TextStyle,
+        chapterHeadingGapPx: Int,
+    ) {
         val sizeChanged = widthPx != contentWidthPx || heightPx != contentHeightPx
         textMeasurer = measurer
         bodyStyle = style
+        headingStyle = chapterHeadingStyle
+        headingGapPx = chapterHeadingGapPx
         contentWidthPx = widthPx
         contentHeightPx = heightPx
         if (widthPx <= 0 || heightPx <= 0) return
@@ -164,6 +177,7 @@ class ReaderScreenViewModel(
     private fun loadChapter(chapterIndex: Int, targetOffset: Int) {
         val measurer = textMeasurer ?: return
         val style = bodyStyle ?: return
+        val headingTextStyle = headingStyle ?: return
         if (contentWidthPx <= 0 || contentHeightPx <= 0) return
         val chapterMeta = bookMeta.chapters.firstOrNull { it.index == chapterIndex } ?: return
 
@@ -171,11 +185,19 @@ class ReaderScreenViewModel(
         loadJob = viewModelScope.launch(Dispatchers.Default) {
             val text = chapterTextCache.getOrPut(chapterMeta.index) {
                 withContext(Dispatchers.IO) {
-                    bookRepository.loadChapterText(bookMeta.slug, chapterMeta.file) ?: ""
+                    val raw = bookRepository.loadChapterText(bookMeta.slug, chapterMeta.file) ?: ""
+                    withExtraParagraphSpacing(raw)
                 }
             }
             val pages = pageCache.getOrPut(chapterMeta.index) {
-                paginate(measurer, style, text, contentWidthPx, contentHeightPx)
+                val headingHeightPx = measurer.measure(
+                    text = AnnotatedString(chapterMeta.title),
+                    style = headingTextStyle,
+                    constraints = Constraints(maxWidth = contentWidthPx),
+                ).size.height
+                val firstPageHeightPx = (contentHeightPx - headingHeightPx - headingGapPx)
+                    .coerceAtLeast(contentHeightPx / 2)
+                paginate(measurer, style, text, contentWidthPx, contentHeightPx, firstPageHeightPx)
             }
             val pageIndex = pages.indexOfFirst { targetOffset in it }
                 .let { if (it >= 0) it else if (targetOffset <= 0) 0 else pages.lastIndex }
@@ -198,6 +220,7 @@ class ReaderScreenViewModel(
         _state.value = ReaderScreenState.Loaded(
             chapterTitle = title,
             pageText = currentChapterText.substring(page.start, page.endExclusive),
+            isChapterStart = currentPageIndex == 0,
         )
     }
 
@@ -235,12 +258,23 @@ class ReaderScreenViewModel(
     }
 }
 
+/**
+ * Chapter text has paragraphs separated by a single blank line (CLAUDE.md 5). For sustained
+ * reading, paragraph breaks read more clearly with a bit more air than a plain line-height
+ * gap - so a second blank line is inserted at each break for display/pagination purposes
+ * only. This runs once per chapter load and every downstream offset (pagination, saved
+ * position) is consistently measured against the resulting string, so nothing needs to
+ * translate back to raw file offsets.
+ */
+private fun withExtraParagraphSpacing(text: String): String = text.replace("\n\n", "\n\n\n")
+
 private fun paginate(
     measurer: TextMeasurer,
     style: TextStyle,
     text: String,
     widthPx: Int,
     heightPx: Int,
+    firstPageHeightPx: Int,
 ): List<PageRange> {
     if (text.isEmpty()) return listOf(PageRange(0, 0))
 
@@ -253,10 +287,11 @@ private fun paginate(
     val pages = mutableListOf<PageRange>()
     var lineIndex = 0
     while (lineIndex < layout.lineCount) {
+        val pageHeightPx = if (pages.isEmpty()) firstPageHeightPx else heightPx
         val pageTop = layout.getLineTop(lineIndex)
         var lastLine = lineIndex
         while (lastLine + 1 < layout.lineCount &&
-            layout.getLineBottom(lastLine + 1) - pageTop <= heightPx.toFloat()
+            layout.getLineBottom(lastLine + 1) - pageTop <= pageHeightPx.toFloat()
         ) {
             lastLine++
         }
@@ -269,6 +304,9 @@ private fun paginate(
 }
 
 private const val BACK_TAP_ZONE_FRACTION = 0.3f
+private const val READER_MARGIN_GRID_UNITS = 1.5f
+private const val HEADING_GAP_GRID_UNITS = 1f
+private const val READER_LINE_HEIGHT_MULTIPLIER = 1.45f
 
 class ReaderScreen(
     sealedActivity: SealedLightActivity,
@@ -292,7 +330,9 @@ class ReaderScreen(
         val state by viewModel.state.collectAsState()
         val textMeasurer = rememberTextMeasurer()
         val bodyStyle = readerBodyStyle()
+        val headingStyle = readerHeadingStyle()
         val density = LocalDensity.current
+        val headingGapPx = with(density) { HEADING_GAP_GRID_UNITS.gridUnitsAsDp().toPx() }.roundToInt()
 
         val topTitle = (state as? ReaderScreenState.Loaded)?.chapterTitle ?: bookMeta.title
 
@@ -323,7 +363,7 @@ class ReaderScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.5f.gridUnitsAsDp())
+                        .padding(horizontal = READER_MARGIN_GRID_UNITS.gridUnitsAsDp(), vertical = 0.75f.gridUnitsAsDp())
                         .pointerInput(Unit) {
                             detectTapGestures { offset ->
                                 if (offset.x < size.width * BACK_TAP_ZONE_FRACTION) {
@@ -337,16 +377,25 @@ class ReaderScreen(
                     val widthPx = with(density) { maxWidth.toPx() }.roundToInt()
                     val heightPx = with(density) { maxHeight.toPx() }.roundToInt()
 
-                    LaunchedEffect(widthPx, heightPx, bodyStyle) {
-                        viewModel.configureLayout(widthPx, heightPx, textMeasurer, bodyStyle)
+                    LaunchedEffect(widthPx, heightPx, bodyStyle, headingStyle) {
+                        viewModel.configureLayout(widthPx, heightPx, textMeasurer, bodyStyle, headingStyle, headingGapPx)
                     }
 
                     when (val current = state) {
                         ReaderScreenState.Loading -> Unit
-                        is ReaderScreenState.Loaded -> LightText(
-                            text = current.pageText,
-                            variant = LightTextVariant.Paragraph,
-                        )
+                        is ReaderScreenState.Loaded -> Column(modifier = Modifier.fillMaxSize()) {
+                            if (current.isChapterStart) {
+                                LightText(
+                                    text = current.chapterTitle,
+                                    variant = LightTextVariant.Heading,
+                                    modifier = Modifier.padding(bottom = HEADING_GAP_GRID_UNITS.gridUnitsAsDp()),
+                                )
+                            }
+                            LightText(
+                                text = current.pageText,
+                                variant = LightTextVariant.Paragraph,
+                            )
+                        }
                     }
                 }
             }
@@ -357,11 +406,24 @@ class ReaderScreen(
 /**
  * The same variant style LightText's Paragraph would use, built by hand so the
  * [TextMeasurer] pagination pass measures with the exact style that ends up on screen
- * (LightText's own scaling is `internal` to `:sdk:ui`, unreachable from here).
+ * (LightText's own scaling is `internal` to `:sdk:ui`, unreachable from here). Line height
+ * is opened up beyond the base Paragraph variant's for sustained reading comfort.
  */
 @Composable
 private fun readerBodyStyle(): TextStyle {
     val base = LightThemeTokens.typography.paragraph
+    val lineHeight = (base.fontSize.value * READER_LINE_HEIGHT_MULTIPLIER).sp
+    return base.copy(
+        fontSize = base.fontSize.scaledForReading(),
+        lineHeight = lineHeight.scaledForReading(),
+        letterSpacing = base.letterSpacing.scaledForReading(),
+    )
+}
+
+/** Chapter-heading style shown above a chapter's first page, built the same way as [readerBodyStyle]. */
+@Composable
+private fun readerHeadingStyle(): TextStyle {
+    val base = LightThemeTokens.typography.heading
     return base.copy(
         fontSize = base.fontSize.scaledForReading(),
         lineHeight = base.lineHeight.scaledForReading(),

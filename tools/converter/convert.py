@@ -97,7 +97,10 @@ def convert_epub(epub_path: Path) -> Book:
             text = _extract_text(html)
             if not text:
                 continue
-            chapter_title = titles.get(item.href) or f"Chapter {len(chapters) + 1}"
+            raw_title = titles.get(item.href)
+            if _is_non_content(raw_title, text):
+                continue
+            chapter_title = raw_title or f"Chapter {len(chapters) + 1}"
             chapters.append(Chapter(title=chapter_title, text=text))
 
     if not chapters:
@@ -109,6 +112,11 @@ def convert_epub(epub_path: Path) -> Book:
 def write_book(book: Book, out_dir: Path) -> Path:
     book_dir = out_dir / book.slug
     book_dir.mkdir(parents=True, exist_ok=True)
+    # Clear any chapter files from a previous conversion first, so a re-convert that
+    # produces fewer chapters (e.g. more non-content filtered out) doesn't leave stale
+    # NNN.txt files that meta.json no longer references.
+    for stale in book_dir.glob("*.txt"):
+        stale.unlink()
     chapters_meta = []
     for i, chapter in enumerate(book.chapters, start=1):
         filename = f"{i:03d}.txt"
@@ -285,6 +293,81 @@ def _read_nav_doc_titles(zf: zipfile.ZipFile, nav_path: str) -> dict[str, str]:
         if text:
             titles.setdefault(_resolve(nav_dir, href), text)
     return titles
+
+
+# --- Non-content chapter filtering -------------------------------------------
+#
+# EPUBs commonly include spine items that aren't reading content: a cover image
+# page, a title/half-title page repeating the book's own title, and — for books
+# that circulated through certain distribution sites — an ad slug for that site.
+# All three share one trait: almost no extracted text. A real chapter, even a
+# short one, still runs to hundreds of characters; checked against five actual
+# converted books, the shortest genuine chapter was ~380 characters while the
+# longest of these filler pages was under 130.
+
+# Below this many characters of extracted text, a spine item is treated as
+# filler rather than a chapter, regardless of its title.
+MIN_CONTENT_CHARS = 300
+
+# Titles publishers commonly give front/back-matter items, matched exactly
+# (after trimming whitespace and a trailing colon) so a real chapter that
+# merely contains one of these words — e.g. "Dedication Day" — is untouched.
+NON_CONTENT_TITLES = {
+    "cover", "cover page", "title page", "half title page",
+    "copyright", "copyright page", "dedication", "epigraph", "quotes", "map",
+    "table of contents", "about the author", "about the publisher",
+    "illustration credits", "notes and sources", "information about the series",
+}
+
+# A spine item whose only title is a bare domain name is a distributor/ad
+# slug, not a chapter.
+_AD_SLUG_RE = re.compile(r"^[\w-]+\.(com|net|org|info)$", re.IGNORECASE)
+
+# Some books bake a human-readable table of contents (or back-of-book index) into
+# the spine as an ordinary content item, distinct from the machine-readable EPUB
+# nav document (already excluded via its "nav" manifest property) - it has no NCX
+# title of its own, so it falls back to "Chapter N" and can run to a thousand-plus
+# characters, clearing MIN_CONTENT_CHARS. But it reads as dozens of one-line
+# entries (chapter titles, index terms) rather than prose, so its average
+# paragraph length is tiny. Checked against five actual books: every genuine
+# chapter's average paragraph length was at least 60 characters; every embedded
+# listing page's was under 20.
+MIN_LISTING_PARAGRAPHS = 5
+MAX_LISTING_AVG_PARAGRAPH_CHARS = 40
+
+
+def _looks_like_a_listing(text: str) -> bool:
+    paragraphs = [p for p in text.split("\n\n") if p]
+    if len(paragraphs) < MIN_LISTING_PARAGRAPHS:
+        return False
+    avg_len = sum(len(p) for p in paragraphs) / len(paragraphs)
+    return avg_len < MAX_LISTING_AVG_PARAGRAPH_CHARS
+
+
+# A page of pull quotes from reviews ("PRAISE FOR ..."), also untitled in the NCX
+# and long enough to clear MIN_CONTENT_CHARS - each quote is a full sentence, so
+# _looks_like_a_listing's short-paragraph check doesn't catch it. The heading is
+# conventional enough (checked against an actual instance) to match reliably
+# without also matching a real chapter that merely mentions praise mid-sentence.
+_PRAISE_PAGE_RE = re.compile(r"^(advance )?praise for\b", re.IGNORECASE)
+
+
+def _looks_like_a_praise_page(text: str) -> bool:
+    paragraphs = [p for p in text.split("\n\n") if p][:3]
+    return any(_PRAISE_PAGE_RE.match(p) for p in paragraphs)
+
+
+def _is_non_content(title: str | None, text: str) -> bool:
+    if len(text) < MIN_CONTENT_CHARS:
+        return True
+    if _looks_like_a_listing(text) or _looks_like_a_praise_page(text):
+        return True
+    if title is None:
+        return False
+    normalized = title.strip().rstrip(":").strip().lower()
+    if normalized in NON_CONTENT_TITLES or normalized.startswith("also by "):
+        return True
+    return bool(_AD_SLUG_RE.match(title.strip()))
 
 
 # --- HTML -> plain text -------------------------------------------------------

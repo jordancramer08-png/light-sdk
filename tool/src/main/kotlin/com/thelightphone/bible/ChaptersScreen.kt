@@ -1,4 +1,4 @@
-package com.thelightphone.reader
+package com.thelightphone.bible
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
@@ -9,8 +9,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import com.thelightphone.reader.data.BookMeta
-import com.thelightphone.reader.data.ChapterMeta
+import com.thelightphone.bible.data.BibleManifestBook
+import com.thelightphone.bible.data.DEFAULT_TRANSLATION
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.ui.LightBarButton
@@ -26,16 +26,12 @@ import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import com.thelightphone.sdk.ui.lightClickable
 
-/**
- * The book's chapters, reachable from the reading screen (CLAUDE.md 8). Tapping a chapter
- * hands its index back to the calling ReaderScreen via [goBack] rather than navigating
- * onward, so the jump happens in place instead of pushing a new reading screen onto the
- * back stack.
- */
-class ContentsScreen(
+/** The chapter numbers for [book] (CLAUDE.md 9). Tapping one opens [ChapterScreen]. */
+class ChaptersScreen(
     sealedActivity: SealedLightActivity,
-    private val bookMeta: BookMeta,
-) : SimpleLightScreen<Int>(sealedActivity) {
+    private val book: BibleManifestBook,
+    private val translation: String = DEFAULT_TRANSLATION,
+) : SimpleLightScreen<Unit>(sealedActivity) {
 
     @Composable
     override fun Content() {
@@ -48,39 +44,38 @@ class ContentsScreen(
                     .background(LightThemeTokens.colors.background),
             ) {
                 LightTopBar(
-                    leftButton = LightBarButton.LightIcon(
-                        icon = LightIcons.BACK,
-                        onClick = { goBack() },
-                    ),
-                    center = LightTopBarCenter.Text(bookMeta.title),
+                    leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
+                    center = LightTopBarCenter.Text(book.name),
                     modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
                 )
 
-                ChapterList(bookMeta = bookMeta, onSelect = { chapter -> goBack(chapter.index) })
+                ChapterList(
+                    chapterCount = book.chapterCount,
+                    onSelect = { chapter ->
+                        navigateTo(screenFactory = { ChapterScreen(it, translation, book, chapter) })
+                    },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun ChapterList(bookMeta: BookMeta, onSelect: (ChapterMeta) -> Unit) {
+private fun ChapterList(chapterCount: Int, onSelect: (Int) -> Unit) {
     LightScrollView(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 1f.gridUnitsAsDp()),
     ) {
-        bookMeta.chapters.forEachIndexed { i, chapter ->
+        for (chapter in 1..chapterCount) {
             LightText(
-                text = chapter.title,
+                text = "Chapter $chapter",
                 variant = LightTextVariant.Copy,
                 modifier = Modifier
                     .fillMaxWidth()
                     .lightClickable { onSelect(chapter) }
-                    .padding(vertical = 0.75f.gridUnitsAsDp()),
+                    .padding(vertical = 0.6f.gridUnitsAsDp()),
             )
-            if (i != bookMeta.chapters.lastIndex) {
-                HairlineDivider()
-            }
         }
     }
 }

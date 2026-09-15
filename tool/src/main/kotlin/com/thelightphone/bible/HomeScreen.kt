@@ -23,10 +23,7 @@ import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import com.thelightphone.sdk.ui.lightClickable
 
-/**
- * Root screen (CLAUDE.md 9): Read and Plan. The Plan section (build order phase 4) isn't
- * built yet, so its row is shown but not yet wired to a destination.
- */
+/** Root screen (CLAUDE.md 9): Read and Plan. */
 @InitialScreen
 class HomeScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Unit>(sealedActivity) {
 
@@ -62,9 +59,9 @@ class HomeScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Unit>(
                     LightText(
                         text = "PLAN",
                         variant = LightTextVariant.Heading,
-                        lighten = true,
                         modifier = Modifier
                             .fillMaxWidth()
+                            .lightClickable { navigateTo(::PlanScreen) }
                             .padding(vertical = 0.75f.gridUnitsAsDp()),
                     )
                 }

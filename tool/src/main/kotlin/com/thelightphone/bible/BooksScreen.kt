@@ -17,8 +17,8 @@ import com.thelightphone.bible.data.BibleManifest
 import com.thelightphone.bible.data.BibleManifestBook
 import com.thelightphone.bible.data.BibleRepository
 import com.thelightphone.bible.data.BookNameResolver
-import com.thelightphone.bible.data.DEFAULT_TRANSLATION
 import com.thelightphone.bible.data.ReadingPlanRepository
+import com.thelightphone.bible.data.TranslationRepository
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
@@ -47,6 +47,7 @@ sealed interface BooksScreenState {
     data object Loading : BooksScreenState
     data object Unavailable : BooksScreenState
     data class Loaded(
+        val translation: String,
         val oldTestament: List<BibleManifestBook>,
         val newTestament: List<BibleManifestBook>,
     ) : BooksScreenState
@@ -54,11 +55,14 @@ sealed interface BooksScreenState {
 
 /**
  * All 66 books under Old/New Testament headings (CLAUDE.md 9), in the reading plan's
- * canonical order rather than the manifest map's iteration order.
+ * canonical order rather than the manifest map's iteration order. Re-reads the persisted
+ * translation on every visit, so returning here after TranslationScreen shows that
+ * translation's books without either screen needing to notify the other.
  */
 class BooksScreenViewModel(
     private val bibleRepository: BibleRepository,
     private val readingPlanRepository: ReadingPlanRepository,
+    private val translationRepository: TranslationRepository,
 ) : LightViewModel<Unit>() {
 
     private val _state = MutableStateFlow<BooksScreenState>(BooksScreenState.Loading)
@@ -71,8 +75,9 @@ class BooksScreenViewModel(
 
     private fun refresh() {
         viewModelScope.launch(Dispatchers.IO) {
+            val translation = translationRepository.selectedTranslation()
             val plan = readingPlanRepository.loadPlan()
-            val manifest = bibleRepository.loadManifest(DEFAULT_TRANSLATION)
+            val manifest = bibleRepository.loadManifest(translation)
             if (plan == null || manifest == null) {
                 _state.value = BooksScreenState.Unavailable
                 return@launch
@@ -83,6 +88,7 @@ class BooksScreenViewModel(
                 .let { if (it >= 0) it else plan.canonicalBookOrder.size }
 
             _state.value = BooksScreenState.Loaded(
+                translation = translation,
                 oldTestament = resolveBooks(plan.canonicalBookOrder.take(newTestamentStart), manifest, resolver),
                 newTestament = resolveBooks(plan.canonicalBookOrder.drop(newTestamentStart), manifest, resolver),
             )
@@ -100,11 +106,14 @@ class BooksScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, Books
 
     private val bibleRepository = BibleRepository(lightContext.fileShare)
     private val readingPlanRepository = ReadingPlanRepository(lightContext.fileShare)
+    private val translationRepository =
+        TranslationRepository(lightContext.fileShare, bibleRepository, lightContext.dataStore)
 
     override val viewModelClass: Class<BooksScreenViewModel>
         get() = BooksScreenViewModel::class.java
 
-    override fun createViewModel() = BooksScreenViewModel(bibleRepository, readingPlanRepository)
+    override fun createViewModel() =
+        BooksScreenViewModel(bibleRepository, readingPlanRepository, translationRepository)
 
     @Composable
     override fun Content() {
@@ -129,7 +138,9 @@ class BooksScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, Books
                     is BooksScreenState.Loaded -> BookSections(
                         oldTestament = current.oldTestament,
                         newTestament = current.newTestament,
-                        onSelect = { book -> navigateTo(screenFactory = { ChaptersScreen(it, book) }) },
+                        onSelect = { book ->
+                            navigateTo(screenFactory = { ChaptersScreen(it, book, current.translation) })
+                        },
                     )
                 }
             }

@@ -35,7 +35,6 @@ import androidx.lifecycle.viewModelScope
 import com.thelightphone.bible.data.BibleManifest
 import com.thelightphone.bible.data.BibleRepository
 import com.thelightphone.bible.data.BookNameResolver
-import com.thelightphone.bible.data.DEFAULT_TRANSLATION
 import com.thelightphone.bible.data.ReadingPlanDay
 import com.thelightphone.bible.data.ReadingPlanPassage
 import com.thelightphone.bible.data.ReadingPlanRepository
@@ -314,7 +313,7 @@ private const val PLAN_DAY_LINE_HEIGHT_MULTIPLIER = 1.45f
 class PlanDayScreen(
     sealedActivity: SealedLightActivity,
     private val day: ReadingPlanDay,
-    private val translation: String = DEFAULT_TRANSLATION,
+    private val translation: String,
 ) : LightScreen<Unit, PlanDayScreenViewModel>(sealedActivity) {
 
     private val bibleRepository = BibleRepository(lightContext.fileShare)

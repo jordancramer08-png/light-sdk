@@ -18,9 +18,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.viewModelScope
+import com.thelightphone.bible.data.BibleRepository
 import com.thelightphone.bible.data.ReadingPlan
 import com.thelightphone.bible.data.ReadingPlanDay
 import com.thelightphone.bible.data.ReadingPlanRepository
+import com.thelightphone.bible.data.TranslationRepository
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
@@ -49,16 +51,19 @@ private const val PLAN_ROW_HEIGHT_GRID = 4f
 sealed interface PlanScreenState {
     data object Loading : PlanScreenState
     data object Unavailable : PlanScreenState
-    data class Loaded(val days: List<ReadingPlanDay>, val initialIndex: Int) : PlanScreenState
+    data class Loaded(val translation: String, val days: List<ReadingPlanDay>, val initialIndex: Int) : PlanScreenState
 }
 
 /**
  * The reading plan by day (CLAUDE.md 9). Opens scrolled to today's row if today falls
  * within the plan's year, otherwise Day 1 - so opening this screen daily doesn't mean
- * scrolling past everything already read.
+ * scrolling past everything already read. Re-reads the persisted translation on every
+ * visit so a change made in TranslationScreen reaches PlanDayScreen without this screen
+ * needing to be notified directly.
  */
 class PlanScreenViewModel(
     private val readingPlanRepository: ReadingPlanRepository,
+    private val translationRepository: TranslationRepository,
 ) : LightViewModel<Unit>() {
 
     private val _state = MutableStateFlow<PlanScreenState>(PlanScreenState.Loading)
@@ -67,12 +72,13 @@ class PlanScreenViewModel(
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
         viewModelScope.launch(Dispatchers.IO) {
+            val translation = translationRepository.selectedTranslation()
             val plan = readingPlanRepository.loadPlan()
             if (plan == null || plan.days.isEmpty()) {
                 _state.value = PlanScreenState.Unavailable
                 return@launch
             }
-            _state.value = PlanScreenState.Loaded(plan.days, todayIndex(plan))
+            _state.value = PlanScreenState.Loaded(translation, plan.days, todayIndex(plan))
         }
     }
 
@@ -88,11 +94,14 @@ class PlanScreenViewModel(
 class PlanScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, PlanScreenViewModel>(sealedActivity) {
 
     private val readingPlanRepository = ReadingPlanRepository(lightContext.fileShare)
+    private val bibleRepository = BibleRepository(lightContext.fileShare)
+    private val translationRepository =
+        TranslationRepository(lightContext.fileShare, bibleRepository, lightContext.dataStore)
 
     override val viewModelClass: Class<PlanScreenViewModel>
         get() = PlanScreenViewModel::class.java
 
-    override fun createViewModel() = PlanScreenViewModel(readingPlanRepository)
+    override fun createViewModel() = PlanScreenViewModel(readingPlanRepository, translationRepository)
 
     @Composable
     override fun Content() {
@@ -117,7 +126,9 @@ class PlanScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, PlanSc
                     is PlanScreenState.Loaded -> PlanDayList(
                         days = current.days,
                         initialIndex = current.initialIndex,
-                        onSelect = { day -> navigateTo(screenFactory = { PlanDayScreen(it, day) }) },
+                        onSelect = { day ->
+                            navigateTo(screenFactory = { PlanDayScreen(it, day, current.translation) })
+                        },
                     )
                 }
             }

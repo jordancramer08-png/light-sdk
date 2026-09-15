@@ -10,7 +10,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import com.thelightphone.bible.data.BibleManifestBook
-import com.thelightphone.bible.data.DEFAULT_TRANSLATION
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.ui.LightBarButton
@@ -30,7 +29,7 @@ import com.thelightphone.sdk.ui.lightClickable
 class ChaptersScreen(
     sealedActivity: SealedLightActivity,
     private val book: BibleManifestBook,
-    private val translation: String = DEFAULT_TRANSLATION,
+    private val translation: String,
 ) : SimpleLightScreen<Unit>(sealedActivity) {
 
     @Composable

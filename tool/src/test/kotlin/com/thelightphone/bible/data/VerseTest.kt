@@ -3,11 +3,11 @@ package com.thelightphone.bible.data
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-// From bible/esv/psalms/119.txt.
+// Synthetic fixture matching the converter's verse-line format (CLAUDE.md section 6) — not real scripture text.
 private const val SAMPLE_CHAPTER = """
-33|Teach me, O LORD, the way of Your statutes, / And I shall observe it to the end.
-34|Give me understanding, that I may observe Your law / And keep it with all my heart.
-35|Make me walk in the path of Your commandments,
+33|Sample verse text spanning a poetic line break, / continuing on the second line here.
+34|Another sample verse showing the plain single-line case with no line break at all.
+35|A third sample verse used only to exercise range filtering,
 """
 
 class VerseTest {
@@ -19,7 +19,7 @@ class VerseTest {
         assertEquals(3, verses.size)
         assertEquals(33, verses[0].number)
         assertEquals(
-            "Teach me, O LORD, the way of Your statutes, / And I shall observe it to the end.",
+            "Sample verse text spanning a poetic line break, / continuing on the second line here.",
             verses[0].text,
         )
         assertEquals(35, verses[2].number)

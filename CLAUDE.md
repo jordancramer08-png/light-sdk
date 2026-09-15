@@ -93,8 +93,8 @@ bible/<translation>/<book-slug>/<chapter>.txt
 ```
 
 ```
-33|Teach me, O LORD, the way of Your statutes, / And I shall observe it to the end.
-34|Give me understanding, that I may observe Your law / And keep it with all my heart.
+33|Sample verse text spanning a poetic line break, / continuing on the second line here.
+34|Another sample verse showing the plain single-line case with no line break at all.
 ```
 
 Verse number, pipe, verse text. Poetic line breaks within a verse become ` / `. This makes

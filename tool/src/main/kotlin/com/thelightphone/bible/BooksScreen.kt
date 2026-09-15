@@ -1,5 +1,6 @@
 package com.thelightphone.bible
 
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,6 +43,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 private const val NEW_TESTAMENT_FIRST_BOOK = "Matthew"
+private const val TAG = "BooksScreen"
 
 sealed interface BooksScreenState {
     data object Loading : BooksScreenState
@@ -95,11 +97,28 @@ class BooksScreenViewModel(
         }
     }
 
+    /**
+     * A book from [names] that fails to resolve is dropped from the list rather than
+     * crashing the screen, but that's a silent data problem - a source-file change
+     * (CLAUDE.md 7 warns this has already happened once) could drift a manifest key's
+     * spelling out of [resolver]'s aliases and quietly remove a book from Read. Log it so
+     * that's visible instead.
+     */
     private fun resolveBooks(
         names: List<String>,
         manifest: BibleManifest,
         resolver: BookNameResolver,
-    ): List<BibleManifestBook> = names.mapNotNull { name -> bibleRepository.findBook(manifest, resolver, name) }
+    ): List<BibleManifestBook> = names.mapNotNull { name ->
+        val book = bibleRepository.findBook(manifest, resolver, name)
+        if (book == null) {
+            Log.w(
+                TAG,
+                "\"$name\" did not resolve to a book in the ${manifest.displayName} manifest - " +
+                    "omitted from the Books list.",
+            )
+        }
+        book
+    }
 }
 
 class BooksScreen(sealedActivity: SealedLightActivity) : LightScreen<Unit, BooksScreenViewModel>(sealedActivity) {

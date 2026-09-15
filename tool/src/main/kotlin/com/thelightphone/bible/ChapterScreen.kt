@@ -61,7 +61,9 @@ import kotlin.math.roundToInt
  * ([start], [endExclusive]) so consecutive pages tile the chapter with no gap or overlap
  * (same approach as the reader project's ReaderScreen.kt, CLAUDE.md 5).
  */
-private data class PageRange(val start: Int, val endExclusive: Int)
+private data class PageRange(val start: Int, val endExclusive: Int) {
+    operator fun contains(offset: Int) = offset in start until endExclusive
+}
 
 sealed interface ChapterScreenState {
     data object Loading : ChapterScreenState
@@ -89,6 +91,9 @@ class ChapterScreenViewModel(
     private var chapterText: AnnotatedString? = null
     private var pages: List<PageRange> = emptyList()
     private var pageIndex = 0
+
+    private var contentWidthPx = 0
+    private var contentHeightPx = 0
     private var layoutConfigured = false
 
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
@@ -105,16 +110,46 @@ class ChapterScreenViewModel(
         }
     }
 
-    /** Called once the reading area's pixel size and text style are known. */
+    /**
+     * Called whenever the reading area's pixel size and text style are known. Re-paginates
+     * if the size changes after the first layout, anchored at the current page's start
+     * offset, since page boundaries shift with the new metrics (same approach as the
+     * reader project's ReaderScreen.kt, CLAUDE.md 5). Requires [verses] to already be
+     * loaded, unlike the reader's version, since building the paginated text depends on it.
+     */
     fun configureLayout(widthPx: Int, heightPx: Int, measurer: TextMeasurer, style: TextStyle, verseNumberColor: Color) {
         val loadedVerses = verses ?: return
-        if (layoutConfigured || widthPx <= 0 || heightPx <= 0) return
-        layoutConfigured = true
+        val sizeChanged = widthPx != contentWidthPx || heightPx != contentHeightPx
+        contentWidthPx = widthPx
+        contentHeightPx = heightPx
+        if (widthPx <= 0 || heightPx <= 0) return
 
-        val text = buildChapterText(loadedVerses, verseNumberColor)
-        chapterText = text
-        pages = paginate(measurer, style, text, widthPx, heightPx)
-        pageIndex = 0
+        if (!layoutConfigured) {
+            layoutConfigured = true
+            repaginate(loadedVerses, measurer, style, verseNumberColor, widthPx, heightPx, anchorOffset = 0)
+        } else if (sizeChanged) {
+            // Not expected on fixed LP3 hardware, but stay correct: re-paginate from the
+            // same character offset, since page boundaries shift with the new metrics.
+            val anchorOffset = pages.getOrNull(pageIndex)?.start ?: 0
+            repaginate(loadedVerses, measurer, style, verseNumberColor, widthPx, heightPx, anchorOffset)
+        }
+    }
+
+    private fun repaginate(
+        loadedVerses: List<Verse>,
+        measurer: TextMeasurer,
+        style: TextStyle,
+        verseNumberColor: Color,
+        widthPx: Int,
+        heightPx: Int,
+        anchorOffset: Int,
+    ) {
+        val text = chapterText ?: buildChapterText(loadedVerses, verseNumberColor).also { chapterText = it }
+        val newPages = paginate(measurer, style, text, widthPx, heightPx)
+        pages = newPages
+        pageIndex = newPages.indexOfFirst { anchorOffset in it }
+            .let { if (it >= 0) it else if (anchorOffset <= 0) 0 else newPages.lastIndex }
+            .coerceIn(0, (newPages.size - 1).coerceAtLeast(0))
         publish()
     }
 

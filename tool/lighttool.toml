@@ -1,6 +1,6 @@
 [tool]
-id = "com.thelightphone.reader"
-label = "Reader"
+id = "com.thelightphone.bible"
+label = "Bible"
 versionCode = 1
 versionName = "1.0.0"
 permissions = []

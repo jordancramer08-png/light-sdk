@@ -418,3 +418,23 @@ or print that file). Metadata (id/label/version/permissions) lives in
 - **`tool/lighttool.toml` declared `android.permission.INTERNET`** despite
   CLAUDE.md §1 requiring the app be offline-only. Likely a leftover from the
   prayer-list template. Removed; rebuild confirmed clean.
+
+## 8. Launcher visibility — corrected (2026-09-15)
+
+Earlier recon (during a launcher-access investigation for the Bible reader)
+wrongly concluded sideloaded tools have no way to show up in the LightOS
+launcher and can only be launched via `adb` from a laptop. **That's wrong —
+Jordan corrected it from direct hardware experience.**
+
+- Sideloaded tools **do** appear in the LightOS launcher menu and launch
+  normally from the phone, no laptop/adb needed. Both the prayer-list and
+  reader tools do this today.
+- The catch: **the launcher caches its menu and doesn't pick up a newly
+  installed tool until it's restarted.** A reboot of the phone after
+  `./gradlew :tool:assembleDebug` + install is what makes a freshly installed
+  tool show up. Skipping the reboot and expecting to find it in the menu is
+  the likely source of the earlier wrong conclusion.
+- The top-level `README.md`'s "no easy way to share your tool" language is
+  about there being no *install/distribution* path for ordinary (non-ADB)
+  users yet — not about launcher visibility once a tool is actually
+  installed. Don't conflate the two again.

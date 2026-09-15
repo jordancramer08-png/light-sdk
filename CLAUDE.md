@@ -109,6 +109,11 @@ name, slug, and chapter count.
 Reads only the converted `.txt` files, `manifest.json`, and `reading_plan_2026.json` from
 `lightContext.fileShare`. Knows nothing about EPUB.
 
+**Not wired up yet:** `reading_plan_2026.json` needs to be pushed to the device's
+`lightContext.fileShare` root (alongside `bible/`) the same way the converted chapters are.
+There is no install step that does this yet — it currently only lives at
+`bible-source/reading_plan_2026.json` on the PC.
+
 ---
 
 ## 7. Source files and extraction gotchas

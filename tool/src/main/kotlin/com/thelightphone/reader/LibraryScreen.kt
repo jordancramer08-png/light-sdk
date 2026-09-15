@@ -126,7 +126,7 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
                         BookList(
                             rows = current.rows,
                             onSelect = { row ->
-                                navigateTo(screenFactory = { ContentsScreen(it, row.meta) })
+                                navigateTo(screenFactory = { ReaderScreen(it, row.meta) })
                             },
                         )
                     }

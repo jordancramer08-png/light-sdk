@@ -10,6 +10,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import com.thelightphone.reader.data.BookMeta
+import com.thelightphone.reader.data.ChapterMeta
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.ui.LightBarButton
@@ -23,12 +24,18 @@ import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
+import com.thelightphone.sdk.ui.lightClickable
 
-/** The book's chapters. Reachable from the reading screen once it exists (CLAUDE.md 8). */
+/**
+ * The book's chapters, reachable from the reading screen (CLAUDE.md 8). Tapping a chapter
+ * hands its index back to the calling ReaderScreen via [goBack] rather than navigating
+ * onward, so the jump happens in place instead of pushing a new reading screen onto the
+ * back stack.
+ */
 class ContentsScreen(
     sealedActivity: SealedLightActivity,
     private val bookMeta: BookMeta,
-) : SimpleLightScreen<Unit>(sealedActivity) {
+) : SimpleLightScreen<Int>(sealedActivity) {
 
     @Composable
     override fun Content() {
@@ -49,14 +56,14 @@ class ContentsScreen(
                     modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
                 )
 
-                ChapterList(bookMeta = bookMeta)
+                ChapterList(bookMeta = bookMeta, onSelect = { chapter -> goBack(chapter.index) })
             }
         }
     }
 }
 
 @Composable
-private fun ChapterList(bookMeta: BookMeta) {
+private fun ChapterList(bookMeta: BookMeta, onSelect: (ChapterMeta) -> Unit) {
     LightScrollView(
         modifier = Modifier
             .fillMaxWidth()
@@ -68,6 +75,7 @@ private fun ChapterList(bookMeta: BookMeta) {
                 variant = LightTextVariant.Copy,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .lightClickable { onSelect(chapter) }
                     .padding(vertical = 0.75f.gridUnitsAsDp()),
             )
             if (i != bookMeta.chapters.lastIndex) {

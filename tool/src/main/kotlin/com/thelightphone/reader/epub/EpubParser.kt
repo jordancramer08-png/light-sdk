@@ -14,6 +14,12 @@ sealed class EpubParseException(message: String) : Exception(message)
 class DrmProtectedException : EpubParseException("DRM-protected (META-INF/encryption.xml present)")
 class InvalidEpubException(message: String) : EpubParseException(message)
 
+/**
+ * Bump this whenever a change here (or in HtmlText / ContentFilter) would change a
+ * book's chapters or text. The library cache sees the new number and re-parses every book.
+ */
+const val PARSER_VERSION = 1
+
 private const val CONTAINER_PATH = "META-INF/container.xml"
 private const val DRM_MARKER_PATH = "META-INF/encryption.xml"
 private val CONTENT_MEDIA_TYPES = setOf("application/xhtml+xml", "text/html")

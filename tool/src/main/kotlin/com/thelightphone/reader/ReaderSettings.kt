@@ -1,15 +1,35 @@
 package com.thelightphone.reader
 
 /**
- * Everything on the Reading Settings screen except the theme: how the page's text is set.
- * One set for all books. Plain Kotlin so it can be unit-tested on the PC.
+ * Everything on the Reading Settings screen except the theme: how the page's text is set,
+ * and whether the progress line shows under it. One set for all books. Plain Kotlin so it
+ * can be unit-tested on the PC.
  */
 data class ReaderSettings(
     val textSize: ReaderTextSize = ReaderTextSize.DEFAULT,
     val typeface: ReaderTypeface = ReaderTypeface.DEFAULT,
     val lineSpacing: ReaderLineSpacing = ReaderLineSpacing.DEFAULT,
     val margins: ReaderMargins = ReaderMargins.DEFAULT,
+    val alignment: ReaderAlignment = ReaderAlignment.DEFAULT,
+    val showProgressLine: Boolean = true,
 )
+
+/**
+ * How lines sit between the margins. Left is the ragged right edge the reader always had;
+ * Justified stretches each line to both margins and hyphenates long words.
+ */
+enum class ReaderAlignment(val label: String) {
+    LEFT("Left"),
+    JUSTIFIED("Justified");
+
+    val previous: ReaderAlignment? get() = entries.getOrNull(ordinal - 1)
+    val next: ReaderAlignment? get() = entries.getOrNull(ordinal + 1)
+
+    companion object {
+        val DEFAULT = LEFT
+        fun fromSavedName(name: String?): ReaderAlignment = entries.firstOrNull { it.name == name } ?: DEFAULT
+    }
+}
 
 /** The page's font. Light is the SDK's own font; Serif and Sans are the phone's built-in ones. */
 enum class ReaderTypeface(val label: String) {

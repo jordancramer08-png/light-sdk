@@ -2,8 +2,10 @@ package com.thelightphone.reader.data
 
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.thelightphone.reader.ReaderAlignment
 import com.thelightphone.reader.ReaderLineSpacing
 import com.thelightphone.reader.ReaderMargins
 import com.thelightphone.reader.ReaderSettings
@@ -12,9 +14,10 @@ import com.thelightphone.reader.ReaderTypeface
 import kotlinx.coroutines.flow.first
 
 /**
- * Remembers the reading settings (size, typeface, line spacing, margins) for all books, in
- * the tool's DataStore (lightContext.dataStore). Each is stored by its enum name; anything
- * missing or unknown comes back as that setting's default.
+ * Remembers the reading settings (size, typeface, line spacing, margins, alignment, progress
+ * line) for all books, in the tool's DataStore (lightContext.dataStore). Each choice is stored
+ * by its enum name, the progress line as On/Off; anything missing or unknown comes back as
+ * that setting's default.
  */
 class ReaderSettingsPreference(private val dataStore: DataStore<Preferences>) {
 
@@ -25,6 +28,8 @@ class ReaderSettingsPreference(private val dataStore: DataStore<Preferences>) {
             typeface = ReaderTypeface.fromSavedName(prefs[TYPEFACE]),
             lineSpacing = ReaderLineSpacing.fromSavedName(prefs[LINE_SPACING]),
             margins = ReaderMargins.fromSavedName(prefs[MARGINS]),
+            alignment = ReaderAlignment.fromSavedName(prefs[ALIGNMENT]),
+            showProgressLine = prefs[PROGRESS_LINE] ?: true,
         )
     }
 
@@ -34,6 +39,8 @@ class ReaderSettingsPreference(private val dataStore: DataStore<Preferences>) {
             prefs[TYPEFACE] = settings.typeface.name
             prefs[LINE_SPACING] = settings.lineSpacing.name
             prefs[MARGINS] = settings.margins.name
+            prefs[ALIGNMENT] = settings.alignment.name
+            prefs[PROGRESS_LINE] = settings.showProgressLine
         }
     }
 
@@ -43,5 +50,7 @@ class ReaderSettingsPreference(private val dataStore: DataStore<Preferences>) {
         val TYPEFACE = stringPreferencesKey("reader_typeface")
         val LINE_SPACING = stringPreferencesKey("reader_line_spacing")
         val MARGINS = stringPreferencesKey("reader_margins")
+        val ALIGNMENT = stringPreferencesKey("reader_alignment")
+        val PROGRESS_LINE = booleanPreferencesKey("reader_progress_line")
     }
 }

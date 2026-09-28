@@ -30,22 +30,27 @@ import com.thelightphone.sdk.ui.designVerticalPxToSp
  * The Paragraph style at the chosen size, typeface and line spacing. Used both to measure
  * pages and to draw them (CLAUDE.md 7).
  *
- * Line breaking is set to the simple, greedy kind: a page is drawn as its own piece of
- * text, and greedy breaking wraps that piece exactly as it wrapped inside the whole chapter.
+ * Left: ragged right, simple (greedy) line breaking, no hyphens — the page the reader always
+ * had. Justified: both edges straight, whole-paragraph line breaking and automatic hyphens.
+ * Headings have their own style, and scene breaks their own centering, so neither changes.
+ * The reader draws each page out of the whole chapter's laid-out text, so a page's lines are
+ * exactly the lines that were measured either way.
  */
 @Composable
 fun readerBodyStyle(settings: ReaderSettings): TextStyle {
     val base = LightThemeTokens.typography.paragraph
     val scale = settings.textSize.scale
     val fontPx = base.fontSize.value * scale
+    val justified = settings.alignment == ReaderAlignment.JUSTIFIED
     return base.copy(
         color = LightThemeTokens.colors.content,
         fontFamily = settings.typeface.fontFamily(base.fontFamily),
         fontSize = fontPx.designVerticalPxToSp(),
         lineHeight = (fontPx * settings.lineSpacing.multiplier).designVerticalPxToSp(),
         letterSpacing = base.letterSpacing.scaledForReading(scale),
-        lineBreak = LineBreak.Simple,
-        hyphens = Hyphens.None,
+        textAlign = if (justified) TextAlign.Justify else TextAlign.Start,
+        lineBreak = if (justified) LineBreak.Paragraph else LineBreak.Simple,
+        hyphens = if (justified) Hyphens.Auto else Hyphens.None,
     )
 }
 

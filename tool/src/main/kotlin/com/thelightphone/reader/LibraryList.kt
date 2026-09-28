@@ -2,6 +2,7 @@ package com.thelightphone.reader
 
 import com.thelightphone.reader.data.BookMeta
 import com.thelightphone.reader.data.BookProblem
+import com.thelightphone.reader.data.ChapterMeta
 import com.thelightphone.reader.data.ReadingPosition
 import java.text.Normalizer
 
@@ -107,11 +108,18 @@ fun statusText(
  */
 fun progressText(meta: BookMeta, position: ReadingPosition?): String {
     if (position == null) return "Not started"
-    val totalChars = meta.chapters.sumOf { it.chars.toLong() }
-    if (totalChars <= 0) return "Not started"
-    val readChars = meta.chapters
-        .filter { it.index < position.chapterIndex }
-        .sumOf { it.chars.toLong() } + position.charOffset
-    val percent = (readChars * 100 / totalChars).coerceIn(0, 100)
+    val percent = percentRead(meta.chapters, position.chapterIndex, position.charOffset) ?: return "Not started"
     return "$percent$READ_SUFFIX"
+}
+
+/**
+ * The percent read at [charOffset] into chapter [chapterIndex]: all earlier chapters plus
+ * the offset, over the whole book. Null for a book with no text. The reader's progress line
+ * uses it too, so it always agrees with the library.
+ */
+fun percentRead(chapters: List<ChapterMeta>, chapterIndex: Int, charOffset: Int): Int? {
+    val totalChars = chapters.sumOf { it.chars.toLong() }
+    if (totalChars <= 0) return null
+    val readChars = chapters.filter { it.index < chapterIndex }.sumOf { it.chars.toLong() } + charOffset
+    return (readChars * 100 / totalChars).coerceIn(0, 100).toInt()
 }

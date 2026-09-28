@@ -9,10 +9,13 @@ import kotlin.math.hypot
 /** A note marker on a page: its number ("12"), its note, and where it sits in the page's text. */
 data class PageNote(val marker: String, val text: String, val start: Int, val end: Int)
 
-/** The note markers on a page (the page is a piece of [styledChapterText], so it carries them). */
-fun pageNotes(page: AnnotatedString): List<PageNote> =
-    page.getStringAnnotations(NOTE_ANNOTATION, 0, page.length).map {
-        PageNote(page.text.substring(it.start, it.end), it.item, it.start, it.end)
+/**
+ * The note markers in [text] (a [styledChapterText], which carries them) between [start] and
+ * [end] — one page of it. Their offsets are [text]'s own.
+ */
+fun pageNotes(text: AnnotatedString, start: Int = 0, end: Int = text.length): List<PageNote> =
+    text.getStringAnnotations(NOTE_ANNOTATION, start, end).map {
+        PageNote(text.text.substring(it.start, it.end), it.item, it.start, it.end)
     }
 
 /**

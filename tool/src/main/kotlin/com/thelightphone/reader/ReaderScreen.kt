@@ -3,6 +3,7 @@ package com.thelightphone.reader
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -12,14 +13,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
@@ -28,6 +32,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
@@ -39,6 +44,7 @@ import com.thelightphone.reader.data.LibraryStore
 import com.thelightphone.reader.data.readerDatabase
 import com.thelightphone.reader.data.ReaderSettingsPreference
 import com.thelightphone.reader.data.ReadingPositionRepository
+import com.thelightphone.reader.data.ReadingSpeedPreference
 import com.thelightphone.reader.data.ReadingStatusRepository
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
@@ -51,6 +57,7 @@ import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
+import com.thelightphone.sdk.ui.lightClickable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -70,19 +77,25 @@ sealed interface ReaderScreenState {
 
     /**
      * [barTitle] is for the top bar ("BOOK 1: GARDENS OF THE MOON · Chapter One");
-     * [chapterTitle] heads the chapter's first page.
+     * [chapterTitle] heads the chapter's first page. The page is drawn straight out of the
+     * whole chapter's laid-out text ([chapterLayout]): the lines from [pageTopPx] to
+     * [pageBottomPx], which hold the characters of [page]. [progress] feeds the progress line.
      */
     data class Loaded(
         val barTitle: String,
         val chapterTitle: String,
-        val pageText: AnnotatedString,
         val isChapterStart: Boolean,
+        val chapterLayout: TextLayoutResult,
+        val page: PageRange,
+        val pageTopPx: Float,
+        val pageBottomPx: Float,
+        val progress: ReadingProgress,
     ) : ReaderScreenState
 }
 
 /**
  * Everything pagination needs to know about the screen: the reading area's size in pixels,
- * and the exact styles the page and heading are drawn with.
+ * and the exact styles the page and heading are drawn with. [accent] colors the note markers.
  */
 data class PageLayout(
     val measurer: TextMeasurer,
@@ -91,6 +104,7 @@ data class PageLayout(
     val headingGapPx: Int,
     val widthPx: Int,
     val heightPx: Int,
+    val accent: Color,
 ) {
     /** Color doesn't change where pages break, so a new theme alone never re-pages the book. */
     fun sameMetricsAs(other: PageLayout) =
@@ -112,6 +126,7 @@ class ReaderScreenViewModel(
     private val readingPositionRepository: ReadingPositionRepository,
     private val readingStatusRepository: ReadingStatusRepository,
     private val settingsPreference: ReaderSettingsPreference,
+    private val speedPreference: ReadingSpeedPreference,
 ) : LightViewModel<Unit>() {
 
     private val _state = MutableStateFlow<ReaderScreenState>(ReaderScreenState.Loading)
@@ -141,13 +156,39 @@ class ReaderScreenViewModel(
     private val pageCache = mutableMapOf<Int, List<PageRange>>()
     private var loadJob: Job? = null
 
+    /**
+     * The laid-out text of the last few chapters read, which pages are drawn from. Only a few
+     * are kept, since a long chapter's layout is large; the rest are laid out again if revisited.
+     */
+    private val layoutCache = object : LinkedHashMap<Int, TextLayoutResult>(4, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, TextLayoutResult>) =
+            size > LAID_OUT_CHAPTERS_KEPT
+    }
+    private var currentLayout: TextLayoutResult? = null
+
     /** Saves run one at a time, in order, so an older place can never overwrite a newer one. */
     private val saveDispatcher = Dispatchers.IO.limitedParallelism(1)
 
+    /** Jordan's reading speed, characters a minute, for the progress line's time left. */
+    private val _charsPerMinute = MutableStateFlow(DEFAULT_CHARS_PER_MINUTE)
+    val charsPerMinute: StateFlow<Float> = _charsPerMinute.asStateFlow()
+
+    /** Whether the progress line counts down the chapter or the book; tapping it switches. */
+    private val _timeLeftMode = MutableStateFlow(TimeLeftMode.CHAPTER)
+    val timeLeftMode: StateFlow<TimeLeftMode> = _timeLeftMode.asStateFlow()
+
+    /** When the page on screen appeared (for timing the reading speed); null while away. */
+    private var pageShownAtMs: Long? = null
+
     init {
         viewModelScope.launch { _settings.value = settingsPreference.load() }
+        viewModelScope.launch { _charsPerMinute.value = speedPreference.load() }
         // Opening the book makes it Reading (unless it's already Reading or Finished).
         DatabaseQueue.write { readingStatusRepository.markOpened(bookMeta.slug) }
+    }
+
+    fun toggleTimeLeftMode() {
+        _timeLeftMode.value = _timeLeftMode.value.other
     }
 
     /** From ReadingSettingsScreen: use the new settings for every book, and remember them. */
@@ -167,6 +208,11 @@ class ReaderScreenViewModel(
         } else if (!layout.sameMetricsAs(previous)) {
             // Page breaks move with the new style or width, so re-page from the same character.
             pageCache.clear()
+            layoutCache.clear()
+            loadChapter(currentChapterIndex, anchorOffset, keepAnchor = true)
+        } else if (layout != previous) {
+            // Only the colors changed (a new theme): same pages, text laid out again in the new colors.
+            layoutCache.clear()
             loadChapter(currentChapterIndex, anchorOffset, keepAnchor = true)
         }
     }
@@ -190,11 +236,29 @@ class ReaderScreenViewModel(
     fun nextPage() {
         if (isLoading() || currentPages.isEmpty()) return
         if (currentPageIndex < currentPages.lastIndex) {
+            timePageJustRead()
             showPage(currentPageIndex + 1)
         } else {
-            chapter(currentChapterIndex + 1)?.let { loadChapter(it.index, 0) }
+            chapter(currentChapterIndex + 1)?.let {
+                timePageJustRead()
+                loadChapter(it.index, 0)
+            }
         }
     }
+
+    /**
+     * A forward turn means the page on screen was read: its characters over the time it was
+     * up give one speed reading, added to the saved average. Turns under 2 seconds or over
+     * 5 minutes don't count (see [pageSpeed]).
+     */
+    private fun timePageJustRead() {
+        val shownAt = pageShownAtMs ?: return
+        val page = currentPages.getOrNull(currentPageIndex) ?: return
+        val speed = pageSpeed(page.endExclusive - page.start, nowMs() - shownAt) ?: return
+        viewModelScope.launch { _charsPerMinute.value = speedPreference.addPage(speed) }
+    }
+
+    private fun nowMs() = System.nanoTime() / 1_000_000
 
     fun previousPage() {
         if (isLoading() || currentPages.isEmpty()) return
@@ -234,12 +298,16 @@ class ReaderScreenViewModel(
             val text = chapterTextCache.getOrPut(chapter.index) {
                 withContext(Dispatchers.IO) { readStyledChapter(chapter) }
             }
+            val body = layoutCache.getOrPut(chapter.index) {
+                withContext(Dispatchers.Default) { layOutChapter(layout, text) }
+            }
             val pages = pageCache.getOrPut(chapter.index) {
-                withContext(Dispatchers.Default) { pageChapter(layout, chapter.title, text) }
+                withContext(Dispatchers.Default) { pageChapter(layout, chapter.title, body) }
             }
             slowNotice.cancel()
             currentChapterIndex = chapter.index
             currentText = text
+            currentLayout = body
             currentPages = pages
             // Re-paging or reopening isn't the reader moving, so it never marks the book Finished.
             showPage(pageIndexFor(pages, text.text, targetOffset), movedByReader = !keepAnchor && !isReopening)
@@ -256,18 +324,24 @@ class ReaderScreenViewModel(
 
     /** [movedByReader]: a page turn or a Contents jump, as opposed to reopening or re-paging. */
     private fun showPage(pageIndex: Int, movedByReader: Boolean = true) {
+        val body = currentLayout ?: return
         currentPageIndex = pageIndex
         val page = currentPages[pageIndex]
         anchorOffset = page.start
         val chapter = chapter(currentChapterIndex)
-        // Trailing blank lines are part of the page's range but don't need drawing.
-        val drawnLength = currentText.text.substring(page.start, page.endExclusive).trimEnd().length
+        // The page's lines: from its first character's line to its last character's line.
+        val lastChar = (page.endExclusive - 1).coerceAtLeast(page.start)
         _state.value = ReaderScreenState.Loaded(
             barTitle = chapter?.let(::readerBarTitle) ?: bookMeta.title,
             chapterTitle = chapter?.title ?: bookMeta.title,
-            pageText = currentText.subSequence(page.start, page.start + drawnLength),
             isChapterStart = pageIndex == 0,
+            chapterLayout = body,
+            page = page,
+            pageTopPx = body.getLineTop(body.getLineForOffset(page.start)),
+            pageBottomPx = body.getLineBottom(body.getLineForOffset(lastChar)),
+            progress = readingProgress(bookMeta.chapters, currentChapterIndex, page.start, currentText.length),
         )
+        pageShownAtMs = nowMs()
         savePosition()
         if (movedByReader && isLastPageOfBook()) {
             DatabaseQueue.write { readingStatusRepository.markFinished(bookMeta.slug) }
@@ -299,29 +373,48 @@ class ReaderScreenViewModel(
         }
     }
 
+    /** Back on this screen (from Contents, a note, settings): time the page from now. */
+    override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
+        super.onScreenShow(screen)
+        if (currentPages.isNotEmpty()) pageShownAtMs = nowMs()
+    }
+
     override fun onScreenHide(screen: SimpleLightScreen<Unit>) {
         super.onScreenHide(screen)
+        pageShownAtMs = null
         flushPosition()
     }
 
     override fun onAppPause() {
         super.onAppPause()
+        pageShownAtMs = null
         flushPosition()
     }
 }
 
 /**
- * Measures the chapter with the page's own style and cuts it into pages. [text] carries the
- * italics, bold, quotes and scene breaks, since they change where lines wrap.
+ * Lays out the whole chapter with the page's own style (and the note markers' accent).
+ * [text] carries the italics, bold, quotes and scene breaks, since they change where lines
+ * wrap. Pages are cut from this layout and drawn from it, so measured is drawn.
  */
-private fun pageChapter(layout: PageLayout, title: String, text: AnnotatedString): List<PageRange> {
+private fun layOutChapter(layout: PageLayout, text: AnnotatedString): TextLayoutResult =
+    layout.measurer.measure(
+        withNoteColor(text, layout.accent),
+        style = layout.bodyStyle,
+        constraints = Constraints(maxWidth = layout.widthPx),
+        // Kept in layoutCache instead; the measurer's own cache would hold extra copies.
+        skipCache = true,
+    )
+
+/** Cuts the laid-out chapter into pages; the first is shorter by the heading above it. */
+private fun pageChapter(layout: PageLayout, title: String, body: TextLayoutResult): List<PageRange> {
     val constraints = Constraints(maxWidth = layout.widthPx)
     val headingHeightPx = layout.measurer
         .measure(AnnotatedString(title), style = layout.headingStyle, constraints = constraints)
         .size.height
     val firstPageHeightPx = (layout.heightPx - headingHeightPx - layout.headingGapPx)
         .coerceAtLeast(layout.heightPx / 2)
-    val body = layout.measurer.measure(text, style = layout.bodyStyle, constraints = constraints)
+    val text = body.layoutInput.text
     return paginate(body.lines(text.text), text.length, layout.heightPx, firstPageHeightPx)
 }
 
@@ -341,6 +434,10 @@ private const val PREPARING_NOTICE_DELAY_MS = 300L
 private const val BACK_TAP_ZONE_FRACTION = 0.3f
 private const val READER_TOP_BOTTOM_GRID_UNITS = 0.75f
 private const val HEADING_GAP_GRID_UNITS = 1f
+private const val PROGRESS_LINE_BOTTOM_GRID_UNITS = 0.5f
+
+/** How many chapters' laid-out text is kept (the one being read and its neighbours, roughly). */
+private const val LAID_OUT_CHAPTERS_KEPT = 3
 
 /** How far from a note marker a tap still opens its note (a finger is wider than a raised number). */
 private const val NOTE_REACH_GRID_UNITS = 1.5f
@@ -362,12 +459,15 @@ class ReaderScreen(
         readingPositionRepository,
         ReadingStatusRepository.getInstance { lightContext.readerDatabase() },
         ReaderSettingsPreference(lightContext.dataStore),
+        ReadingSpeedPreference(lightContext.dataStore),
     )
 
     @Composable
     override fun Content() {
         val state by viewModel.state.collectAsState()
         val settings by viewModel.settings.collectAsState()
+        val charsPerMinute by viewModel.charsPerMinute.collectAsState()
+        val timeLeftMode by viewModel.timeLeftMode.collectAsState()
         val topTitle = when (val current = state) {
             is ReaderScreenState.Loaded -> current.barTitle
             is ReaderScreenState.Preparing -> current.barTitle
@@ -382,7 +482,14 @@ class ReaderScreen(
             )
             // Nothing is drawn until the saved settings are known (a moment at most).
             settings?.let { current ->
+                // The page takes what's left after the progress line, so the line's height is
+                // kept out of every page and the two never overlap.
                 PageArea(state, current, modifier = Modifier.weight(1f).fillMaxWidth())
+                if (current.showProgressLine) {
+                    val text = (state as? ReaderScreenState.Loaded)
+                        ?.let { progressLineText(it.progress, charsPerMinute, timeLeftMode) }
+                    ProgressLine(text, current.margins, onClick = viewModel::toggleTimeLeftMode)
+                }
             }
         }
     }
@@ -418,22 +525,24 @@ class ReaderScreen(
         val textMeasurer = rememberTextMeasurer()
         val bodyStyle = readerBodyStyle(settings)
         val headingStyle = readerHeadingStyle(settings)
+        val accent = LocalReaderAccent.current
         val density = LocalDensity.current
         val headingGapPx = with(density) { HEADING_GAP_GRID_UNITS.gridUnitsAsDp().toPx() }.roundToInt()
         val headingGap = with(density) { headingGapPx.toDp() }
         val noteReachPx = with(density) { NOTE_REACH_GRID_UNITS.gridUnitsAsDp().toPx() }
 
-        // Where the page's text was last laid out, for finding a tapped note marker.
-        var bodyLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+        // Where the page's text sits on screen, for finding a tapped note marker.
         var bodyTop by remember { mutableFloatStateOf(0f) }
         val currentState by rememberUpdatedState(state)
 
         fun tappedNote(tap: Offset): PageNote? {
-            val page = (currentState as? ReaderScreenState.Loaded)?.pageText ?: return null
-            val layout = bodyLayout?.takeIf { it.layoutInput.text.text == page.text } ?: return null
-            val notes = pageNotes(page)
+            val loaded = currentState as? ReaderScreenState.Loaded ?: return null
+            val layout = loaded.chapterLayout
+            val notes = pageNotes(layout.layoutInput.text, loaded.page.start, loaded.page.endExclusive)
             if (notes.isEmpty()) return null
-            return nearestNote(tap - Offset(0f, bodyTop), markerBoxes(layout, notes), noteReachPx)
+            // The page shows the chapter's layout moved up by pageTopPx.
+            val inChapter = tap - Offset(0f, bodyTop) + Offset(0f, loaded.pageTopPx)
+            return nearestNote(inChapter, markerBoxes(layout, notes), noteReachPx)
         }
 
         BoxWithConstraints(
@@ -453,9 +562,9 @@ class ReaderScreen(
             val widthPx = constraints.maxWidth
             val heightPx = constraints.maxHeight
 
-            LaunchedEffect(widthPx, heightPx, bodyStyle, headingStyle, headingGapPx) {
+            LaunchedEffect(widthPx, heightPx, bodyStyle, headingStyle, headingGapPx, accent) {
                 viewModel.configureLayout(
-                    PageLayout(textMeasurer, bodyStyle, headingStyle, headingGapPx, widthPx, heightPx),
+                    PageLayout(textMeasurer, bodyStyle, headingStyle, headingGapPx, widthPx, heightPx, accent),
                 )
             }
 
@@ -477,16 +586,56 @@ class ReaderScreen(
                             modifier = Modifier.padding(bottom = headingGap),
                         )
                     }
-                    val accent = LocalReaderAccent.current
-                    val pageText = remember(state.pageText, accent) { withNoteColor(state.pageText, accent) }
-                    BasicText(
-                        text = pageText,
-                        style = bodyStyle,
-                        onTextLayout = { bodyLayout = it },
-                        modifier = Modifier.onGloballyPositioned { bodyTop = it.positionInParent().y },
+                    PageText(
+                        state,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .onGloballyPositioned { bodyTop = it.positionInParent().y },
                     )
                 }
             }
         }
     }
+}
+
+/**
+ * Draws the page's lines straight from the chapter's layout: moved up so the page's first
+ * line is at the top, and cut off below its last line. No second layout, so the lines (their
+ * breaks, hyphens and justification) are exactly the ones pagination measured.
+ */
+@Composable
+private fun PageText(state: ReaderScreenState.Loaded, modifier: Modifier) {
+    Spacer(
+        modifier = modifier
+            .clipToBounds()
+            .drawBehind {
+                clipRect(bottom = state.pageBottomPx - state.pageTopPx) {
+                    translate(top = -state.pageTopPx) { drawText(state.chapterLayout) }
+                }
+            },
+    )
+}
+
+/**
+ * "Ch 5 of 63 · 34% · 12 min left in chapter", small and lighter, one line. Tapping it
+ * switches between time left in the chapter and in the book. [text] is null while the page
+ * is loading: the line is still there (blank), so the page's height never changes.
+ */
+@Composable
+private fun ProgressLine(text: String?, margins: ReaderMargins, onClick: () -> Unit) {
+    LightText(
+        text = text ?: " ",
+        variant = LightTextVariant.Detail,
+        lighten = true,
+        maxLines = 1,
+        modifier = Modifier
+            .fillMaxWidth()
+            .lightClickable(onClick = onClick)
+            .padding(
+                start = margins.gridUnits.gridUnitsAsDp(),
+                end = margins.gridUnits.gridUnitsAsDp(),
+                bottom = PROGRESS_LINE_BOTTOM_GRID_UNITS.gridUnitsAsDp(),
+            ),
+    )
 }

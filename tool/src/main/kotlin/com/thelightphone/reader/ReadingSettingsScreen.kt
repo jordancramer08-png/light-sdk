@@ -18,6 +18,7 @@ import androidx.compose.ui.text.style.TextAlign
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.ui.LightBarButton
+import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
@@ -37,7 +38,8 @@ private const val SAMPLE_TEXT =
 private const val VALUE_WIDTH_GRID_UNITS = 7f
 
 /**
- * Text size, typeface, line spacing and margins, each stepped with the buttons on its row.
+ * Text size, typeface, line spacing, margins and alignment, each stepped with the buttons on
+ * its row, and the progress line switched on or off.
  * The sample below is drawn with exactly the reader's page style and margins, so every
  * change shows at once. Back hands the settings to ReaderScreen, which saves them and
  * re-pages the book. The Theme row opens ThemeScreen.
@@ -107,6 +109,21 @@ class ReadingSettingsScreen(
             onNext = s.margins.next?.let { { settings = s.copy(margins = it) } },
         )
         RowDivider()
+        StepperRow(
+            label = "Alignment",
+            value = s.alignment.label,
+            onPrevious = s.alignment.previous?.let { { settings = s.copy(alignment = it) } },
+            onNext = s.alignment.next?.let { { settings = s.copy(alignment = it) } },
+            previousSymbol = "‹",
+            nextSymbol = "›",
+        )
+        RowDivider()
+        OnOffRow(
+            label = "Progress line",
+            isOn = s.showProgressLine,
+            onClick = { settings = s.copy(showProgressLine = !s.showProgressLine) },
+        )
+        RowDivider()
     }
 
     /** The theme applies to every screen as soon as it is picked, so nothing comes back here. */
@@ -164,6 +181,30 @@ private fun StepButton(symbol: String, onClick: (() -> Unit)?) {
             .lightClickable(onClick = { onClick?.invoke() })
             .padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.25f.gridUnitsAsDp()),
     )
+}
+
+/**
+ * "Progress line      On  (switch)" — tap anywhere on the row to switch. The word says On or
+ * Off as well as the switch's shape.
+ */
+@Composable
+private fun OnOffRow(label: String, isOn: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .lightClickable(onClick = onClick)
+            .padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.75f.gridUnitsAsDp()),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        LightText(text = label, variant = LightTextVariant.Copy, modifier = Modifier.weight(1f))
+        LightText(
+            text = if (isOn) "On" else "Off",
+            variant = LightTextVariant.Copy,
+            lighten = true,
+            modifier = Modifier.padding(end = 0.5f.gridUnitsAsDp()),
+        )
+        LightIcon(icon = if (isOn) LightIcons.TOGGLE_STATE_ON else LightIcons.TOGGLE_STATE_OFF)
+    }
 }
 
 /** "Theme          Sepia" — tap to open the Theme screen. */

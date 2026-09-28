@@ -16,6 +16,8 @@ class ReaderSettingsTest {
         assertEquals(1.45f, defaults.lineSpacing.multiplier)
         assertEquals(ReaderMargins.NORMAL, defaults.margins)
         assertEquals(1.5f, defaults.margins.gridUnits)
+        assertEquals(ReaderAlignment.LEFT, defaults.alignment)
+        assertTrue(defaults.showProgressLine)
     }
 
     @Test
@@ -43,5 +45,15 @@ class ReaderSettingsTest {
         assertEquals(ReaderLineSpacing.NORMAL, ReaderLineSpacing.fromSavedName("LOOSE"))
         assertEquals(ReaderMargins.NARROW, ReaderMargins.fromSavedName("NARROW"))
         assertEquals(ReaderMargins.NORMAL, ReaderMargins.fromSavedName(""))
+        assertEquals(ReaderAlignment.JUSTIFIED, ReaderAlignment.fromSavedName("JUSTIFIED"))
+        assertEquals(ReaderAlignment.LEFT, ReaderAlignment.fromSavedName("CENTER"))
+    }
+
+    @Test
+    fun `alignment steps between Left and Justified`() {
+        assertEquals(ReaderAlignment.JUSTIFIED, ReaderAlignment.LEFT.next)
+        assertNull(ReaderAlignment.LEFT.previous)
+        assertEquals(ReaderAlignment.LEFT, ReaderAlignment.JUSTIFIED.previous)
+        assertNull(ReaderAlignment.JUSTIFIED.next)
     }
 }

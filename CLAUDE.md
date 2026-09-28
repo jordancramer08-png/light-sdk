@@ -110,11 +110,16 @@ reader/
     LibrarySortPreference.kt  remembered library sort (DataStore)
     LibraryFilterPreference.kt  remembered library Show filter (DataStore)
     LibraryGroupSeriesPreference.kt  remembered Group series On/Off (DataStore)
-    ReaderSettingsPreference.kt  remembered size, typeface, line spacing, margins (DataStore)
+    ReaderSettingsPreference.kt  remembered size, typeface, line spacing, margins, alignment,
+                                 progress line On/Off (DataStore)
+    ReadingSpeedPreference.kt    remembered reading speed, characters a minute (DataStore)
     ReaderThemePreference.kt     remembered reading theme (DataStore)
   ReaderTextSize.kt     the five text sizes (pure Kotlin, unit-tested)
-  ReaderSettings.kt     ReaderSettings (size + typeface + line spacing + margins) and the
-                        ReaderTypeface / ReaderLineSpacing / ReaderMargins choices (pure Kotlin, unit-tested)
+  ReaderSettings.kt     ReaderSettings (size + typeface + line spacing + margins + alignment + progress
+                        line) and the ReaderTypeface / ReaderLineSpacing / ReaderMargins /
+                        ReaderAlignment choices (pure Kotlin, unit-tested)
+  ReadingProgress.kt    the progress line: ReadingProgress, reading-speed estimate (pageSpeed,
+                        updatedSpeed), time left and its wording (pure Kotlin, unit-tested)
   ReaderTypography.kt   reader body + heading TextStyles for a ReaderSettings (shared with ReadingSettingsScreen),
                         styledChapterText (chapter text + StyleRanges → AnnotatedString), withNoteColor
   NoteMarkers.kt        PageNote, pageNotes, nearestNote: which note marker a tap hit (unit-tested)
@@ -242,8 +247,14 @@ git ls-tree -r --name-only f59672f -- tool      # the full list
   under- or over-fill. **Draw with exactly the `TextStyle` you measure with** (the Bible
   tool's `ChapterScreen` on `main` does this with `Text(text, style = bodyStyle)`). Same for
   the chapter heading. With formatting (§6) the chapter is one `AnnotatedString`
-  (`styledChapterText`, its ranges shifted for the extra paragraph spacing): pages are
-  measured with it, and each page is drawn as a `subSequence` of that same string.
+  (`styledChapterText`, its ranges shifted for the extra paragraph spacing). The whole
+  chapter is laid out once with it (`layOutChapter`, a `TextLayoutResult`), pages are cut
+  from that layout's lines, and **each page is drawn from that same layout** (`drawText`,
+  moved up to the page's first line and clipped below its last), never re-laid-out as a
+  piece of text. That is what keeps measured = drawn with justified text: whole-paragraph
+  line breaking and hyphens would wrap a page-sized piece differently, and a page ending
+  mid-paragraph would lose the justification of its last line. The last 3 chapters' layouts
+  are kept; a theme change lays the current one out again in the new colors, same pages.
 
 ## 8. Library order and display
 
@@ -330,22 +341,36 @@ that opens Contents. When the chapter sits under a heading, the title reads
 `readerBarTitle`, one line, ellipsized by the SDK). The heading on a chapter's first page is
 always just the chapter title. Paged text below (§7), with italic, bold, indented block
 quotes, centered "⁂" scene breaks and note markers (§6): small (0.7 em), raised, in the
-theme's accent (added at draw time by `withNoteColor`, so a theme change never re-pages). A
-tap on or within 1.5 grid units of a marker (`NOTE_REACH_GRID_UNITS`; measured on the page's
-`TextLayoutResult` character boxes, nearest marker wins) opens NoteScreen instead of turning
+theme's accent (added by `withNoteColor` when the chapter is laid out, not measured, so a
+theme change never re-pages). A tap on or within 1.5 grid units of a marker
+(`NOTE_REACH_GRID_UNITS`; measured on the chapter layout's character boxes, shifted to the
+page, nearest marker wins) opens NoteScreen instead of turning
 the page, even in the left 30%; every other tap turns pages as before. Opening a book makes a Want to Read book
 Reading (Reading and Finished stay as they are). A page turn or Contents jump that lands on
 the last page of the last chapter makes it Finished; reopening the book on that page, or
 re-paging, does not (so a hand-set status isn't undone just by opening the book).
+**Progress line** (Reading Settings, default On): one line under the page, Detail size,
+lighter: "Ch 5 of 63 · 34% · 12 min left in chapter" (chapter's place in the list, the
+library's percent, `percentRead`). Tapping it switches the time to "3 hr 20 min left in
+book" and back (not remembered: each book opens on the chapter). It sits below the page
+area, so its height is taken out of every page; while a page loads it stays, blank, so the
+page's height never changes. Time left = characters from the page's first character to the
+chapter's (or book's) end ÷ reading speed, rounded, at least 1 min. Reading speed: each
+forward turn times the page just left (characters ÷ minutes it was up); turns under 2 s or
+over 5 min are ignored, and the timer stops while the screen is hidden or the app paused.
+Each timed page moves a rolling average a tenth of the way (`updatedSpeed`), kept in
+`lightContext.dataStore` (key `reading_chars_per_minute`, a float; missing = 1,400).
 If a chapter takes more than 300 ms to read and page (a huge chapter, or the library still
 busy), the page area shows "Preparing…" (lighter, centered) and taps are ignored until the
 page is ready. Tapping the chapter title opens ReadingSettingsScreen.
 
 **ReadingSettingsScreen** — top bar: back, "Reading Settings". Opened by tapping the
-chapter title in the reader. Four stepper rows, each "Label   −  <value>  +" (drawn as text:
+chapter title in the reader. Stepper rows, each "Label   −  <value>  +" (drawn as text:
 the SDK has no minus icon; Typeface uses "‹ ›" since fonts aren't a quantity), then a
 "Theme  <name>" row that opens ThemeScreen, then a sample paragraph drawn with exactly the
-reader's body style and margins, so every change shows live. At either end of a range the
+reader's body style and margins, so every change shows live. Between them, after Margins:
+an "Alignment" stepper (‹ ›) and a "Progress line  On/Off" row (the word plus the
+`TOGGLE_STATE_ON/OFF` icon; tap the row to switch). At either end of a range the
 button is lighter and does nothing (the value's name, not the tone, says where you are).
 
 - **Text size** (`ReaderTextSize`): Small 0.85×, **Medium 1.0× (default)**, Large 1.15×,
@@ -357,12 +382,18 @@ button is lighter and does nothing (the value's name, not the tone, says where y
   1.7 × the text size.
 - **Margins** (`ReaderMargins`): left and right margin of the page, Narrow 0.75, **Normal
   1.5 (default)**, Wide 2.5 grid units.
+- **Alignment** (`ReaderAlignment`): **Left (default)** — `TextAlign.Start`,
+  `LineBreak.Simple`, `Hyphens.None`, the page the reader always had — or Justified —
+  `TextAlign.Justify`, `LineBreak.Paragraph`, `Hyphens.Auto`. Only the body text: headings
+  keep their own style, scene breaks stay centered, block quotes keep their indent.
+- **Progress line**: On (default) / Off (above, under ReaderScreen).
 
-Back returns all four as one `ReaderSettings` via `goBack(settings)`; ReaderScreen saves
+Back returns all six as one `ReaderSettings` via `goBack(settings)`; ReaderScreen saves
 them and re-paginates. One set for all books, remembered in `lightContext.dataStore` by
 `ReaderSettingsPreference` (keys `reader_text_size`, `reader_typeface`,
-`reader_line_spacing`, `reader_margins`, each the enum name; missing/unknown = that
-setting's default). Any change of style or page width re-paginates anchored at the reader's
+`reader_line_spacing`, `reader_margins`, `reader_alignment`, each the enum name, and
+`reader_progress_line`, a boolean; missing/unknown = that setting's default). Any change of
+style, page width or page height (the progress line on or off) re-paginates anchored at the reader's
 place — the first character of the page last turned or jumped to (`anchorOffset`), which
 re-paging does not move — so switching back and forth never drifts off the passage.
 

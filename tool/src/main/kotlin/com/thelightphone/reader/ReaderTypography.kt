@@ -1,11 +1,21 @@
 package com.thelightphone.reader
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.ParagraphStyle
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.Hyphens
 import androidx.compose.ui.text.style.LineBreak
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.em
+import com.thelightphone.reader.epub.StyleRange
+import com.thelightphone.reader.epub.TextStyleKind
 import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.designVerticalPxToSp
 
@@ -66,4 +76,41 @@ private fun ReaderTypeface.fontFamily(lightFont: FontFamily?): FontFamily? = whe
 private fun TextUnit.scaledForReading(scale: Float): TextUnit {
     if (this == TextUnit.Unspecified) return this
     return (value * scale).designVerticalPxToSp()
+}
+
+/** How far a block quote is indented, in the text's own size (em). */
+private const val QUOTE_INDENT_EM = 1.5f
+
+/**
+ * A chapter's text with its italic, bold, block quotes (indented) and scene breaks
+ * (centered). The reader measures pages with this exact string and draws each page as a
+ * piece of it, so what is measured is what is drawn (CLAUDE.md 7). No colors here: the
+ * theme's color comes from the body style.
+ */
+fun styledChapterText(text: String, styles: List<StyleRange>): AnnotatedString {
+    val valid = styles.filter { it.start in 0 until it.end && it.end <= text.length }
+    // Compose needs paragraph styles in order and never overlapping.
+    var lastParagraphEnd = 0
+    val paragraphRanges = valid.filter { it.style.isParagraphStyle() }.sortedBy { it.start }.filter { range ->
+        (range.start >= lastParagraphEnd).also { ok -> if (ok) lastParagraphEnd = range.end }
+    }
+    val spanRanges = valid.filterNot { it.style.isParagraphStyle() }
+    return AnnotatedString(
+        text = text,
+        spanStyles = spanRanges.map { AnnotatedString.Range(it.style.spanStyle(), it.start, it.end) },
+        paragraphStyles = paragraphRanges.map { AnnotatedString.Range(it.style.paragraphStyle(), it.start, it.end) },
+    )
+}
+
+private fun TextStyleKind.isParagraphStyle() = this == TextStyleKind.QUOTE || this == TextStyleKind.SCENE_BREAK
+
+private fun TextStyleKind.spanStyle(): SpanStyle = when (this) {
+    TextStyleKind.BOLD -> SpanStyle(fontWeight = FontWeight.Bold)
+    else -> SpanStyle(fontStyle = FontStyle.Italic)
+}
+
+private fun TextStyleKind.paragraphStyle(): ParagraphStyle = when (this) {
+    TextStyleKind.SCENE_BREAK -> ParagraphStyle(textAlign = TextAlign.Center)
+    // The same indent on every line, so a page that starts mid-quote wraps just as it was measured.
+    else -> ParagraphStyle(textIndent = TextIndent(firstLine = QUOTE_INDENT_EM.em, restLine = QUOTE_INDENT_EM.em))
 }

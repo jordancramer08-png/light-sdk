@@ -5,7 +5,8 @@ import kotlinx.serialization.Serializable
 /**
  * One book as cached in `<filesDir>/library/<slug>/meta.json` (CLAUDE.md 6).
  * The first four fields are the September app's meta.json, unchanged.
- * Parser version 2 added the series and each chapter's word count.
+ * Parser version 2 added the series and each chapter's word count; version 3 each
+ * chapter's place in the contents (depth, parents).
  */
 @Serializable
 data class BookMeta(
@@ -25,7 +26,12 @@ data class BookMeta(
     val words: Long get() = chapters.sumOf { it.words.toLong() }
 }
 
-/** `index` is 1-based and counts chapters after filtering; `file` is e.g. "001.txt". */
+/**
+ * `index` is 1-based and counts chapters after filtering; `file` is e.g. "001.txt" (its
+ * italic, bold, quotes and scene breaks, if any, are in "001.styles.json").
+ * [parents] are the titles of the contents entries above this chapter, outermost first
+ * (e.g. "BOOK 1: GARDENS OF THE MOON", "Book One: Pale"); [depth] is how many there are.
+ */
 @Serializable
 data class ChapterMeta(
     val index: Int,
@@ -34,6 +40,8 @@ data class ChapterMeta(
     val chars: Int,
     /** Words in this chapter, counted once when the book was prepared. */
     val words: Int = 0,
+    val depth: Int = 0,
+    val parents: List<String> = emptyList(),
 )
 
 /**

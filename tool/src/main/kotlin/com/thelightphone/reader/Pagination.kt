@@ -1,5 +1,7 @@
 package com.thelightphone.reader
 
+import com.thelightphone.reader.epub.StyleRange
+
 /**
  * How a chapter is cut into pages, in plain Kotlin so it can be unit-tested on the PC.
  * ReaderScreen measures the chapter with Compose and hands the lines to [paginate].
@@ -22,6 +24,26 @@ data class PageRange(val start: Int, val endExclusive: Int) {
  * this spaced-out text, as they were in the September app.
  */
 fun withExtraParagraphSpacing(text: String): String = text.replace("\n\n", "\n\n\n")
+
+/**
+ * The chapter's style ranges moved to match [withExtraParagraphSpacing]: each paragraph
+ * break before an offset adds one character. [text] is the chapter as stored (not spaced).
+ */
+fun withExtraParagraphSpacing(styles: List<StyleRange>, text: String): List<StyleRange> {
+    if (styles.isEmpty()) return styles
+    // Where each paragraph starts; every one after the first follows a "\n\n".
+    val paragraphStarts = mutableListOf<Int>()
+    var i = text.indexOf("\n\n")
+    while (i >= 0) {
+        paragraphStarts.add(i + 2)
+        i = text.indexOf("\n\n", i + 2)
+    }
+    fun spaced(offset: Int): Int {
+        val breaksBefore = paragraphStarts.binarySearch(offset).let { if (it >= 0) it + 1 else -it - 1 }
+        return offset + breaksBefore
+    }
+    return styles.map { it.copy(start = spaced(it.start), end = spaced(it.end)) }
+}
 
 /**
  * Fills each page with as many whole lines as fit. The first page is shorter

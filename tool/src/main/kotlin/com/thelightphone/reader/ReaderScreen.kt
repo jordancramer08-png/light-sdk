@@ -58,11 +58,16 @@ sealed interface ReaderScreenState {
     data object Loading : ReaderScreenState
 
     /** A chapter is taking a while to read and page (a huge one): "Preparing…" shows. */
-    data class Preparing(val chapterTitle: String) : ReaderScreenState
+    data class Preparing(val barTitle: String) : ReaderScreenState
 
+    /**
+     * [barTitle] is for the top bar ("BOOK 1: GARDENS OF THE MOON · Chapter One");
+     * [chapterTitle] heads the chapter's first page.
+     */
     data class Loaded(
+        val barTitle: String,
         val chapterTitle: String,
-        val pageText: String,
+        val pageText: AnnotatedString,
         val isChapterStart: Boolean,
     ) : ReaderScreenState
 }
@@ -113,7 +118,7 @@ class ReaderScreenViewModel(
     /** The chapter being read; Contents opens scrolled to it. */
     var currentChapterIndex: Int = bookMeta.chapters.firstOrNull()?.index ?: 1
         private set
-    private var currentText: String = ""
+    private var currentText: AnnotatedString = AnnotatedString("")
     private var currentPages: List<PageRange> = emptyList()
     private var currentPageIndex: Int = 0
 
@@ -124,7 +129,7 @@ class ReaderScreenViewModel(
      */
     private var anchorOffset: Int = 0
 
-    private val chapterTextCache = mutableMapOf<Int, String>()
+    private val chapterTextCache = mutableMapOf<Int, AnnotatedString>()
     private val pageCache = mutableMapOf<Int, List<PageRange>>()
     private var loadJob: Job? = null
 
@@ -216,12 +221,10 @@ class ReaderScreenViewModel(
             // Usually done in a blink. If not, say so rather than show a stale or empty page.
             val slowNotice = launch {
                 delay(PREPARING_NOTICE_DELAY_MS)
-                _state.value = ReaderScreenState.Preparing(chapter.title)
+                _state.value = ReaderScreenState.Preparing(readerBarTitle(chapter))
             }
             val text = chapterTextCache.getOrPut(chapter.index) {
-                withContext(Dispatchers.IO) {
-                    withExtraParagraphSpacing(libraryStore.chapterText(bookMeta, chapter).orEmpty())
-                }
+                withContext(Dispatchers.IO) { readStyledChapter(chapter) }
             }
             val pages = pageCache.getOrPut(chapter.index) {
                 withContext(Dispatchers.Default) { pageChapter(layout, chapter.title, text) }
@@ -231,9 +234,16 @@ class ReaderScreenViewModel(
             currentText = text
             currentPages = pages
             // Re-paging or reopening isn't the reader moving, so it never marks the book Finished.
-            showPage(pageIndexFor(pages, text, targetOffset), movedByReader = !keepAnchor && !isReopening)
+            showPage(pageIndexFor(pages, text.text, targetOffset), movedByReader = !keepAnchor && !isReopening)
             if (keepAnchor) anchorOffset = targetOffset
         }
+    }
+
+    /** The chapter's text with its styles, spaced out for the page (see [withExtraParagraphSpacing]). */
+    private fun readStyledChapter(chapter: ChapterMeta): AnnotatedString {
+        val text = libraryStore.chapterText(bookMeta, chapter).orEmpty()
+        val styles = libraryStore.chapterStyles(bookMeta, chapter)
+        return styledChapterText(withExtraParagraphSpacing(text), withExtraParagraphSpacing(styles, text))
     }
 
     /** [movedByReader]: a page turn or a Contents jump, as opposed to reopening or re-paging. */
@@ -241,10 +251,13 @@ class ReaderScreenViewModel(
         currentPageIndex = pageIndex
         val page = currentPages[pageIndex]
         anchorOffset = page.start
+        val chapter = chapter(currentChapterIndex)
+        // Trailing blank lines are part of the page's range but don't need drawing.
+        val drawnLength = currentText.text.substring(page.start, page.endExclusive).trimEnd().length
         _state.value = ReaderScreenState.Loaded(
-            chapterTitle = chapter(currentChapterIndex)?.title ?: bookMeta.title,
-            // Trailing blank lines are part of the page's range but don't need drawing.
-            pageText = currentText.substring(page.start, page.endExclusive).trimEnd(),
+            barTitle = chapter?.let(::readerBarTitle) ?: bookMeta.title,
+            chapterTitle = chapter?.title ?: bookMeta.title,
+            pageText = currentText.subSequence(page.start, page.start + drawnLength),
             isChapterStart = pageIndex == 0,
         )
         savePosition()
@@ -289,16 +302,19 @@ class ReaderScreenViewModel(
     }
 }
 
-/** Measures the chapter with the page's own style and cuts it into pages. */
-private fun pageChapter(layout: PageLayout, title: String, text: String): List<PageRange> {
+/**
+ * Measures the chapter with the page's own style and cuts it into pages. [text] carries the
+ * italics, bold, quotes and scene breaks, since they change where lines wrap.
+ */
+private fun pageChapter(layout: PageLayout, title: String, text: AnnotatedString): List<PageRange> {
     val constraints = Constraints(maxWidth = layout.widthPx)
     val headingHeightPx = layout.measurer
         .measure(AnnotatedString(title), style = layout.headingStyle, constraints = constraints)
         .size.height
     val firstPageHeightPx = (layout.heightPx - headingHeightPx - layout.headingGapPx)
         .coerceAtLeast(layout.heightPx / 2)
-    val body = layout.measurer.measure(AnnotatedString(text), style = layout.bodyStyle, constraints = constraints)
-    return paginate(body.lines(text), text.length, layout.heightPx, firstPageHeightPx)
+    val body = layout.measurer.measure(text, style = layout.bodyStyle, constraints = constraints)
+    return paginate(body.lines(text.text), text.length, layout.heightPx, firstPageHeightPx)
 }
 
 private fun TextLayoutResult.lines(text: String): List<TextLine> =
@@ -342,8 +358,8 @@ class ReaderScreen(
         val state by viewModel.state.collectAsState()
         val settings by viewModel.settings.collectAsState()
         val topTitle = when (val current = state) {
-            is ReaderScreenState.Loaded -> current.chapterTitle
-            is ReaderScreenState.Preparing -> current.chapterTitle
+            is ReaderScreenState.Loaded -> current.barTitle
+            is ReaderScreenState.Preparing -> current.barTitle
             ReaderScreenState.Loading -> bookMeta.title
         }
 

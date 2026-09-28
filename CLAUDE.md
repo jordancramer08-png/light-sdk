@@ -91,8 +91,9 @@ slug) are kept, so a book sent again opens where Jordan stopped and is back in i
 ```
 reader/
   epub/        pure Kotlin, NO Android imports — unit-testable on the PC
-    EpubParser.kt       zip → Book(title, author, chapters[title, text])
-    HtmlText.kt         XHTML → plain text (paragraphs split by one blank line)
+    EpubParser.kt       zip → Book(title, author, chapters[title, text, styles, parents])
+    HtmlText.kt         XHTML → plain text (paragraphs split by one blank line) + StyleRanges
+                        (italic, bold, quote, scene break)
     ContentFilter.kt    drops covers, title pages, ads, embedded TOCs, praise pages
     Series.kt           series + number: OPF metadata (calibre, then EPUB 3), else file name
     WordCount.kt        countWords (runs of non-space holding a letter or digit)
@@ -113,13 +114,15 @@ reader/
   ReaderTextSize.kt     the five text sizes (pure Kotlin, unit-tested)
   ReaderSettings.kt     ReaderSettings (size + typeface + line spacing + margins) and the
                         ReaderTypeface / ReaderLineSpacing / ReaderMargins choices (pure Kotlin, unit-tested)
-  ReaderTypography.kt   reader body + heading TextStyles for a ReaderSettings (shared with ReadingSettingsScreen)
+  ReaderTypography.kt   reader body + heading TextStyles for a ReaderSettings (shared with ReadingSettingsScreen),
+                        and styledChapterText (chapter text + StyleRanges → AnnotatedString)
   ReaderTheme.kt        the four themes: LightColors + accent each
   ReaderThemeController.kt  the app-wide current theme; ThemedScreen frame every screen uses
   ReadingLists.kt       list logic: LibraryView, listRows, neighbourSlug (pure Kotlin, unit-tested)
   ReadingStatus.kt      ReadingStatus, LibraryFilter, statusAfterOpening (pure Kotlin, unit-tested)
   SeriesGroups.kt       LibraryEntry (a book or a series row), libraryEntries (pure Kotlin, unit-tested)
   BookDetails.kt        the Book Details rows: reading time, time left, sizes, dates (pure Kotlin, unit-tested)
+  ChapterTree.kt        contentsRows (Contents with headings), readerBarTitle (pure Kotlin, unit-tested)
   LibraryScreen.kt, SortFilterScreen.kt, ContentsScreen.kt, ReaderScreen.kt, ReadingSettingsScreen.kt,
   ThemeScreen.kt, ListsScreen.kt, ListNameScreen.kt, DeleteListScreen.kt, ListBooksScreen.kt,
   AddToListScreen.kt, BookDetailsScreen.kt, SeriesScreen.kt, Divider.kt, RowIconButton.kt
@@ -132,9 +135,31 @@ tool/schemas/           Room's saved schema for each database version (checked i
 changes, or `PARSER_VERSION` is bumped), parse it and write
 `<filesDir>/library/<slug>/meta.json` + `001.txt`, `002.txt`, … Every later open reads the
 cache. meta.json also holds the series (`series`, `seriesNumber`, when there is one) and each
-chapter's word count (`words`), counted once at this step (`PARSER_VERSION` 2). Delete cache
-folders whose EPUB is gone. Parsing runs on `Dispatchers.IO`, one book at a time; the library
-shows "Preparing N books…" meanwhile.
+chapter's word count (`words`), counted once at this step (`PARSER_VERSION` 2), and each
+chapter's place in the contents: `depth` and `parents` (the titles of the NCX / nav entries
+above it, outermost first) (`PARSER_VERSION` 3). Delete cache folders whose EPUB is gone.
+Parsing runs on `Dispatchers.IO`, one book at a time; the library shows "Preparing N books…"
+meanwhile.
+
+**Formatting (`PARSER_VERSION` 3).** `NNN.txt` stays plain text, and saved places are still
+character offsets into it (a scene break adds a "⁂" paragraph, so a place saved before
+version 3 can land a page early in a book that has them). A chapter with any formatting also gets
+`NNN.styles.json`: a list of `{style, start, end}` ranges by character offset in `NNN.txt`
+(`StyleRange`; no file = no formatting). Kept: italic (`i`, `em`, `cite`), bold (`b`,
+`strong`), block quotes (`blockquote`, one QUOTE range over its paragraphs, drawn indented
+1.5 em on every line) and scene breaks (`hr`, and paragraphs that are only asterisks or
+ornaments: "* * *", "***", "⁂", "#", "~" …). A scene break becomes its own "⁂" paragraph,
+drawn centered; repeated ones merge, and none opens or ends a chapter. Italic or bold set by
+CSS classes (`<span class="italic">`) is not detected.
+
+**Nested contents.** The NCX `navPoint`s (or nav `<ol>`s) are read as a tree; the first
+entry pointing at a file gives it its title and its `parents`. A heading page too short to be
+a chapter ("Book One: Pale") is dropped as before, but still shows in Contents, rebuilt from
+the chapters' `parents` (`contentsRows`). A file the contents doesn't list sits under the
+entry before it if that entry has children, else beside it; if that entry was a dropped leaf
+divider page (e.g. a one-word "Prologue" page, and not a front-matter title) and this is the
+very next file, it takes the divider's title instead of "Chapter N". Chapter anchors inside
+one file (`ch.html#ch05`) don't split it: one spine file is one chapter.
 
 **Parse with plain Kotlin string handling, not `XmlPullParser` / `android.util.Xml`.** EPUB
 XHTML in the wild is often not valid XML (HTML entities like `&nbsp;`, stray tags), and the
@@ -196,7 +221,9 @@ git ls-tree -r --name-only f59672f -- tool      # the full list
   height) but drew them with `LightText(variant = Paragraph)`, a different style — pages could
   under- or over-fill. **Draw with exactly the `TextStyle` you measure with** (the Bible
   tool's `ChapterScreen` on `main` does this with `Text(text, style = bodyStyle)`). Same for
-  the chapter heading.
+  the chapter heading. With formatting (§6) the chapter is one `AnnotatedString`
+  (`styledChapterText`, its ranges shifted for the extra paragraph spacing): pages are
+  measured with it, and each page is drawn as a `subSequence` of that same string.
 
 ## 8. Library order and display
 
@@ -278,7 +305,11 @@ switch (`TOGGLE_STATE_ON/OFF`); tapping a row puts the book at the end of that l
 it out. Any number of lists.
 
 **ReaderScreen** — top bar: back, the current chapter title, and a `LightIcons.LIST` button
-that opens Contents. Paged text below (§7). Opening a book makes a Want to Read book
+that opens Contents. When the chapter sits under a heading, the title reads
+"<top-level heading> · <chapter title>" ("BOOK 1: GARDENS OF THE MOON · Chapter One";
+`readerBarTitle`, one line, ellipsized by the SDK). The heading on a chapter's first page is
+always just the chapter title. Paged text below (§7), with italic, bold, indented block
+quotes and centered "⁂" scene breaks (§6). Opening a book makes a Want to Read book
 Reading (Reading and Finished stay as they are). A page turn or Contents jump that lands on
 the last page of the last chapter makes it Finished; reopening the book on that page, or
 re-paging, does not (so a hand-set status isn't undone just by opening the book).
@@ -320,10 +351,13 @@ Sepia, Night (dark gray, warm text). Each is a `LightColors` plus an accent colo
 the enum name; missing/unknown = Dark), and goes back. A theme change never re-pages the
 book. Every screen draws inside `ThemedScreen { }`.
 
-**ContentsScreen** — the book's chapters; tapping one returns its index to ReaderScreen via
-`goBack(index)`, which jumps to that chapter's start in place. A `LightLazyScrollView` of
-4-grid-unit `UniformRow`s (titles one line, ellipsized); it opens with the chapter being
-read as the top row. Bottom bar: "ADD TO LIST" (→ AddToListScreen), "DETAILS"
+**ContentsScreen** — the book's chapters, with their headings (`contentsRows`, §6); tapping
+one returns its index to ReaderScreen via `goBack(index)`, which jumps to that chapter's
+start in place. Tapping a heading jumps to the first readable chapter under it. Headings (and
+chapters with others nested under them) are drawn in the theme's accent; every row is
+indented 1.25 grid units per level (up to 4 levels), so the nesting shows by position too.
+A `LightLazyScrollView` of 4-grid-unit `UniformRow`s (titles one line, ellipsized); it opens
+with the chapter being read as the top row. Bottom bar: "ADD TO LIST" (→ AddToListScreen), "DETAILS"
 (→ BookDetailsScreen).
 
 **Reading status** — each book is Want to Read (default, no row saved), Reading or Finished

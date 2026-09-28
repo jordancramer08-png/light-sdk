@@ -4,8 +4,10 @@ import com.thelightphone.reader.epub.Book
 import com.thelightphone.reader.epub.DrmProtectedException
 import com.thelightphone.reader.epub.EpubParser
 import com.thelightphone.reader.epub.PARSER_VERSION
+import com.thelightphone.reader.epub.StyleRange
 import com.thelightphone.reader.epub.countWords
 import com.thelightphone.reader.epub.slugify
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.io.File
 
@@ -13,7 +15,8 @@ import java.io.File
  * The books on the phone (CLAUDE.md 5, 6).
  *
  * EPUBs sit in `<filesDir>/shared/books/`. Each one is parsed once and cached as
- * `<filesDir>/library/<slug>/meta.json` plus `001.txt`, `002.txt`, … Later opens
+ * `<filesDir>/library/<slug>/meta.json` plus `001.txt`, `002.txt`, … (plain text) and,
+ * for chapters with any italic, bold, quotes or scene breaks, `001.styles.json`, … Later opens
  * read the cache. A book is parsed again when its file size or modified time
  * changes, or when [PARSER_VERSION] is bumped. Cache folders whose EPUB is gone
  * are deleted.
@@ -68,6 +71,18 @@ class LibraryStore(
         return if (file.isFile) file.readText() else null
     }
 
+    /** One chapter's italic, bold, quotes and scene breaks; none if it has no styles file (or it's unreadable). */
+    @Synchronized
+    fun chapterStyles(book: BookMeta, chapter: ChapterMeta): List<StyleRange> {
+        val file = File(File(libraryDir, book.slug), stylesFileName(chapter.file))
+        if (!file.isFile) return emptyList()
+        return try {
+            json.decodeFromString(STYLES_SERIALIZER, file.readText())
+        } catch (e: IllegalArgumentException) { // includes SerializationException
+            emptyList()
+        }
+    }
+
     // --- cache rules ----------------------------------------------------------
 
     /**
@@ -103,12 +118,17 @@ class LibraryStore(
         val chapters = book.chapters.mapIndexed { i, chapter ->
             val fileName = chapterFileName(i + 1)
             File(folder, fileName).writeText(chapter.text)
+            if (chapter.styles.isNotEmpty()) {
+                File(folder, stylesFileName(fileName)).writeText(json.encodeToString(STYLES_SERIALIZER, chapter.styles))
+            }
             ChapterMeta(
                 index = i + 1,
                 title = chapter.title,
                 file = fileName,
                 chars = chapter.text.length,
                 words = countWords(chapter.text),
+                depth = chapter.depth,
+                parents = chapter.parents,
             )
         }
         val meta = BookMeta(slug, book.title, book.author, chapters, stamp, series = book.series, seriesNumber = book.seriesNumber)
@@ -162,9 +182,13 @@ class LibraryStore(
 
     companion object {
         private const val META_FILE = "meta.json"
+        private val STYLES_SERIALIZER = ListSerializer(StyleRange.serializer())
 
         /** "001.txt", "002.txt", … */
         fun chapterFileName(index: Int): String = index.toString().padStart(3, '0') + ".txt"
+
+        /** "001.txt" -> "001.styles.json" */
+        fun stylesFileName(chapterFile: String): String = chapterFile.substringBeforeLast('.') + ".styles.json"
 
         /** `slug`, or `slug-2`, `slug-3`, … if that's already taken by another book. */
         fun uniqueSlug(slug: String, slugsInUse: Set<String>): String {

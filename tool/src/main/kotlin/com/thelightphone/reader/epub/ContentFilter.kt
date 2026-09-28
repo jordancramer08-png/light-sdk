@@ -50,7 +50,11 @@ private fun looksLikeAPraisePage(text: String): Boolean {
 fun isNonContent(title: String?, text: String): Boolean {
     if (text.length < MIN_CONTENT_CHARS) return true
     if (looksLikeAListing(text) || looksLikeAPraisePage(text)) return true
-    if (title == null) return false
+    return title != null && isNonContentTitle(title)
+}
+
+/** A front- or back-matter title ("Cover", "Copyright", "Also by …") or an ad slug. */
+fun isNonContentTitle(title: String): Boolean {
     val normalized = title.trim().trimEnd(':').trim().lowercase()
     if (normalized in NON_CONTENT_TITLES || normalized.startsWith("also by ")) return true
     return AD_SLUG_RE.matches(title.trim())

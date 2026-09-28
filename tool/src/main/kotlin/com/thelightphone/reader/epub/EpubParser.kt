@@ -6,7 +6,18 @@ import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction
 import java.util.zip.ZipFile
 
-data class Chapter(val title: String, val text: String)
+/**
+ * One readable chapter. [parents] are the titles of the table-of-contents entries above it,
+ * outermost first (e.g. "BOOK 1: GARDENS OF THE MOON", "Book One: Pale"); empty at the top.
+ */
+data class Chapter(
+    val title: String,
+    val text: String,
+    val styles: List<StyleRange> = emptyList(),
+    val parents: List<String> = emptyList(),
+) {
+    val depth: Int get() = parents.size
+}
 data class Book(
     val title: String,
     val author: String,
@@ -25,7 +36,7 @@ class InvalidEpubException(message: String) : EpubParseException(message)
  * Bump this whenever a change here (or in HtmlText / ContentFilter) would change a
  * book's chapters or text. The library cache sees the new number and re-parses every book.
  */
-const val PARSER_VERSION = 2 // 2: series, and word counts in the cache
+const val PARSER_VERSION = 3 // 2: series, and word counts. 3: italic/bold/quotes/scene breaks, nested contents
 
 private const val CONTAINER_PATH = "META-INF/container.xml"
 private const val DRM_MARKER_PATH = "META-INF/encryption.xml"
@@ -34,8 +45,9 @@ private val CONTENT_MEDIA_TYPES = setOf("application/xhtml+xml", "text/html")
 /**
  * Parses an EPUB into a [Book]: container.xml -> OPF -> metadata (dc:title,
  * dc:creator) -> manifest -> spine (skip `linear="no"`, skip the nav item,
- * only xhtml/html media types) -> chapter titles from the NCX first, nav.xhtml
- * fallback -> HTML flattened to text -> non-content filtering -> untitled
+ * only xhtml/html media types) -> chapter titles and their nesting from the NCX
+ * first, nav.xhtml fallback -> HTML flattened to text (italic, bold, quotes and
+ * scene breaks kept as style ranges) -> non-content filtering -> untitled
  * chapters numbered "Chapter N". Ported from `convert.py` (see CLAUDE.md
  * section 7) — the phone parses EPUBs itself instead of reading pre-converted
  * text from the PC.
@@ -53,9 +65,12 @@ object EpubParser {
             val (title, author) = readMetadata(opfRoot)
             val manifest = readManifest(opfRoot, opfDir)
             val (spineItems, tocId) = readSpine(opfRoot)
-            val titles = loadTitles(zip, manifest, tocId)
+            val toc = loadToc(zip, manifest, tocId)
 
             val chapters = mutableListOf<Chapter>()
+            var lastPlace: TocPlace? = null
+            // A divider page ("Prologue") too short to keep, whose text is in the next, unlisted file.
+            var dividerTitle: String? = null
             for ((idref, linear) in spineItems) {
                 if (!linear) continue
                 val item = manifest[idref] ?: continue
@@ -64,11 +79,19 @@ object EpubParser {
                 val entry = zip.getEntry(item.href) ?: continue
                 val bytes = zip.getInputStream(entry).use { it.readBytes() }
                 val html = decodeHtmlBytes(bytes, item.href)
-                val text = extractText(html)
-                if (text.isEmpty()) continue
-                val rawTitle = titles[item.href]
-                if (isNonContent(rawTitle, text)) continue
-                chapters.add(Chapter(title = rawTitle ?: "Chapter ${chapters.size + 1}", text = text))
+                val styled = extractStyledText(html)
+                val place = toc[item.href]
+                // A file the contents doesn't list sits beside (or under) the entry before it.
+                val parents = place?.parents ?: lastPlace?.parentsOfNext().orEmpty()
+                if (place != null) lastPlace = place
+                if (styled.text.isEmpty() || isNonContent(place?.title, styled.text)) {
+                    val isDivider = place != null && !place.hasChildren && !isNonContentTitle(place.title)
+                    dividerTitle = if (isDivider) place?.title else null
+                    continue
+                }
+                val title = place?.title ?: dividerTitle ?: "Chapter ${chapters.size + 1}"
+                dividerTitle = null
+                chapters.add(Chapter(title, styled.text, styled.styles, parents))
             }
 
             if (chapters.isEmpty()) throw InvalidEpubException("no readable chapters found")
@@ -126,17 +149,48 @@ private fun readSpine(opfRoot: XmlNode): Pair<List<Pair<String, Boolean>>, Strin
     return items to spineEl.attrs["toc"]
 }
 
-/** Chapter titles keyed by resolved content href, per CLAUDE.md: NCX first, nav.xhtml fallback. */
-private fun loadTitles(zip: ZipFile, manifest: Map<String, ManifestItem>, tocId: String?): Map<String, String> {
+/**
+ * Where a content file sits in the table of contents: its title, the titles of the
+ * entries above it (outermost first), and whether other entries are nested under it.
+ */
+private data class TocPlace(val title: String, val parents: List<String>, val hasChildren: Boolean) {
+    /** The parents of a file that follows this one without a contents entry of its own. */
+    fun parentsOfNext(): List<String> = if (hasChildren) parents + title else parents
+}
+
+/**
+ * One entry of the NCX or nav contents. [href] is the resolved content file, or null for a
+ * heading with no link of its own.
+ */
+private class TocEntry(val title: String, val href: String?, val children: List<TocEntry>)
+
+/** Each content file's place in the contents, keyed by resolved href: NCX first, nav.xhtml fallback. */
+private fun loadToc(zip: ZipFile, manifest: Map<String, ManifestItem>, tocId: String?): Map<String, TocPlace> {
     val ncxItem = tocId?.let { manifest[it] } ?: manifest.values.firstOrNull { it.mediaType == "application/x-dtbncx+xml" }
-    if (ncxItem != null) {
-        return readNcxTitles(zip, ncxItem.href).mapValues { repairTitle(it.value) }
-    }
+    if (ncxItem != null) return placesByHref(readNcxEntries(zip, ncxItem.href))
     val navItem = manifest.values.firstOrNull { "nav" in it.properties }
-    if (navItem != null) {
-        return readNavDocTitles(zip, navItem.href).mapValues { repairTitle(it.value) }
-    }
+    if (navItem != null) return placesByHref(readNavDocEntries(zip, navItem.href))
     return emptyMap()
+}
+
+/**
+ * Walks the contents in reading order. The first entry pointing at a file wins, so a
+ * whole-chapter entry's title is kept even when later entries point into the same file at
+ * a finer (e.g. scene-level) granularity.
+ */
+private fun placesByHref(entries: List<TocEntry>): Map<String, TocPlace> {
+    val places = LinkedHashMap<String, TocPlace>()
+    fun walk(list: List<TocEntry>, parents: List<String>) {
+        for (entry in list) {
+            val title = repairTitle(entry.title)
+            if (entry.href != null) {
+                places.putIfAbsent(entry.href, TocPlace(title, parents, hasChildren = entry.children.isNotEmpty()))
+            }
+            walk(entry.children, parents + title)
+        }
+    }
+    walk(entries, emptyList())
+    return places
 }
 
 // Some publishers' NCX/nav titles are generated by flattening styled text runs
@@ -172,43 +226,51 @@ private fun splitWordAndNumeral(word: String): String {
     return word
 }
 
-private fun readNcxTitles(zip: ZipFile, ncxPath: String): Map<String, String> {
+private fun readNcxEntries(zip: ZipFile, ncxPath: String): List<TocEntry> {
     val ncxDir = zipDirname(ncxPath)
     val wrapperRoot = parseXml(readZipText(zip, ncxPath))
-    val ncxRoot = firstChild(wrapperRoot, "ncx") ?: return emptyMap()
-    val navMap = firstChild(ncxRoot, "navmap") ?: return emptyMap()
-    val titles = LinkedHashMap<String, String>()
+    val ncxRoot = firstChild(wrapperRoot, "ncx") ?: return emptyList()
+    val navMap = firstChild(ncxRoot, "navmap") ?: return emptyList()
 
-    fun walk(el: XmlNode) {
-        for (navPoint in directChildren(el, "navpoint")) {
-            val labelText = firstChild(navPoint, "navlabel")
-                ?.let { firstChild(it, "text") }
-                ?.let { directText(it).trim() }
-            val src = firstChild(navPoint, "content")?.attrs?.get("src")
-            if (!labelText.isNullOrEmpty() && !src.isNullOrEmpty()) {
-                // First occurrence wins, so a whole-chapter navPoint's title is kept
-                // even when later navPoints point into the same file at a finer
-                // (e.g. scene-level) granularity.
-                titles.putIfAbsent(resolvePath(ncxDir, src), labelText)
-            }
-            walk(navPoint)
-        }
+    fun entries(el: XmlNode): List<TocEntry> = directChildren(el, "navpoint").flatMap { navPoint ->
+        val title = firstChild(navPoint, "navlabel")
+            ?.let { firstChild(it, "text") }
+            ?.let { directText(it).trim() }
+            .orEmpty()
+        val src = firstChild(navPoint, "content")?.attrs?.get("src")?.takeIf { it.isNotEmpty() }
+        val children = entries(navPoint)
+        // An entry with no title can't be shown; its children move up a level.
+        if (title.isEmpty()) children else listOf(TocEntry(title, src?.let { resolvePath(ncxDir, it) }, children))
     }
-    walk(navMap)
-    return titles
+    return entries(navMap)
 }
 
-private fun readNavDocTitles(zip: ZipFile, navPath: String): Map<String, String> {
+/** The nav document's `<nav epub:type="toc">`: nested `<ol>`s of `<li>`, each an `<a>` (or a `<span>` heading). */
+private fun readNavDocEntries(zip: ZipFile, navPath: String): List<TocEntry> {
     val navDir = zipDirname(navPath)
     val root = parseXml(readZipText(zip, navPath))
-    val tocNav = allDescendants(root, "nav").firstOrNull { it.attrs["epub:type"] == "toc" } ?: return emptyMap()
-    val titles = LinkedHashMap<String, String>()
-    for (a in allDescendants(tocNav, "a")) {
-        val href = a.attrs["href"] ?: continue
-        val text = allText(a).replace(Regex("\\s+"), " ").trim()
-        if (text.isNotEmpty()) titles.putIfAbsent(resolvePath(navDir, href), text)
+    val tocNav = allDescendants(root, "nav").firstOrNull { it.attrs["epub:type"] == "toc" } ?: return emptyList()
+    val topList = firstDescendant(tocNav, "ol") ?: firstDescendant(tocNav, "ul") ?: return emptyList()
+
+    fun entries(list: XmlNode): List<TocEntry> = directChildren(list, "li").flatMap { li ->
+        val label = navLabelOf(li)
+        val title = label?.let { allText(it).replace(Regex("\\s+"), " ").trim() }.orEmpty()
+        val href = label?.takeIf { it.name == "a" }?.attrs?.get("href")?.takeIf { it.isNotEmpty() }
+        val sublist = firstChild(li, "ol") ?: firstChild(li, "ul")
+        val children = sublist?.let { entries(it) }.orEmpty()
+        if (title.isEmpty()) children else listOf(TocEntry(title, href?.let { resolvePath(navDir, it) }, children))
     }
-    return titles
+    return entries(topList)
+}
+
+/** The `<a>` or `<span>` that labels a nav `<li>`, looking past wrappers but not into its sub-list. */
+private fun navLabelOf(li: XmlNode): XmlNode? {
+    for (child in li.children.filterIsInstance<XmlNode>()) {
+        if (child.name == "ol" || child.name == "ul") continue
+        if (child.name == "a" || child.name == "span") return child
+        (firstDescendant(child, "a") ?: firstDescendant(child, "span"))?.let { return it }
+    }
+    return null
 }
 
 // --- zip / encoding helpers ---------------------------------------------------

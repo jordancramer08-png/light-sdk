@@ -70,6 +70,39 @@ class LibraryStoreTest {
     }
 
     @Test
+    fun stylesAreCachedBesideTheChapterText() {
+        val body = "<p>An <i>italic</i> word. ${EpubFixture.longParagraph("x")}</p>"
+        val styled = EpubFixture.ChapterSpec("c1", "c1.xhtml", body, navTitle = "One")
+        val plain = EpubFixture.chapter("c2", "Two", listOf(EpubFixture.longParagraph("y")))
+        EpubFixture.build(title = "Styled", chapters = listOf(styled, plain)).copyTo(File(booksDir, "a.epub"))
+
+        val book = store().refresh().single()
+        val text = store().chapterText(book, book.chapters[0])!!
+        val italic = store().chapterStyles(book, book.chapters[0]).single()
+
+        assertEquals("italic", text.substring(italic.start, italic.end))
+        assertTrue(File(libraryDir, "styled/001.styles.json").isFile)
+        assertFalse(File(libraryDir, "styled/002.styles.json").exists()) // nothing to keep
+        assertEquals(emptyList(), store().chapterStyles(book, book.chapters[1]))
+    }
+
+    @Test
+    fun contentsNestingIsCachedPerChapter() {
+        val chapters = listOf(EpubFixture.chapter("c1", "One", listOf(EpubFixture.longParagraph("a"))))
+        val ncx = """<ncx><navMap><navPoint><navLabel><text>Part One</text></navLabel>
+            <navPoint><navLabel><text>One</text></navLabel><content src="c1.xhtml"/></navPoint>
+            </navPoint></navMap></ncx>"""
+        EpubFixture.build(title = "Nested", chapters = chapters, rawEntries = mapOf("OEBPS/toc.ncx" to ncx.toByteArray()))
+            .copyTo(File(booksDir, "a.epub"))
+
+        store().refresh()
+        val chapter = store().book("nested")!!.chapters.single()
+
+        assertEquals(1, chapter.depth)
+        assertEquals(listOf("Part One"), chapter.parents)
+    }
+
+    @Test
     fun wordCountsAreStoredPerChapter() {
         val chapter = EpubFixture.chapter("c1", "One", listOf(EpubFixture.longParagraph("Words here")))
         EpubFixture.build(title = "Counted", chapters = listOf(chapter)).copyTo(File(booksDir, "a.epub"))

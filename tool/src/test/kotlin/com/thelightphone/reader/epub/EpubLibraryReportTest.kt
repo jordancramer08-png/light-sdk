@@ -1,0 +1,66 @@
+package com.thelightphone.reader.epub
+
+import java.io.File
+import kotlin.test.Test
+
+/**
+ * Parses every real EPUB under the folder named by READER_TEST_EPUBS (recursively)
+ * and writes a report to build/epub-report.txt: one summary line per book, then
+ * full chapter titles + char counts per book. Skipped when the env var is unset,
+ * so it never runs on CI or a plain `testDebugUnitTest`. See CLAUDE.md section 10,
+ * phase 1.
+ */
+class EpubLibraryReportTest {
+
+    @Test
+    fun reportAgainstRealLibrary() {
+        val dirPath = System.getenv("READER_TEST_EPUBS") ?: return
+        val root = File(dirPath)
+        check(root.isDirectory) { "READER_TEST_EPUBS is not a directory: $dirPath" }
+
+        val epubFiles = root.walkTopDown()
+            .filter { it.isFile && it.extension.equals("epub", ignoreCase = true) }
+            .sortedBy { it.path }
+            .toList()
+
+        val summaryLines = mutableListOf<String>()
+        val detailBlocks = mutableListOf<String>()
+        var failureCount = 0
+
+        for (file in epubFiles) {
+            try {
+                val book = EpubParser.parse(file)
+                summaryLines.add("${file.name}\t\"${book.title}\" by ${book.author}\t${book.chapters.size} chapters")
+
+                val detail = StringBuilder()
+                detail.append("== ${file.name} ==\n")
+                detail.append("Title: ${book.title}\nAuthor: ${book.author}\n")
+                for (chapter in book.chapters) {
+                    detail.append("  ${chapter.title}  (${chapter.text.length} chars)\n")
+                }
+                detailBlocks.add(detail.toString())
+            } catch (e: DrmProtectedException) {
+                summaryLines.add("${file.name}\tCan't open (DRM)")
+                failureCount++
+            } catch (e: Exception) {
+                summaryLines.add("${file.name}\tERROR: ${e.message}")
+                failureCount++
+            }
+        }
+
+        val report = buildString {
+            append("READER_TEST_EPUBS report\n")
+            append("Source: $dirPath\n")
+            append("${epubFiles.size} EPUB(s) found, $failureCount failed/skipped\n\n")
+            append(summaryLines.joinToString("\n"))
+            append("\n\n")
+            append(detailBlocks.joinToString("\n"))
+        }
+
+        val outFile = File("build/epub-report.txt")
+        outFile.parentFile?.mkdirs()
+        outFile.writeText(report)
+
+        println("Wrote EPUB report for ${epubFiles.size} books (${failureCount} failed) to ${outFile.absolutePath}")
+    }
+}

@@ -50,7 +50,8 @@ September reader, on purpose, so this build *replaces* it. Never change the id i
 
 Jordan installs with `scripts\Build and Install Reader.cmd` (builds, `adb install -r`,
 offers to reboot). **After installing, the phone must reboot** — the LightOS launcher caches
-its menu. Books go onto the phone with `scripts\Send Books to Phone.cmd` (§5).
+its menu. Books go onto the phone with `scripts\Send Books to Phone.cmd` and come off it
+with `scripts\Remove Books from Phone.cmd` (§5).
 
 `local.properties` may contain private keys. **Never read, print, or commit it.**
 
@@ -60,7 +61,7 @@ This app lives on the **`reader`** branch of `jordancramer08-png/light-sdk`. The
 branch holds the Bible tool. **Never merge, rebase onto, or push to `main` from here.**
 Commit at the end of each phase with a plain message and `git push origin reader`.
 
-## 5. How books get onto the phone
+## 5. How books get onto (and off) the phone
 
 `scripts\Send Books to Phone.cmd` copies `.epub` files into the app's private storage:
 
@@ -77,6 +78,13 @@ debug builds are debuggable.) The app reads that folder with
 
 The September app left converted-text folders in `shared/books/<slug>/`. **Ignore
 subdirectories there** — only `*.epub` files are books.
+
+**Removing books.** `scripts\Remove Books from Phone.cmd` (→ `remove-books.ps1`) lists the
+`*.epub` files in `shared/books/` in a searchable, multi-select picker, shows the chosen
+ones, asks "Remove these N books? (Y/N)", deletes them with `run-as … rm`, then lists the
+books left. It deletes only the `.epub` files: the app drops the book's `library/<slug>/`
+cache on its next scan (§6), and saved places, reading lists and reading status (keyed by
+slug) are kept, so a book sent again opens where Jordan stopped and is back in its lists.
 
 ## 6. Architecture
 

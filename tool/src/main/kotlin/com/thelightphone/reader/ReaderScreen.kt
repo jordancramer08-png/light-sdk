@@ -28,7 +28,7 @@ import com.thelightphone.reader.data.BookMeta
 import com.thelightphone.reader.data.ChapterMeta
 import com.thelightphone.reader.data.LibraryStore
 import com.thelightphone.reader.data.readerDatabase
-import com.thelightphone.reader.data.ReaderTextSizePreference
+import com.thelightphone.reader.data.ReaderSettingsPreference
 import com.thelightphone.reader.data.ReadingPositionRepository
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
@@ -95,15 +95,15 @@ class ReaderScreenViewModel(
     private val bookMeta: BookMeta,
     private val libraryStore: LibraryStore,
     private val readingPositionRepository: ReadingPositionRepository,
-    private val textSizePreference: ReaderTextSizePreference,
+    private val settingsPreference: ReaderSettingsPreference,
 ) : LightViewModel<Unit>() {
 
     private val _state = MutableStateFlow<ReaderScreenState>(ReaderScreenState.Loading)
     val state: StateFlow<ReaderScreenState> = _state.asStateFlow()
 
-    /** The reading text size; null until it has been read from storage, so nothing is paged at the wrong size. */
-    private val _textSize = MutableStateFlow<ReaderTextSize?>(null)
-    val textSize: StateFlow<ReaderTextSize?> = _textSize.asStateFlow()
+    /** The reading settings; null until they have been read from storage, so nothing is paged with the wrong ones. */
+    private val _settings = MutableStateFlow<ReaderSettings?>(null)
+    val settings: StateFlow<ReaderSettings?> = _settings.asStateFlow()
 
     private var pageLayout: PageLayout? = null
 
@@ -116,7 +116,7 @@ class ReaderScreenViewModel(
 
     /**
      * The character the reader is at: the first character of the page they last turned or
-     * jumped to. Re-paging (a new text size) keeps it, so changing size back and forth
+     * jumped to. Re-paging (a new size, typeface, spacing or margin) keeps it, so changing back and forth
      * always returns to the same passage instead of creeping backwards.
      */
     private var anchorOffset: Int = 0
@@ -129,14 +129,14 @@ class ReaderScreenViewModel(
     private val saveDispatcher = Dispatchers.IO.limitedParallelism(1)
 
     init {
-        viewModelScope.launch { _textSize.value = textSizePreference.load() }
+        viewModelScope.launch { _settings.value = settingsPreference.load() }
     }
 
-    /** From TextSizeScreen: use the new size for every book, and remember it. */
-    fun changeTextSize(size: ReaderTextSize) {
-        if (size == _textSize.value) return
-        _textSize.value = size
-        viewModelScope.launch { textSizePreference.save(size) }
+    /** From ReadingSettingsScreen: use the new settings for every book, and remember them. */
+    fun changeSettings(settings: ReaderSettings) {
+        if (settings == _settings.value) return
+        _settings.value = settings
+        viewModelScope.launch { settingsPreference.save(settings) }
     }
 
     /** Called once the reading area has a size. Nothing can be paged before that. */
@@ -147,7 +147,7 @@ class ReaderScreenViewModel(
         if (previous == null) {
             loadSavedPosition()
         } else if (!layout.sameMetricsAs(previous)) {
-            // Page breaks move with the new size, so re-page from the same character.
+            // Page breaks move with the new style or width, so re-page from the same character.
             pageCache.clear()
             loadChapter(currentChapterIndex, anchorOffset, keepAnchor = true)
         }
@@ -313,13 +313,13 @@ class ReaderScreen(
         bookMeta,
         libraryStore,
         readingPositionRepository,
-        ReaderTextSizePreference(lightContext.dataStore),
+        ReaderSettingsPreference(lightContext.dataStore),
     )
 
     @Composable
     override fun Content() {
         val state by viewModel.state.collectAsState()
-        val textSize by viewModel.textSize.collectAsState()
+        val settings by viewModel.settings.collectAsState()
         val topTitle = when (val current = state) {
             is ReaderScreenState.Loaded -> current.chapterTitle
             is ReaderScreenState.Preparing -> current.chapterTitle
@@ -329,12 +329,12 @@ class ReaderScreen(
         ThemedScreen {
             LightTopBar(
                 leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
-                center = LightTopBarCenter.Text(topTitle, onClick = ::openTextSize),
+                center = LightTopBarCenter.Text(topTitle, onClick = ::openSettings),
                 rightButton = LightBarButton.LightIcon(icon = LightIcons.LIST, onClick = ::openContents),
             )
-            // Nothing is drawn until the saved text size is known (a moment at most).
-            textSize?.let { size ->
-                PageArea(state, size, modifier = Modifier.weight(1f).fillMaxWidth())
+            // Nothing is drawn until the saved settings are known (a moment at most).
+            settings?.let { current ->
+                PageArea(state, current, modifier = Modifier.weight(1f).fillMaxWidth())
             }
         }
     }
@@ -346,11 +346,11 @@ class ReaderScreen(
         )
     }
 
-    /** Tapping the chapter title opens Text Size; the chosen size comes back when it closes. */
-    private fun openTextSize() {
+    /** Tapping the chapter title opens Reading Settings; the chosen settings come back when it closes. */
+    private fun openSettings() {
         navigateTo(
-            screenFactory = { TextSizeScreen(it, viewModel.textSize.value ?: ReaderTextSize.DEFAULT) },
-            resultCallback = { size -> viewModel.changeTextSize(size) },
+            screenFactory = { ReadingSettingsScreen(it, viewModel.settings.value ?: ReaderSettings()) },
+            resultCallback = { settings -> viewModel.changeSettings(settings) },
         )
     }
 
@@ -360,17 +360,17 @@ class ReaderScreen(
      * every page is filled just as pagination planned.
      */
     @Composable
-    private fun PageArea(state: ReaderScreenState, textSize: ReaderTextSize, modifier: Modifier) {
+    private fun PageArea(state: ReaderScreenState, settings: ReaderSettings, modifier: Modifier) {
         val textMeasurer = rememberTextMeasurer()
-        val bodyStyle = readerBodyStyle(textSize)
-        val headingStyle = readerHeadingStyle(textSize)
+        val bodyStyle = readerBodyStyle(settings)
+        val headingStyle = readerHeadingStyle(settings)
         val density = LocalDensity.current
         val headingGapPx = with(density) { HEADING_GAP_GRID_UNITS.gridUnitsAsDp().toPx() }.roundToInt()
         val headingGap = with(density) { headingGapPx.toDp() }
 
         BoxWithConstraints(
             modifier = modifier
-                .padding(horizontal = READER_MARGIN_GRID_UNITS.gridUnitsAsDp(), vertical = READER_TOP_BOTTOM_GRID_UNITS.gridUnitsAsDp())
+                .padding(horizontal = settings.margins.gridUnits.gridUnitsAsDp(), vertical = READER_TOP_BOTTOM_GRID_UNITS.gridUnitsAsDp())
                 .pointerInput(Unit) {
                     detectTapGestures { offset ->
                         if (offset.x < size.width * BACK_TAP_ZONE_FRACTION) viewModel.previousPage() else viewModel.nextPage()

@@ -1,0 +1,183 @@
+package com.thelightphone.reader
+
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.text.style.TextAlign
+import com.thelightphone.sdk.SealedLightActivity
+import com.thelightphone.sdk.SimpleLightScreen
+import com.thelightphone.sdk.ui.LightBarButton
+import com.thelightphone.sdk.ui.LightIcons
+import com.thelightphone.sdk.ui.LightText
+import com.thelightphone.sdk.ui.LightTextVariant
+import com.thelightphone.sdk.ui.LightTopBar
+import com.thelightphone.sdk.ui.LightTopBarCenter
+import com.thelightphone.sdk.ui.gridUnitsAsDp
+import com.thelightphone.sdk.ui.lightClickable
+
+private const val SAMPLE_TEXT =
+    "It is a truth universally acknowledged, that a single man in possession of a good " +
+        "fortune, must be in want of a wife.\n\n\nHowever little known the feelings or views " +
+        "of such a man may be on his first entering a neighbourhood, this truth is so well fixed " +
+        "in the minds of the surrounding families, that he is considered as the rightful " +
+        "property of some one or other of their daughters."
+
+/** Wide enough for the longest value ("Extra large"), so the buttons line up row to row. */
+private const val VALUE_WIDTH_GRID_UNITS = 7f
+
+/**
+ * Text size, typeface, line spacing and margins, each stepped with the buttons on its row.
+ * The sample below is drawn with exactly the reader's page style and margins, so every
+ * change shows at once. Back hands the settings to ReaderScreen, which saves them and
+ * re-pages the book. The Theme row opens ThemeScreen.
+ */
+class ReadingSettingsScreen(
+    sealedActivity: SealedLightActivity,
+    current: ReaderSettings,
+) : SimpleLightScreen<ReaderSettings>(sealedActivity) {
+
+    private var settings by mutableStateOf(current)
+
+    @Composable
+    override fun Content() {
+        ThemedScreen {
+            LightTopBar(
+                leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack(settings) }),
+                center = LightTopBarCenter.Text("Reading Settings"),
+            )
+            SettingRows()
+            ThemeRow(onClick = ::openTheme)
+            RowDivider()
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .clipToBounds()
+                    .padding(
+                        horizontal = settings.margins.gridUnits.gridUnitsAsDp(),
+                        vertical = 1f.gridUnitsAsDp(),
+                    ),
+            ) {
+                BasicText(text = SAMPLE_TEXT, style = readerBodyStyle(settings))
+            }
+        }
+    }
+
+    @Composable
+    private fun SettingRows() {
+        val s = settings
+        StepperRow(
+            label = "Text size",
+            value = s.textSize.label,
+            onPrevious = s.textSize.smaller?.let { { settings = s.copy(textSize = it) } },
+            onNext = s.textSize.larger?.let { { settings = s.copy(textSize = it) } },
+        )
+        RowDivider()
+        StepperRow(
+            label = "Typeface",
+            value = s.typeface.label,
+            onPrevious = s.typeface.previous?.let { { settings = s.copy(typeface = it) } },
+            onNext = s.typeface.next?.let { { settings = s.copy(typeface = it) } },
+            previousSymbol = "‹",
+            nextSymbol = "›",
+        )
+        RowDivider()
+        StepperRow(
+            label = "Line spacing",
+            value = s.lineSpacing.label,
+            onPrevious = s.lineSpacing.previous?.let { { settings = s.copy(lineSpacing = it) } },
+            onNext = s.lineSpacing.next?.let { { settings = s.copy(lineSpacing = it) } },
+        )
+        RowDivider()
+        StepperRow(
+            label = "Margins",
+            value = s.margins.label,
+            onPrevious = s.margins.previous?.let { { settings = s.copy(margins = it) } },
+            onNext = s.margins.next?.let { { settings = s.copy(margins = it) } },
+        )
+        RowDivider()
+    }
+
+    /** The theme applies to every screen as soon as it is picked, so nothing comes back here. */
+    private fun openTheme() {
+        navigateTo(screenFactory = { ThemeScreen(it) })
+    }
+}
+
+@Composable
+private fun RowDivider() {
+    HairlineDivider(modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp()))
+}
+
+/**
+ * "Line spacing    −  Normal  +". A null [onPrevious] / [onNext] means the end of the
+ * range: that button is drawn lighter and does nothing. The value's name says where you
+ * are, so the lighter tone never carries the meaning alone.
+ */
+@Composable
+private fun StepperRow(
+    label: String,
+    value: String,
+    onPrevious: (() -> Unit)?,
+    onNext: (() -> Unit)?,
+    previousSymbol: String = "−",
+    nextSymbol: String = "+",
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 1f.gridUnitsAsDp(), top = 0.25f.gridUnitsAsDp(), bottom = 0.25f.gridUnitsAsDp()),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        LightText(text = label, variant = LightTextVariant.Copy, maxLines = 1, modifier = Modifier.weight(1f))
+        StepButton(symbol = previousSymbol, onClick = onPrevious)
+        LightText(
+            text = value,
+            variant = LightTextVariant.Copy,
+            align = TextAlign.Center,
+            maxLines = 1,
+            modifier = Modifier.width(VALUE_WIDTH_GRID_UNITS.gridUnitsAsDp()),
+        )
+        StepButton(symbol = nextSymbol, onClick = onNext)
+    }
+}
+
+@Composable
+private fun StepButton(symbol: String, onClick: (() -> Unit)?) {
+    LightText(
+        text = symbol,
+        variant = LightTextVariant.Subtitle,
+        lighten = onClick == null,
+        align = TextAlign.Center,
+        modifier = Modifier
+            .lightClickable(onClick = { onClick?.invoke() })
+            .padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.25f.gridUnitsAsDp()),
+    )
+}
+
+/** "Theme          Sepia" — tap to open the Theme screen. */
+@Composable
+private fun ThemeRow(onClick: () -> Unit) {
+    val theme by ReaderThemeController.theme.collectAsState()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .lightClickable(onClick = onClick)
+            .padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.75f.gridUnitsAsDp()),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        LightText(text = "Theme", variant = LightTextVariant.Copy, modifier = Modifier.weight(1f))
+        LightText(text = theme.label, variant = LightTextVariant.Copy, lighten = true)
+    }
+}

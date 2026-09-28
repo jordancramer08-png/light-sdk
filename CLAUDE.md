@@ -94,14 +94,16 @@ reader/
     ReadingList*.kt     Room entities / dao / repository for reading lists;
                         ReadingListQueue runs list reads + writes one at a time, in order
     LibrarySortPreference.kt  remembered library sort (DataStore)
-    ReaderTextSizePreference.kt  remembered reading text size (DataStore)
+    ReaderSettingsPreference.kt  remembered size, typeface, line spacing, margins (DataStore)
     ReaderThemePreference.kt     remembered reading theme (DataStore)
   ReaderTextSize.kt     the five text sizes (pure Kotlin, unit-tested)
-  ReaderTypography.kt   reader body + heading TextStyles at a size (shared with TextSizeScreen)
+  ReaderSettings.kt     ReaderSettings (size + typeface + line spacing + margins) and the
+                        ReaderTypeface / ReaderLineSpacing / ReaderMargins choices (pure Kotlin, unit-tested)
+  ReaderTypography.kt   reader body + heading TextStyles for a ReaderSettings (shared with ReadingSettingsScreen)
   ReaderTheme.kt        the four themes: LightColors + accent each
   ReaderThemeController.kt  the app-wide current theme; ThemedScreen frame every screen uses
   ReadingLists.kt       list logic: LibraryView, listRows, neighbourSlug (pure Kotlin, unit-tested)
-  LibraryScreen.kt, SortScreen.kt, ContentsScreen.kt, ReaderScreen.kt, TextSizeScreen.kt,
+  LibraryScreen.kt, SortScreen.kt, ContentsScreen.kt, ReaderScreen.kt, ReadingSettingsScreen.kt,
   ThemeScreen.kt, ListsScreen.kt, ListNameScreen.kt, DeleteListScreen.kt, ListBooksScreen.kt,
   AddToListScreen.kt, Divider.kt, RowIconButton.kt
   UniformRow.kt         a fixed-height row (divider included) for LightLazyScrollView lists
@@ -230,23 +232,35 @@ switch (`TOGGLE_STATE_ON/OFF`); tapping a row puts the book at the end of that l
 it out. Any number of lists.
 
 **ReaderScreen** — top bar: back, the current chapter title, and a `LightIcons.LIST` button
-that opens Contents. Paged text below (§7). Tapping the chapter title opens TextSizeScreen.
+that opens Contents. Paged text below (§7).
 If a chapter takes more than 300 ms to read and page (a huge chapter, or the library still
 busy), the page area shows "Preparing…" (lighter, centered) and taps are ignored until the
-page is ready.
+page is ready. Tapping the chapter title opens ReadingSettingsScreen.
 
-**TextSizeScreen** — top bar: back, "Text Size". Below it "−  <size name>  +" (drawn as
-text: the SDK has no minus icon), then a sample paragraph drawn with exactly the reader's
-body style and margins. Five sizes, `ReaderTextSize`: Small 0.85×, **Medium 1.0× (default,
-the original size)**, Large 1.15×, Larger 1.3×, Extra large 1.5× the SDK Paragraph size;
-the chapter heading scales by the same factor. At either end the button is lighter and does
-nothing (the size name, not the tone, says where you are). Back returns the size via
-`goBack(size)`; ReaderScreen saves it and re-paginates. One size for all books, remembered
-in `lightContext.dataStore` (key `reader_text_size`, the enum name; missing/unknown =
-Medium). Re-pagination anchors at the reader's place — the first character of the page last
-turned or jumped to (`anchorOffset`), which re-paging does not move — so switching sizes
-back and forth never drifts off the passage. Below the stepper, a "Theme  <name>" row opens
-ThemeScreen.
+**ReadingSettingsScreen** — top bar: back, "Reading Settings". Opened by tapping the
+chapter title in the reader. Four stepper rows, each "Label   −  <value>  +" (drawn as text:
+the SDK has no minus icon; Typeface uses "‹ ›" since fonts aren't a quantity), then a
+"Theme  <name>" row that opens ThemeScreen, then a sample paragraph drawn with exactly the
+reader's body style and margins, so every change shows live. At either end of a range the
+button is lighter and does nothing (the value's name, not the tone, says where you are).
+
+- **Text size** (`ReaderTextSize`): Small 0.85×, **Medium 1.0× (default)**, Large 1.15×,
+  Larger 1.3×, Extra large 1.5× the SDK Paragraph size; the chapter heading scales too.
+- **Typeface** (`ReaderTypeface`): **Light (the SDK font, default)**, Serif
+  (`FontFamily.Serif`), Sans (`FontFamily.SansSerif`). Built-in families only, no font
+  files. Body and chapter heading both use it.
+- **Line spacing** (`ReaderLineSpacing`): Compact 1.25, **Normal 1.45 (default)**, Relaxed
+  1.7 × the text size.
+- **Margins** (`ReaderMargins`): left and right margin of the page, Narrow 0.75, **Normal
+  1.5 (default)**, Wide 2.5 grid units.
+
+Back returns all four as one `ReaderSettings` via `goBack(settings)`; ReaderScreen saves
+them and re-paginates. One set for all books, remembered in `lightContext.dataStore` by
+`ReaderSettingsPreference` (keys `reader_text_size`, `reader_typeface`,
+`reader_line_spacing`, `reader_margins`, each the enum name; missing/unknown = that
+setting's default). Any change of style or page width re-paginates anchored at the reader's
+place — the first character of the page last turned or jumped to (`anchorOffset`), which
+re-paging does not move — so switching back and forth never drifts off the passage.
 
 **ThemeScreen** — top bar: back, "Theme". Four rows, each drawn in its own colors as a
 preview, the current one marked `SELECT_ON`: **Dark** (default, the SDK dark look), Light,

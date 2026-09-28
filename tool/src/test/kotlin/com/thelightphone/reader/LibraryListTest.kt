@@ -15,11 +15,12 @@ class LibraryListTest {
     private fun book(
         fileName: String,
         author: String = "Someone",
+        title: String = fileName,
         chapterChars: List<Int> = listOf(100),
         problem: BookProblem? = null,
     ) = BookMeta(
         slug = fileName.substringBefore('.'),
-        title = fileName,
+        title = title,
         author = author,
         chapters = chapterChars.mapIndexed { i, chars -> ChapterMeta(i + 1, "Chapter ${i + 1}", "x.txt", chars) },
         source = SourceStamp(fileName, 1, 1, 1),
@@ -49,6 +50,48 @@ class LibraryListTest {
         )
         val order = libraryRows(books, emptyMap()).map { it.meta.source.fileName }
         assertEquals(listOf("2.epub", "3.epub", "1.epub"), order)
+    }
+
+    private fun orderOf(books: List<BookMeta>, sort: LibrarySort) =
+        libraryRows(books, emptyMap(), sort).map { it.meta.source.fileName }
+
+    @Test
+    fun authorZtoAKeepsSeriesInOrderWithinAnAuthor() {
+        val books = listOf(
+            book("Series 02.epub", author = "Adams"),
+            book("b.epub", author = "Zafon"),
+            book("Series 01.epub", author = "Adams"),
+        )
+        assertEquals(listOf("b.epub", "Series 01.epub", "Series 02.epub"), orderOf(books, LibrarySort.AUTHOR_Z_TO_A))
+    }
+
+    @Test
+    fun titleSortsIgnoreLeadingArticles() {
+        val books = listOf(
+            book("1.epub", title = "The Shadow of the Wind"),
+            book("2.epub", title = "A Wizard of Earthsea"),
+            book("3.epub", title = "An Echo"),
+            book("4.epub", title = "Middlemarch"),
+            book("5.epub", title = "Theology"),
+        )
+        // Echo, Middlemarch, Shadow, Theology, Wizard
+        assertEquals(listOf("3.epub", "4.epub", "1.epub", "5.epub", "2.epub"), orderOf(books, LibrarySort.TITLE_A_TO_Z))
+        assertEquals(listOf("2.epub", "5.epub", "1.epub", "4.epub", "3.epub"), orderOf(books, LibrarySort.TITLE_Z_TO_A))
+    }
+
+    @Test
+    fun titleSortKeyOnlyDropsAWholeLeadingWord() {
+        assertEquals("shadow of the wind", titleSortKey("The Shadow of the Wind"))
+        assertEquals("theology", titleSortKey("Theology"))
+        assertEquals("anathem", titleSortKey("Anathem"))
+        assertEquals("etude in black", titleSortKey("An Étude in Black"))
+    }
+
+    @Test
+    fun savedSortNameRoundTripsAndUnknownFallsBack() {
+        LibrarySort.entries.forEach { assertEquals(it, LibrarySort.fromSavedName(it.name)) }
+        assertEquals(LibrarySort.AUTHOR_A_TO_Z, LibrarySort.fromSavedName(null))
+        assertEquals(LibrarySort.AUTHOR_A_TO_Z, LibrarySort.fromSavedName("SOMETHING_OLD"))
     }
 
     @Test

@@ -15,8 +15,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.reader.data.BookMeta
+import com.thelightphone.reader.data.LibrarySortPreference
 import com.thelightphone.reader.data.LibraryStore
 import com.thelightphone.reader.data.ReaderDatabase
+import com.thelightphone.reader.data.ReadingPosition
 import com.thelightphone.reader.data.ReadingPositionRepository
 import com.thelightphone.sdk.InitialScreen
 import com.thelightphone.sdk.LightScreen
@@ -24,6 +26,8 @@ import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.buildDatabase
+import com.thelightphone.sdk.ui.LightBarButton
+import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
@@ -40,6 +44,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 sealed interface LibraryScreenState {
     /** First moments after launch, before we know anything. Draws nothing. */
@@ -54,12 +59,21 @@ sealed interface LibraryScreenState {
 class LibraryScreenViewModel(
     private val libraryStore: LibraryStore,
     private val readingPositionRepository: ReadingPositionRepository,
+    private val sortPreference: LibrarySortPreference,
 ) : LightViewModel<Unit>() {
 
     private val _state = MutableStateFlow<LibraryScreenState>(LibraryScreenState.Loading)
     val state: StateFlow<LibraryScreenState> = _state.asStateFlow()
 
     private var refreshJob: Job? = null
+
+    // The sort choice and the last-loaded books are only touched on the main thread, so
+    // changing the sort while a refresh is running can't mix up the order.
+    private var sortLoaded = false
+    var sort = LibrarySort.DEFAULT
+        private set
+    private var books = emptyList<BookMeta>()
+    private var positions = emptyMap<String, ReadingPosition>()
 
     /** Runs every time the library comes to the front, so new books and new progress show up. */
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
@@ -69,13 +83,33 @@ class LibraryScreenViewModel(
 
     private fun refresh() {
         if (refreshJob?.isActive == true) return
-        refreshJob = viewModelScope.launch(Dispatchers.IO) {
-            val books = libraryStore.refresh { remaining ->
-                _state.value = LibraryScreenState.Preparing(remaining)
+        refreshJob = viewModelScope.launch {
+            if (!sortLoaded) {
+                sort = sortPreference.load()
+                sortLoaded = true
             }
-            val positions = readingPositionRepository.getAll().associateBy { it.bookSlug }
-            _state.value = LibraryScreenState.Loaded(libraryRows(books, positions))
+            books = withContext(Dispatchers.IO) {
+                libraryStore.refresh { remaining ->
+                    _state.value = LibraryScreenState.Preparing(remaining)
+                }
+            }
+            positions = withContext(Dispatchers.IO) {
+                readingPositionRepository.getAll().associateBy { it.bookSlug }
+            }
+            showRows()
         }
+    }
+
+    /** Re-orders the list right away and saves the choice for next time. */
+    fun changeSort(newSort: LibrarySort) {
+        sort = newSort
+        sortLoaded = true
+        if (_state.value is LibraryScreenState.Loaded) showRows()
+        viewModelScope.launch { sortPreference.save(newSort) }
+    }
+
+    private fun showRows() {
+        _state.value = LibraryScreenState.Loaded(libraryRows(books, positions, sort))
     }
 }
 
@@ -92,7 +126,11 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
     override val viewModelClass: Class<LibraryScreenViewModel>
         get() = LibraryScreenViewModel::class.java
 
-    override fun createViewModel() = LibraryScreenViewModel(libraryStore, readingPositionRepository)
+    override fun createViewModel() = LibraryScreenViewModel(
+        libraryStore,
+        readingPositionRepository,
+        LibrarySortPreference(lightContext.dataStore),
+    )
 
     @Composable
     override fun Content() {
@@ -107,6 +145,7 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
             ) {
                 LightTopBar(
                     center = LightTopBarCenter.Text("Library"),
+                    rightButton = LightBarButton.LightIcon(icon = LightIcons.REVERSE_ORDER, onClick = ::openSort),
                     modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
                 )
 
@@ -122,6 +161,13 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
                 }
             }
         }
+    }
+
+    private fun openSort() {
+        navigateTo(
+            screenFactory = { SortScreen(it, viewModel.sort) },
+            resultCallback = { chosen -> viewModel.changeSort(chosen) },
+        )
     }
 
     private fun openBook(meta: BookMeta) {

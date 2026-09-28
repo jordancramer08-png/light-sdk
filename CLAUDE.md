@@ -89,7 +89,8 @@ reader/
     LibraryStore.kt     scans shared/books/*.epub, caches parsed books
     BookMeta.kt         cached meta.json model (kotlinx-serialization)
     ReadingPosition*.kt Room entity / dao / database / repository
-  LibraryScreen.kt, ContentsScreen.kt, ReaderScreen.kt, Divider.kt
+    LibrarySortPreference.kt  remembered library sort (DataStore)
+  LibraryScreen.kt, SortScreen.kt, ContentsScreen.kt, ReaderScreen.kt, Divider.kt
 ```
 
 **Parse once, then cache.** The first time a book is seen (or its file size / modified time
@@ -150,15 +151,27 @@ like `Cemetery of Forgotten Books 01. The Shadow of the Wind - Carlos Ruiz Zafó
 handful at a time, not the whole library. On the phone the files sit flat in
 `shared/books/`, with names flattened to plain ASCII by the send script.
 
-- Sort by **author** (from the EPUB metadata; case- and accent-insensitive, so "le Carré"
-  and "Le Carre" group together), then by **file name**, which keeps series in order.
+- **Four sort orders**, chosen from a sort icon (`LightIcons.REVERSE_ORDER` — the SDK has
+  no dedicated sort icon) in the right slot of the Library top bar. It opens `SortScreen`:
+  Author A–Z, Author Z–A, Title A–Z, Title Z–A, the current one marked with a filled
+  circle (`SELECT_ON`, others `SELECT_OFF`). Tapping one returns it and re-orders the list;
+  back leaves the order unchanged.
+- All comparisons are case- and accent-insensitive ("le Carré" and "Le Carre" group
+  together). Author comes from the EPUB metadata; title from the EPUB metadata with a
+  leading "The", "A" or "An" ignored ("The Shadow of the Wind" sorts under S).
+- Ties always fall back to **file name, A to Z** — even in Author Z–A — so an author's
+  series stays in order (01, 02, …).
+- The choice is remembered in `lightContext.dataStore` (key `library_sort`, the enum name;
+  anything missing or unknown means Author A–Z, the default). Logic: `LibraryList.kt`
+  (`LibrarySort`, `libraryRows`), storage: `data/LibrarySortPreference.kt`.
 - Row: title (from the EPUB metadata, one line), author (lighter), progress ("Not started" or
   "NN% read", computed from chapter char counts as in the September `LibraryScreen`).
 - Empty library: "No books on this device yet." centered, lighter text.
 
 ## 9. Screens
 
-**LibraryScreen** (`@InitialScreen`) — top bar "Library", the list, tap a book → ReaderScreen.
+**LibraryScreen** (`@InitialScreen`) — top bar "Library" with the sort icon on the right
+(→ SortScreen, §8), the list, tap a book → ReaderScreen.
 
 **ReaderScreen** — top bar: back, the current chapter title, and a `LightIcons.LIST` button
 that opens Contents. Paged text below (§7).

@@ -19,11 +19,47 @@ data class LibraryRow(
     val canOpen: Boolean get() = meta.problem == null
 }
 
-/** Sorted by author (ignoring case and accents), then by EPUB file name, which keeps series in order. */
-fun libraryRows(books: List<BookMeta>, positions: Map<String, ReadingPosition>): List<LibraryRow> =
+/** The four ways the library can be ordered, as shown on the sort screen. */
+enum class LibrarySort(val label: String) {
+    AUTHOR_A_TO_Z("Author A–Z"),
+    AUTHOR_Z_TO_A("Author Z–A"),
+    TITLE_A_TO_Z("Title A–Z"),
+    TITLE_Z_TO_A("Title Z–A");
+
+    companion object {
+        val DEFAULT = AUTHOR_A_TO_Z
+
+        /** Turns a saved name back into a choice; anything unknown falls back to the default. */
+        fun fromSavedName(name: String?): LibrarySort =
+            entries.firstOrNull { it.name == name } ?: DEFAULT
+    }
+}
+
+/**
+ * The library rows in the chosen order. Ties always fall back to the EPUB file name,
+ * A to Z, so an author's series stays in order (01, 02, …) even when authors run Z to A.
+ */
+fun libraryRows(
+    books: List<BookMeta>,
+    positions: Map<String, ReadingPosition>,
+    sort: LibrarySort = LibrarySort.DEFAULT,
+): List<LibraryRow> =
     books
-        .sortedWith(compareBy<BookMeta>({ sortKey(it.author) }, { it.source.fileName }))
+        .sortedWith(comparatorFor(sort).thenBy { it.source.fileName })
         .map { LibraryRow(it, statusText(it, positions[it.slug])) }
+
+private fun comparatorFor(sort: LibrarySort): Comparator<BookMeta> = when (sort) {
+    LibrarySort.AUTHOR_A_TO_Z -> compareBy { sortKey(it.author) }
+    LibrarySort.AUTHOR_Z_TO_A -> compareByDescending { sortKey(it.author) }
+    LibrarySort.TITLE_A_TO_Z -> compareBy { titleSortKey(it.title) }
+    LibrarySort.TITLE_Z_TO_A -> compareByDescending { titleSortKey(it.title) }
+}
+
+private val LEADING_ARTICLE = Regex("^(the|a|an)\\s+")
+
+/** "The Shadow of the Wind" sorts under S, "A Wizard of Earthsea" under W. */
+fun titleSortKey(title: String): String =
+    sortKey(title).replaceFirst(LEADING_ARTICLE, "")
 
 /** "le Carré" and "Le Carre" both become "le carre". */
 fun sortKey(text: String): String =

@@ -32,12 +32,14 @@ class EpubLibraryReportTest {
         for (file in epubFiles) {
             try {
                 val book = EpubParser.parse(file)
-                summaryLines.add("${file.name}\t\"${book.title}\" by ${book.author}\t${book.chapters.size} chapters")
+                val notes = book.chapters.flatMap { c -> c.styles.filter { it.style == TextStyleKind.NOTE } }
+                summaryLines.add("${file.name}\t\"${book.title}\" by ${book.author}\t${book.chapters.size} chapters\t${notes.size} notes")
 
                 val detail = StringBuilder()
                 detail.append("== ${file.name} ==\n")
                 detail.append("Title: ${book.title}\nAuthor: ${book.author}\n")
                 for (line in chapterTree(book)) detail.append("  $line\n")
+                for (note in notes.take(SAMPLE_NOTES)) detail.append("  Note: ${note.note.orEmpty().replace("\n", " ").take(120)}\n")
                 detailBlocks.add(detail.toString())
             } catch (e: DrmProtectedException) {
                 summaryLines.add("${file.name}\tCan't open (DRM)")
@@ -80,6 +82,11 @@ class EpubLibraryReportTest {
             val details = if (isChapterRow) "  (${chapter.text.length} chars${styleCounts(chapter)})" else ""
             "  ".repeat(row.depth) + mark + row.title + details
         }
+    }
+
+    private companion object {
+        /** How many notes each book's details show, to check their text reads right. */
+        const val SAMPLE_NOTES = 3
     }
 
     /** ", 12 italic, 3 scene break" — only the kinds the chapter has. */

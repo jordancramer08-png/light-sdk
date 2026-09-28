@@ -93,7 +93,8 @@ reader/
   epub/        pure Kotlin, NO Android imports — unit-testable on the PC
     EpubParser.kt       zip → Book(title, author, chapters[title, text, styles, parents])
     HtmlText.kt         XHTML → plain text (paragraphs split by one blank line) + StyleRanges
-                        (italic, bold, quote, scene break)
+                        (italic, bold, quote, scene break) + note markers (NoteRef)
+    Footnotes.kt        NoteFinder: a note marker's link → the note's text, in any file of the book
     ContentFilter.kt    drops covers, title pages, ads, embedded TOCs, praise pages
     Series.kt           series + number: OPF metadata (calibre, then EPUB 3), else file name
     WordCount.kt        countWords (runs of non-space holding a letter or digit)
@@ -115,7 +116,8 @@ reader/
   ReaderSettings.kt     ReaderSettings (size + typeface + line spacing + margins) and the
                         ReaderTypeface / ReaderLineSpacing / ReaderMargins choices (pure Kotlin, unit-tested)
   ReaderTypography.kt   reader body + heading TextStyles for a ReaderSettings (shared with ReadingSettingsScreen),
-                        and styledChapterText (chapter text + StyleRanges → AnnotatedString)
+                        styledChapterText (chapter text + StyleRanges → AnnotatedString), withNoteColor
+  NoteMarkers.kt        PageNote, pageNotes, nearestNote: which note marker a tap hit (unit-tested)
   ReaderTheme.kt        the four themes: LightColors + accent each
   ReaderThemeController.kt  the app-wide current theme; ThemedScreen frame every screen uses
   ReadingLists.kt       list logic: LibraryView, listRows, neighbourSlug (pure Kotlin, unit-tested)
@@ -125,7 +127,7 @@ reader/
   ChapterTree.kt        contentsRows (Contents with headings), readerBarTitle (pure Kotlin, unit-tested)
   LibraryScreen.kt, SortFilterScreen.kt, ContentsScreen.kt, ReaderScreen.kt, ReadingSettingsScreen.kt,
   ThemeScreen.kt, ListsScreen.kt, ListNameScreen.kt, DeleteListScreen.kt, ListBooksScreen.kt,
-  AddToListScreen.kt, BookDetailsScreen.kt, SeriesScreen.kt, Divider.kt, RowIconButton.kt
+  AddToListScreen.kt, BookDetailsScreen.kt, SeriesScreen.kt, NoteScreen.kt, Divider.kt, RowIconButton.kt
   LibraryEntryList.kt   the book / series rows list, shared by LibraryScreen and SeriesScreen
   UniformRow.kt         a fixed-height row (divider included) for LightLazyScrollView lists
 tool/schemas/           Room's saved schema for each database version (checked in)
@@ -151,6 +153,24 @@ version 3 can land a page early in a book that has them). A chapter with any for
 ornaments: "* * *", "***", "⁂", "#", "~" …). A scene break becomes its own "⁂" paragraph,
 drawn centered; repeated ones merge, and none opens or ends a chapter. Italic or bold set by
 CSS classes (`<span class="italic">`) is not detected.
+
+**Notes (`PARSER_VERSION` 4).** A note marker is an `<a>` with `epub:type="noteref"` or
+`role="doc-noteref"`, or a link of at most 6 characters (`MAX_MARKER_CHARS`) inside `<sup>` or
+`<small>` (or holding one) that points at an id (`#id`, `file.xhtml#id`; not `doc-backlink`). Its
+text is kept in `NNN.txt` as the number alone ("[12]" → "12"), and `NNN.styles.json` gets a
+`NOTE` range over it whose `note` field is the note's plain text (paragraphs split by a blank
+line). The note is the element with that id in any file of the zip — also an endnotes file
+dropped as non-content, or one outside the spine (`NoteFinder`, each file read once). When the
+id is on an inline element (the backlink number, an empty anchor), the note is its enclosing
+paragraph / block; the backlink number and the punctuation after it are dropped; a block that
+held only the number (`<dt>12</dt><dd>…</dd>`) takes the next block. A note over 10,000 chars
+(`MAX_NOTE_CHARS`) or empty is skipped. A `<sup>`/`<small>` marker must point forward (later
+file, or later in the same file); pointing back means it's a note's link back to the text.
+A marker whose note isn't found stays plain text. Footnotes printed beside the text — an
+`<aside>` typed as a footnote / endnote / note, or any element typed `footnote(s)` /
+`doc-footnote` — are left out of the chapter; endnote lists (e.g. `<section
+epub:type="endnotes">` in a Notes chapter) are kept. Not detected: markers raised only by a
+CSS class (`<span class="sup">`), and notes keyed to page numbers with no link from the text.
 
 **Nested contents.** The NCX `navPoint`s (or nav `<ol>`s) are read as a tree; the first
 entry pointing at a file gives it its title and its `parents`. A heading page too short to be
@@ -309,7 +329,11 @@ that opens Contents. When the chapter sits under a heading, the title reads
 "<top-level heading> · <chapter title>" ("BOOK 1: GARDENS OF THE MOON · Chapter One";
 `readerBarTitle`, one line, ellipsized by the SDK). The heading on a chapter's first page is
 always just the chapter title. Paged text below (§7), with italic, bold, indented block
-quotes and centered "⁂" scene breaks (§6). Opening a book makes a Want to Read book
+quotes, centered "⁂" scene breaks and note markers (§6): small (0.7 em), raised, in the
+theme's accent (added at draw time by `withNoteColor`, so a theme change never re-pages). A
+tap on or within 1.5 grid units of a marker (`NOTE_REACH_GRID_UNITS`; measured on the page's
+`TextLayoutResult` character boxes, nearest marker wins) opens NoteScreen instead of turning
+the page, even in the left 30%; every other tap turns pages as before. Opening a book makes a Want to Read book
 Reading (Reading and Finished stay as they are). A page turn or Contents jump that lands on
 the last page of the last chapter makes it Finished; reopening the book on that page, or
 re-paging, does not (so a hand-set status isn't undone just by opening the book).
@@ -341,6 +365,10 @@ them and re-paginates. One set for all books, remembered in `lightContext.dataSt
 setting's default). Any change of style or page width re-paginates anchored at the reader's
 place — the first character of the page last turned or jumped to (`anchorOffset`), which
 re-paging does not move — so switching back and forth never drifts off the passage.
+
+**NoteScreen** — top bar: back, "Note 12" (the marker). The note's text drawn with exactly the
+reader's body style and margins (paragraphs spaced as on a page), in a `LightScrollView` so a
+long note scrolls. Back returns to the same page.
 
 **ThemeScreen** — top bar: back, "Theme". Four rows, each drawn in its own colors as a
 preview, the current one marked `SELECT_ON`: **Dark** (default, the SDK dark look), Light,

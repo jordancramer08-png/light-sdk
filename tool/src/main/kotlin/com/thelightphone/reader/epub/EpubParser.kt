@@ -36,7 +36,7 @@ class InvalidEpubException(message: String) : EpubParseException(message)
  * Bump this whenever a change here (or in HtmlText / ContentFilter) would change a
  * book's chapters or text. The library cache sees the new number and re-parses every book.
  */
-const val PARSER_VERSION = 3 // 2: series, and word counts. 3: italic/bold/quotes/scene breaks, nested contents
+const val PARSER_VERSION = 4 // 2: series, and word counts. 3: italic/bold/quotes/scene breaks, nested contents. 4: notes
 
 private const val CONTAINER_PATH = "META-INF/container.xml"
 private const val DRM_MARKER_PATH = "META-INF/encryption.xml"
@@ -47,7 +47,7 @@ private val CONTENT_MEDIA_TYPES = setOf("application/xhtml+xml", "text/html")
  * dc:creator) -> manifest -> spine (skip `linear="no"`, skip the nav item,
  * only xhtml/html media types) -> chapter titles and their nesting from the NCX
  * first, nav.xhtml fallback -> HTML flattened to text (italic, bold, quotes and
- * scene breaks kept as style ranges) -> non-content filtering -> untitled
+ * scene breaks kept as style ranges; note markers matched to their notes) -> non-content filtering -> untitled
  * chapters numbered "Chapter N". Ported from `convert.py` (see CLAUDE.md
  * section 7) — the phone parses EPUBs itself instead of reading pre-converted
  * text from the PC.
@@ -66,6 +66,7 @@ object EpubParser {
             val manifest = readManifest(opfRoot, opfDir)
             val (spineItems, tocId) = readSpine(opfRoot)
             val toc = loadToc(zip, manifest, tocId)
+            val notes = NoteFinder(zip, spineItems.mapNotNull { (idref, _) -> manifest[idref]?.href })
 
             val chapters = mutableListOf<Chapter>()
             var lastPlace: TocPlace? = null
@@ -91,7 +92,8 @@ object EpubParser {
                 }
                 val title = place?.title ?: dividerTitle ?: "Chapter ${chapters.size + 1}"
                 dividerTitle = null
-                chapters.add(Chapter(title, styled.text, styled.styles, parents))
+                val styles = (styled.styles + noteRanges(notes, item.href, styled)).sortedBy { it.start }
+                chapters.add(Chapter(title, styled.text, styles, parents))
             }
 
             if (chapters.isEmpty()) throw InvalidEpubException("no readable chapters found")
@@ -100,6 +102,13 @@ object EpubParser {
         }
     }
 }
+
+/** A NOTE range for each marker whose note was found; a marker without one stays plain text. */
+private fun noteRanges(notes: NoteFinder, file: String, styled: StyledText): List<StyleRange> =
+    styled.noteRefs.mapNotNull { ref ->
+        val marker = styled.text.substring(ref.start, ref.end)
+        notes.noteText(file, marker, ref)?.let { StyleRange(TextStyleKind.NOTE, ref.start, ref.end, note = it) }
+    }
 
 /** Same rule as `convert.py`'s `_slugify`, kept identical so saved reading positions carry over. */
 fun slugify(title: String): String {
@@ -284,7 +293,7 @@ private fun readZipText(zip: ZipFile, path: String): String = readZipBytes(zip, 
 
 private val DECLARED_ENCODING_RE = Regex("""encoding=["']([\w-]+)["']""")
 
-private fun decodeHtmlBytes(data: ByteArray, path: String): String {
+internal fun decodeHtmlBytes(data: ByteArray, path: String): String {
     // XML/XHTML declarations are always ASCII at the very start of the file,
     // regardless of the document's actual encoding, so it's safe to scan for
     // one before we know what that encoding is.
@@ -307,12 +316,12 @@ private fun decodeStrict(data: ByteArray, encodingName: String): String {
     return decoder.decode(ByteBuffer.wrap(data)).toString()
 }
 
-private fun zipDirname(path: String): String {
+internal fun zipDirname(path: String): String {
     val idx = path.lastIndexOf('/')
     return if (idx >= 0) path.substring(0, idx + 1) else ""
 }
 
-private fun resolvePath(baseDir: String, href: String): String {
+internal fun resolvePath(baseDir: String, href: String): String {
     val withoutFragment = href.substringBefore('#')
     val joined = if (withoutFragment.startsWith("/")) withoutFragment else baseDir + withoutFragment
     val stack = mutableListOf<String>()

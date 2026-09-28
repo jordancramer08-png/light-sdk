@@ -87,6 +87,21 @@ class LibraryStoreTest {
     }
 
     @Test
+    fun noteMarkersAreCachedWithTheirNoteText() {
+        val body = "<p>A claim.<a epub:type=\"noteref\" href=\"#fn1\">1</a> ${EpubFixture.longParagraph("x")}</p>" +
+            "<aside epub:type=\"footnote\" id=\"fn1\"><p>Source for the claim.</p></aside>"
+        val chapter = EpubFixture.ChapterSpec("c1", "c1.xhtml", body, navTitle = "One")
+        EpubFixture.build(title = "Noted", chapters = listOf(chapter)).copyTo(File(booksDir, "a.epub"))
+
+        val book = store().refresh().single()
+        val text = store().chapterText(book, book.chapters[0])!!
+        val note = store().chapterStyles(book, book.chapters[0]).single()
+
+        assertEquals("1", text.substring(note.start, note.end))
+        assertEquals("Source for the claim.", note.note)
+    }
+
+    @Test
     fun contentsNestingIsCachedPerChapter() {
         val chapters = listOf(EpubFixture.chapter("c1", "One", listOf(EpubFixture.longParagraph("a"))))
         val ncx = """<ncx><navMap><navPoint><navLabel><text>Part One</text></navLabel>

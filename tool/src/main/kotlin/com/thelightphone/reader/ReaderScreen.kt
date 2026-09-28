@@ -11,10 +11,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
@@ -334,6 +342,9 @@ private const val BACK_TAP_ZONE_FRACTION = 0.3f
 private const val READER_TOP_BOTTOM_GRID_UNITS = 0.75f
 private const val HEADING_GAP_GRID_UNITS = 1f
 
+/** How far from a note marker a tap still opens its note (a finger is wider than a raised number). */
+private const val NOTE_REACH_GRID_UNITS = 1.5f
+
 class ReaderScreen(
     sealedActivity: SealedLightActivity,
     private val bookMeta: BookMeta,
@@ -391,8 +402,14 @@ class ReaderScreen(
         )
     }
 
+    /** Opens the note whose marker was tapped; back returns to this page. */
+    private fun openNote(note: PageNote) {
+        navigateTo(screenFactory = { NoteScreen(it, note, viewModel.settings.value ?: ReaderSettings()) })
+    }
+
     /**
-     * The page itself. Tap the left 30% to go back a page, anywhere else to go forward.
+     * The page itself. A tap on (or very near) a note marker opens the note; otherwise tap the
+     * left 30% to go back a page, anywhere else to go forward.
      * The heading and page are drawn with exactly the styles they were measured with, so
      * every page is filled just as pagination planned.
      */
@@ -404,13 +421,32 @@ class ReaderScreen(
         val density = LocalDensity.current
         val headingGapPx = with(density) { HEADING_GAP_GRID_UNITS.gridUnitsAsDp().toPx() }.roundToInt()
         val headingGap = with(density) { headingGapPx.toDp() }
+        val noteReachPx = with(density) { NOTE_REACH_GRID_UNITS.gridUnitsAsDp().toPx() }
+
+        // Where the page's text was last laid out, for finding a tapped note marker.
+        var bodyLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+        var bodyTop by remember { mutableFloatStateOf(0f) }
+        val currentState by rememberUpdatedState(state)
+
+        fun tappedNote(tap: Offset): PageNote? {
+            val page = (currentState as? ReaderScreenState.Loaded)?.pageText ?: return null
+            val layout = bodyLayout?.takeIf { it.layoutInput.text.text == page.text } ?: return null
+            val notes = pageNotes(page)
+            if (notes.isEmpty()) return null
+            return nearestNote(tap - Offset(0f, bodyTop), markerBoxes(layout, notes), noteReachPx)
+        }
 
         BoxWithConstraints(
             modifier = modifier
                 .padding(horizontal = settings.margins.gridUnits.gridUnitsAsDp(), vertical = READER_TOP_BOTTOM_GRID_UNITS.gridUnitsAsDp())
                 .pointerInput(Unit) {
                     detectTapGestures { offset ->
-                        if (offset.x < size.width * BACK_TAP_ZONE_FRACTION) viewModel.previousPage() else viewModel.nextPage()
+                        val note = tappedNote(offset)
+                        when {
+                            note != null -> openNote(note)
+                            offset.x < size.width * BACK_TAP_ZONE_FRACTION -> viewModel.previousPage()
+                            else -> viewModel.nextPage()
+                        }
                     }
                 },
         ) {
@@ -441,7 +477,14 @@ class ReaderScreen(
                             modifier = Modifier.padding(bottom = headingGap),
                         )
                     }
-                    BasicText(text = state.pageText, style = bodyStyle)
+                    val accent = LocalReaderAccent.current
+                    val pageText = remember(state.pageText, accent) { withNoteColor(state.pageText, accent) }
+                    BasicText(
+                        text = pageText,
+                        style = bodyStyle,
+                        onTextLayout = { bodyLayout = it },
+                        modifier = Modifier.onGloballyPositioned { bodyTop = it.positionInParent().y },
+                    )
                 }
             }
         }

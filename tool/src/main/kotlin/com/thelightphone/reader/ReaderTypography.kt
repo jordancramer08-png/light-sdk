@@ -4,10 +4,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.ParagraphStyle
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.style.Hyphens
 import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextAlign
@@ -82,10 +84,11 @@ private fun TextUnit.scaledForReading(scale: Float): TextUnit {
 private const val QUOTE_INDENT_EM = 1.5f
 
 /**
- * A chapter's text with its italic, bold, block quotes (indented) and scene breaks
- * (centered). The reader measures pages with this exact string and draws each page as a
- * piece of it, so what is measured is what is drawn (CLAUDE.md 7). No colors here: the
- * theme's color comes from the body style.
+ * A chapter's text with its italic, bold, block quotes (indented), scene breaks (centered)
+ * and note markers (small and raised, each carrying its note as a [NOTE_ANNOTATION]). The
+ * reader measures pages with this exact string and draws each page as a piece of it, so what
+ * is measured is what is drawn (CLAUDE.md 7). No colors here: the theme's color comes from
+ * the body style, and the markers' accent from [withNoteColor].
  */
 fun styledChapterText(text: String, styles: List<StyleRange>): AnnotatedString {
     val valid = styles.filter { it.start in 0 until it.end && it.end <= text.length }
@@ -95,18 +98,41 @@ fun styledChapterText(text: String, styles: List<StyleRange>): AnnotatedString {
         (range.start >= lastParagraphEnd).also { ok -> if (ok) lastParagraphEnd = range.end }
     }
     val spanRanges = valid.filterNot { it.style.isParagraphStyle() }
-    return AnnotatedString(
-        text = text,
-        spanStyles = spanRanges.map { AnnotatedString.Range(it.style.spanStyle(), it.start, it.end) },
-        paragraphStyles = paragraphRanges.map { AnnotatedString.Range(it.style.paragraphStyle(), it.start, it.end) },
-    )
+    val builder = AnnotatedString.Builder(text)
+    for (range in spanRanges) builder.addStyle(range.style.spanStyle(), range.start, range.end)
+    for (range in paragraphRanges) builder.addStyle(range.style.paragraphStyle(), range.start, range.end)
+    // Each note marker carries its note, so a page cut from this text knows its own notes.
+    for (range in spanRanges) {
+        if (range.style == TextStyleKind.NOTE && range.note != null) {
+            builder.addStringAnnotation(NOTE_ANNOTATION, range.note, range.start, range.end)
+        }
+    }
+    return builder.toAnnotatedString()
 }
+
+/** The tag of the annotation holding a note marker's note text. */
+const val NOTE_ANNOTATION = "note"
+
+/** A note marker's size next to the text around it. */
+private const val NOTE_MARKER_EM = 0.7f
 
 private fun TextStyleKind.isParagraphStyle() = this == TextStyleKind.QUOTE || this == TextStyleKind.SCENE_BREAK
 
 private fun TextStyleKind.spanStyle(): SpanStyle = when (this) {
     TextStyleKind.BOLD -> SpanStyle(fontWeight = FontWeight.Bold)
+    // Small and raised. Its accent color is added when the page is drawn (withNoteColor),
+    // so a theme change never re-pages the book.
+    TextStyleKind.NOTE -> SpanStyle(fontSize = NOTE_MARKER_EM.em, baselineShift = BaselineShift.Superscript)
     else -> SpanStyle(fontStyle = FontStyle.Italic)
+}
+
+/** [page] with its note markers in [accent]. Color never moves a line break, so pages stay as measured. */
+fun withNoteColor(page: AnnotatedString, accent: Color): AnnotatedString {
+    val markers = page.getStringAnnotations(NOTE_ANNOTATION, 0, page.length)
+    if (markers.isEmpty()) return page
+    val builder = AnnotatedString.Builder(page)
+    for (marker in markers) builder.addStyle(SpanStyle(color = accent), marker.start, marker.end)
+    return builder.toAnnotatedString()
 }
 
 private fun TextStyleKind.paragraphStyle(): ParagraphStyle = when (this) {

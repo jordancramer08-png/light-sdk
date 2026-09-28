@@ -1,8 +1,8 @@
 [tool]
-id = "com.thelightphone.bible"
-label = "Bible"
-versionCode = 1
-versionName = "1.0.0"
+id = "com.thelightphone.reader"
+label = "Reader"
+versionCode = 2
+versionName = "2.0.0"
 permissions = []
 capabilities = []
 # com.lightos = LightOS system host on real LP3 hardware (verified via `pm query-services`)

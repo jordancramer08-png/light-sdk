@@ -63,3 +63,6 @@ __pycache__/
 
 ### Converted scripture text — copyrighted content, never committed (CLAUDE.md section 7) ###
 /bible/
+### Books - copyrighted content, never committed ###
+*.epub
+/books/

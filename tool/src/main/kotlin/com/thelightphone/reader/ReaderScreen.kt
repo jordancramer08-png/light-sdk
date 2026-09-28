@@ -20,15 +20,13 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.text.style.Hyphens
-import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.unit.TextUnit
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.reader.data.BookMeta
 import com.thelightphone.reader.data.ChapterMeta
 import com.thelightphone.reader.data.LibraryStore
 import com.thelightphone.reader.data.ReaderDatabase
+import com.thelightphone.reader.data.ReaderTextSizePreference
 import com.thelightphone.reader.data.ReadingPositionRepository
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
@@ -42,7 +40,6 @@ import com.thelightphone.sdk.ui.LightThemeController
 import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
-import com.thelightphone.sdk.ui.designVerticalPxToSp
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -89,10 +86,15 @@ class ReaderScreenViewModel(
     private val bookMeta: BookMeta,
     private val libraryStore: LibraryStore,
     private val readingPositionRepository: ReadingPositionRepository,
+    private val textSizePreference: ReaderTextSizePreference,
 ) : LightViewModel<Unit>() {
 
     private val _state = MutableStateFlow<ReaderScreenState>(ReaderScreenState.Loading)
     val state: StateFlow<ReaderScreenState> = _state.asStateFlow()
+
+    /** The reading text size; null until it has been read from storage, so nothing is paged at the wrong size. */
+    private val _textSize = MutableStateFlow<ReaderTextSize?>(null)
+    val textSize: StateFlow<ReaderTextSize?> = _textSize.asStateFlow()
 
     private var pageLayout: PageLayout? = null
 
@@ -101,12 +103,30 @@ class ReaderScreenViewModel(
     private var currentPages: List<PageRange> = emptyList()
     private var currentPageIndex: Int = 0
 
+    /**
+     * The character the reader is at: the first character of the page they last turned or
+     * jumped to. Re-paging (a new text size) keeps it, so changing size back and forth
+     * always returns to the same passage instead of creeping backwards.
+     */
+    private var anchorOffset: Int = 0
+
     private val chapterTextCache = mutableMapOf<Int, String>()
     private val pageCache = mutableMapOf<Int, List<PageRange>>()
     private var loadJob: Job? = null
 
     /** Saves run one at a time, in order, so an older place can never overwrite a newer one. */
     private val saveDispatcher = Dispatchers.IO.limitedParallelism(1)
+
+    init {
+        viewModelScope.launch { _textSize.value = textSizePreference.load() }
+    }
+
+    /** From TextSizeScreen: use the new size for every book, and remember it. */
+    fun changeTextSize(size: ReaderTextSize) {
+        if (size == _textSize.value) return
+        _textSize.value = size
+        viewModelScope.launch { textSizePreference.save(size) }
+    }
 
     /** Called once the reading area has a size. Nothing can be paged before that. */
     fun configureLayout(layout: PageLayout) {
@@ -117,9 +137,8 @@ class ReaderScreenViewModel(
             loadSavedPosition()
         } else if (!layout.sameMetricsAs(previous)) {
             // Page breaks move with the new size, so re-page from the same character.
-            val anchor = currentPages.getOrNull(currentPageIndex)?.start ?: 0
             pageCache.clear()
-            loadChapter(currentChapterIndex, anchor)
+            loadChapter(currentChapterIndex, anchorOffset, keepAnchor = true)
         }
     }
 
@@ -159,8 +178,11 @@ class ReaderScreenViewModel(
 
     private fun chapter(index: Int): ChapterMeta? = bookMeta.chapters.firstOrNull { it.index == index }
 
-    /** Reads (or reuses) a chapter's text and pages, then shows the page holding [targetOffset]. */
-    private fun loadChapter(chapterIndex: Int, targetOffset: Int) {
+    /**
+     * Reads (or reuses) a chapter's text and pages, then shows the page holding [targetOffset].
+     * [keepAnchor] is for re-paging: the reader's place stays [targetOffset] exactly.
+     */
+    private fun loadChapter(chapterIndex: Int, targetOffset: Int, keepAnchor: Boolean = false) {
         val layout = pageLayout ?: return
         val chapter = chapter(chapterIndex) ?: return
 
@@ -178,12 +200,14 @@ class ReaderScreenViewModel(
             currentText = text
             currentPages = pages
             showPage(pageIndexFor(pages, text, targetOffset))
+            if (keepAnchor) anchorOffset = targetOffset
         }
     }
 
     private fun showPage(pageIndex: Int) {
         currentPageIndex = pageIndex
         val page = currentPages[pageIndex]
+        anchorOffset = page.start
         _state.value = ReaderScreenState.Loaded(
             chapterTitle = chapter(currentChapterIndex)?.title ?: bookMeta.title,
             // Trailing blank lines are part of the page's range but don't need drawing.
@@ -248,10 +272,8 @@ private fun TextLayoutResult.lines(text: String): List<TextLine> =
     }
 
 private const val BACK_TAP_ZONE_FRACTION = 0.3f
-private const val READER_MARGIN_GRID_UNITS = 1.5f
 private const val READER_TOP_BOTTOM_GRID_UNITS = 0.75f
 private const val HEADING_GAP_GRID_UNITS = 1f
-private const val READER_LINE_HEIGHT_MULTIPLIER = 1.45f
 
 class ReaderScreen(
     sealedActivity: SealedLightActivity,
@@ -266,12 +288,18 @@ class ReaderScreen(
     override val viewModelClass: Class<ReaderScreenViewModel>
         get() = ReaderScreenViewModel::class.java
 
-    override fun createViewModel() = ReaderScreenViewModel(bookMeta, libraryStore, readingPositionRepository)
+    override fun createViewModel() = ReaderScreenViewModel(
+        bookMeta,
+        libraryStore,
+        readingPositionRepository,
+        ReaderTextSizePreference(lightContext.dataStore),
+    )
 
     @Composable
     override fun Content() {
         val themeColors by LightThemeController.colors.collectAsState()
         val state by viewModel.state.collectAsState()
+        val textSize by viewModel.textSize.collectAsState()
         val topTitle = (state as? ReaderScreenState.Loaded)?.chapterTitle ?: bookMeta.title
 
         LightTheme(colors = themeColors) {
@@ -282,10 +310,13 @@ class ReaderScreen(
             ) {
                 LightTopBar(
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
-                    center = LightTopBarCenter.Text(topTitle),
+                    center = LightTopBarCenter.Text(topTitle, onClick = ::openTextSize),
                     rightButton = LightBarButton.LightIcon(icon = LightIcons.LIST, onClick = ::openContents),
                 )
-                PageArea(state, modifier = Modifier.weight(1f).fillMaxWidth())
+                // Nothing is drawn until the saved text size is known (a moment at most).
+                textSize?.let { size ->
+                    PageArea(state, size, modifier = Modifier.weight(1f).fillMaxWidth())
+                }
             }
         }
     }
@@ -297,16 +328,24 @@ class ReaderScreen(
         )
     }
 
+    /** Tapping the chapter title opens Text Size; the chosen size comes back when it closes. */
+    private fun openTextSize() {
+        navigateTo(
+            screenFactory = { TextSizeScreen(it, viewModel.textSize.value ?: ReaderTextSize.DEFAULT) },
+            resultCallback = { size -> viewModel.changeTextSize(size) },
+        )
+    }
+
     /**
      * The page itself. Tap the left 30% to go back a page, anywhere else to go forward.
      * The heading and page are drawn with exactly the styles they were measured with, so
      * every page is filled just as pagination planned.
      */
     @Composable
-    private fun PageArea(state: ReaderScreenState, modifier: Modifier) {
+    private fun PageArea(state: ReaderScreenState, textSize: ReaderTextSize, modifier: Modifier) {
         val textMeasurer = rememberTextMeasurer()
-        val bodyStyle = readerBodyStyle()
-        val headingStyle = readerHeadingStyle()
+        val bodyStyle = readerBodyStyle(textSize)
+        val headingStyle = readerHeadingStyle(textSize)
         val density = LocalDensity.current
         val headingGapPx = with(density) { HEADING_GAP_GRID_UNITS.gridUnitsAsDp().toPx() }.roundToInt()
         val headingGap = with(density) { headingGapPx.toDp() }
@@ -343,43 +382,4 @@ class ReaderScreen(
             }
         }
     }
-}
-
-/**
- * The Paragraph style with more generous line height for long reading. Used both to
- * measure pages and to draw them (CLAUDE.md 7).
- *
- * Line breaking is set to the simple, greedy kind: a page is drawn as its own piece of
- * text, and greedy breaking wraps that piece exactly as it wrapped inside the whole chapter.
- */
-@Composable
-private fun readerBodyStyle(): TextStyle {
-    val base = LightThemeTokens.typography.paragraph
-    return base.copy(
-        color = LightThemeTokens.colors.content,
-        fontSize = base.fontSize.scaledForReading(),
-        lineHeight = (base.fontSize.value * READER_LINE_HEIGHT_MULTIPLIER).designVerticalPxToSp(),
-        letterSpacing = base.letterSpacing.scaledForReading(),
-        lineBreak = LineBreak.Simple,
-        hyphens = Hyphens.None,
-    )
-}
-
-/** The chapter heading on a chapter's first page. Also measured and drawn with this one style. */
-@Composable
-private fun readerHeadingStyle(): TextStyle {
-    val base = LightThemeTokens.typography.heading
-    return base.copy(
-        color = LightThemeTokens.colors.content,
-        fontSize = base.fontSize.scaledForReading(),
-        lineHeight = base.lineHeight.scaledForReading(),
-        letterSpacing = base.letterSpacing.scaledForReading(),
-    )
-}
-
-/** Theme sizes are in design pixels; this scales them to the screen, as LightText does. */
-@Composable
-private fun TextUnit.scaledForReading(): TextUnit {
-    if (this == TextUnit.Unspecified) return this
-    return value.designVerticalPxToSp()
 }

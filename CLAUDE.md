@@ -90,7 +90,10 @@ reader/
     BookMeta.kt         cached meta.json model (kotlinx-serialization)
     ReadingPosition*.kt Room entity / dao / database / repository
     LibrarySortPreference.kt  remembered library sort (DataStore)
-  LibraryScreen.kt, SortScreen.kt, ContentsScreen.kt, ReaderScreen.kt, Divider.kt
+    ReaderTextSizePreference.kt  remembered reading text size (DataStore)
+  ReaderTextSize.kt     the five text sizes (pure Kotlin, unit-tested)
+  ReaderTypography.kt   reader body + heading TextStyles at a size (shared with TextSizeScreen)
+  LibraryScreen.kt, SortScreen.kt, ContentsScreen.kt, ReaderScreen.kt, TextSizeScreen.kt, Divider.kt
 ```
 
 **Parse once, then cache.** The first time a book is seen (or its file size / modified time
@@ -174,7 +177,19 @@ handful at a time, not the whole library. On the phone the files sit flat in
 (→ SortScreen, §8), the list, tap a book → ReaderScreen.
 
 **ReaderScreen** — top bar: back, the current chapter title, and a `LightIcons.LIST` button
-that opens Contents. Paged text below (§7).
+that opens Contents. Paged text below (§7). Tapping the chapter title opens TextSizeScreen.
+
+**TextSizeScreen** — top bar: back, "Text Size". Below it "−  <size name>  +" (drawn as
+text: the SDK has no minus icon), then a sample paragraph drawn with exactly the reader's
+body style and margins. Five sizes, `ReaderTextSize`: Small 0.85×, **Medium 1.0× (default,
+the original size)**, Large 1.15×, Larger 1.3×, Extra large 1.5× the SDK Paragraph size;
+the chapter heading scales by the same factor. At either end the button is lighter and does
+nothing (the size name, not the tone, says where you are). Back returns the size via
+`goBack(size)`; ReaderScreen saves it and re-paginates. One size for all books, remembered
+in `lightContext.dataStore` (key `reader_text_size`, the enum name; missing/unknown =
+Medium). Re-pagination anchors at the reader's place — the first character of the page last
+turned or jumped to (`anchorOffset`), which re-paging does not move — so switching sizes
+back and forth never drifts off the passage.
 
 **ContentsScreen** — the book's chapters; tapping one returns its index to ReaderScreen via
 `goBack(index)`, which jumps to that chapter's start in place.

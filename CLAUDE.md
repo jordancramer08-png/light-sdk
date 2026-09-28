@@ -144,8 +144,14 @@ git ls-tree -r --name-only f59672f -- tool      # the full list
 
 ## 8. Library order and display
 
-- Sort by **file name**. Jordan names files `Author - Series NN - Title.epub`, so file order
-  groups authors and keeps series in order.
+Jordan's PC library is `D:\Reading\Digital Books`: ~660 EPUBs in author folders, named
+like `Cemetery of Forgotten Books 01. The Shadow of the Wind - Carlos Ruiz Zafón.epub`
+(`Series NN. Title - Author.epub`, or `Title - Author.epub` for standalones). He sends a
+handful at a time, not the whole library. On the phone the files sit flat in
+`shared/books/`, with names flattened to plain ASCII by the send script.
+
+- Sort by **author** (from the EPUB metadata; case- and accent-insensitive, so "le Carré"
+  and "Le Carre" group together), then by **file name**, which keeps series in order.
 - Row: title (from the EPUB metadata, one line), author (lighter), progress ("Not started" or
   "NN% read", computed from chapter char counts as in the September `LibraryScreen`).
 - Empty library: "No books on this device yet." centered, lighter text.
@@ -170,8 +176,11 @@ and Jordan has confirmed it on the phone (phases 3–5).
 0. **Setup (done)** — branch, placeholder screen, scripts, this file.
 1. **EPUB engine** — `epub/` package ported from `convert.py`, pure Kotlin. Unit tests build
    small EPUBs in memory (never commit real books). Also a test that, when the env var
-   `READER_TEST_EPUBS` points to a folder, parses every EPUB there and prints title, author,
-   chapter count, and each chapter title + char count — skipped when the var is unset.
+   `READER_TEST_EPUBS` points to a folder, parses every EPUB under it (recursively) and writes
+   a report to `build/epub-report.txt`: one line per book (file, title, author, chapter
+   count, or the error / DRM), then full chapter titles + char counts for each book. It is
+   skipped when the var is unset. Run it on a few author folders first, then the whole
+   library, and summarize the failures and anything suspicious for Jordan.
 2. **Data layer** — `LibraryStore` (scan, parse-once cache, stale/orphan handling) and the
    Room position model. No UI.
 3. **Library + Contents screens.**

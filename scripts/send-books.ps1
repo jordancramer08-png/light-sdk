@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 $Package   = 'com.thelightphone.reader'
 $PhoneDir  = 'files/shared/books'
 $TempDir   = '/data/local/tmp'
-$DefaultSource = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'reader-books'
+$LibraryRoot = 'D:\Reading\Digital Books'   # your whole EPUB library (subfolders included)
 
 # --- find adb ---
 $adb = (Get-Command adb -ErrorAction SilentlyContinue).Source
@@ -13,20 +13,53 @@ if (-not $adb) { $adb = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\
 if (-not (Test-Path $adb)) { Write-Host "Can't find adb. Install Android Studio first (see the walkthrough)."; exit 1 }
 
 # --- which books? ---
-$sources = if ($args.Count -gt 0) { $args } else { @($DefaultSource) }
-$books = foreach ($s in $sources) {
-    if (Test-Path $s -PathType Container) { Get-ChildItem -LiteralPath $s -Filter *.epub -File }
-    elseif ($s -like '*.epub' -and (Test-Path -LiteralPath $s)) { Get-Item -LiteralPath $s }
-    else { Write-Host "Skipping (not an .epub or folder): $s" }
+# Drag-and-drop: the dropped files/folders. Double-click: a searchable picker over the whole library.
+function Find-Epubs($paths) {
+    foreach ($p in $paths) {
+        if (Test-Path -LiteralPath $p -PathType Container) { Get-ChildItem -LiteralPath $p -Filter *.epub -File -Recurse }
+        elseif ($p -like '*.epub' -and (Test-Path -LiteralPath $p)) { Get-Item -LiteralPath $p }
+        else { Write-Host "Skipping (not an .epub or folder): $p" }
+    }
+}
+if ($args.Count -gt 0) {
+    $books = @(Find-Epubs $args)
+} else {
+    if (-not (Test-Path -LiteralPath $LibraryRoot)) { Write-Host "Library folder not found: $LibraryRoot"; exit 1 }
+    Write-Host "Reading your library in $LibraryRoot ..."
+    $all = @(Find-Epubs @($LibraryRoot))
+    $rows = $all | Sort-Object FullName | ForEach-Object {
+        [pscustomobject]@{
+            Folder = $_.DirectoryName.Substring($LibraryRoot.Length).TrimStart('\')
+            Book   = $_.BaseName
+            SizeMB = [math]::Round($_.Length / 1MB, 1)
+            Path   = $_.FullName
+        }
+    }
+    Write-Host 'Pick books in the window: type in the filter box to search, Ctrl+click to pick several, then OK.'
+    $picked = @($rows | Out-GridView -Title 'Pick books to send to the phone' -PassThru)
+    $books = @($picked | ForEach-Object { Get-Item -LiteralPath $_.Path })
 }
 $books = @($books)
-if ($books.Count -eq 0) { Write-Host "No .epub files found in: $($sources -join ', ')"; exit 1 }
+if ($books.Count -eq 0) { Write-Host 'No books picked.'; exit 1 }
 
 # --- phone connected and app installed? ---
 $devices = & $adb devices | Select-String "`tdevice$"
 if (-not $devices) { Write-Host 'No phone found. Plug it in, unlock it, and allow USB debugging.'; exit 1 }
 $installed = & $adb shell pm list packages $Package | Select-String -SimpleMatch "package:$Package"
 if (-not $installed) { Write-Host 'The Reader app is not installed yet. Run "Build and Install Reader.cmd" first.'; exit 1 }
+
+# Phone-side file name: plain ASCII (accents and curly quotes flattened) so nothing
+# gets mangled between Windows, adb, and the phone. Titles on screen come from the
+# book itself, not the file name.
+function PhoneName([string]$name) {
+    $n = $name.Replace([char]0x2019, "'").Replace([char]0x2018, "'").Replace([char]0x201C, '"').Replace([char]0x201D, '"')
+    $n = $n.Replace([char]0x2013, '-').Replace([char]0x2014, '-')
+    $n = $n.Normalize([Text.NormalizationForm]::FormD)
+    $n = -join ($n.ToCharArray() | Where-Object { [Globalization.CharUnicodeInfo]::GetUnicodeCategory($_) -ne 'NonSpacingMark' })
+    $n = $n -replace '[^\x20-\x7E]', '_'
+    $n = $n -replace '"', ''
+    return $n
+}
 
 # Single-quote a path for the phone's shell (handles spaces and apostrophes).
 function Quote([string]$s) { "'" + ($s -replace "'", "'\''") + "'" }
@@ -39,7 +72,7 @@ foreach ($b in $books) {
     $tmp = "$TempDir/reader-upload.epub"
     & $adb push $b.FullName $tmp | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Host '   push failed'; continue }
-    $dest = Quote "$PhoneDir/$($b.Name)"
+    $dest = Quote "$PhoneDir/$(PhoneName $b.Name)"
     & $adb shell "run-as $Package cp $tmp $dest && rm $tmp"
     if ($LASTEXITCODE -ne 0) { Write-Host '   copy into the app failed'; continue }
     $sent++

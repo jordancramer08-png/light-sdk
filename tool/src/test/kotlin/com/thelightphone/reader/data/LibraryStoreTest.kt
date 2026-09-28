@@ -22,12 +22,78 @@ class LibraryStoreTest {
     /** How many times the EPUB parser actually ran. */
     private var parseCount = 0
 
+    /**
+     * Stands in for CoverImages (Android's image classes don't run on the PC): writes the
+     * cover's bytes to both files, or throws when [coverSaverFails].
+     */
+    private val savedCovers = mutableListOf<ByteArray>()
+    private var coverSaverFails = false
+
+    private fun fakeSaveCover(bytes: ByteArray, folder: File): Boolean {
+        File(folder, CoverSize.SMALL.fileName).writeBytes(bytes)
+        if (coverSaverFails) error("can't decode")
+        savedCovers.add(bytes)
+        File(folder, CoverSize.LARGE.fileName).writeBytes(bytes)
+        return true
+    }
+
     private fun store(parserVersion: Int = PARSER_VERSION) = LibraryStore(
         booksDir = booksDir,
         libraryDir = libraryDir,
         parse = { file: File -> parseCount++; EpubParser.parse(file) },
         parserVersion = parserVersion,
+        saveCover = ::fakeSaveCover,
     )
+
+    /** Puts a small EPUB with a cover image into shared/books. */
+    private fun addBookWithCover(fileName: String, title: String, cover: ByteArray) {
+        val chapters = listOf(EpubFixture.chapter("c1", "One", listOf(EpubFixture.longParagraph(title))))
+        EpubFixture.build(
+            title = title,
+            chapters = chapters,
+            extraManifest = """<item id="cover" href="cover.jpg" media-type="image/jpeg" properties="cover-image"/>""",
+            rawEntries = mapOf("OEBPS/cover.jpg" to cover),
+        ).copyTo(File(booksDir, fileName))
+    }
+
+    // --- covers -------------------------------------------------------------------
+
+    @Test
+    fun aCoverIsSavedInTheBooksCacheFolder() {
+        addBookWithCover("a.epub", "Covered", "jpeg bytes".toByteArray())
+
+        val book = store().refresh().single()
+
+        assertEquals(listOf("jpeg bytes"), savedCovers.map { String(it) })
+        val small = store().coverFile(book, CoverSize.SMALL)
+        assertEquals(File(File(libraryDir, "covered"), "cover-small.png"), small)
+        assertTrue(small.isFile)
+        assertTrue(store().coverFile(book, CoverSize.LARGE).isFile)
+    }
+
+    @Test
+    fun aBookWithoutACoverHasNoCoverFiles() {
+        addBook("a.epub", "Plain")
+
+        val book = store().refresh().single()
+
+        assertTrue(savedCovers.isEmpty())
+        assertFalse(store().coverFile(book, CoverSize.SMALL).exists())
+    }
+
+    @Test
+    fun aCoverThatCantBeDecodedLeavesTheBookReadableWithoutOne() {
+        coverSaverFails = true
+        addBookWithCover("a.epub", "Broken Cover", "not an image".toByteArray())
+
+        val book = store().refresh().single()
+
+        assertNull(book.problem)
+        assertEquals(1, book.chapters.size)
+        // The half-written small picture was removed too.
+        assertFalse(store().coverFile(book, CoverSize.SMALL).exists())
+        assertFalse(store().coverFile(book, CoverSize.LARGE).exists())
+    }
 
     @AfterTest
     fun cleanUp() {

@@ -11,8 +11,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.reader.data.BookMeta
+import com.thelightphone.reader.data.CoverSize
 import com.thelightphone.reader.data.LibraryFilterPreference
 import com.thelightphone.reader.data.LibraryGroupSeriesPreference
+import com.thelightphone.reader.data.LibraryShowCoversPreference
 import com.thelightphone.reader.data.LibrarySortPreference
 import com.thelightphone.reader.data.LibraryStore
 import com.thelightphone.reader.data.ReadingList
@@ -50,11 +52,16 @@ sealed interface LibraryScreenState {
     /** New or changed EPUBs are being parsed; [remaining] counts down. */
     data class Preparing(val remaining: Int) : LibraryScreenState
 
-    /** [list] is the reading list being shown, or null for all books. */
+    /**
+     * [list] is the reading list being shown, or null for all books. [continueReading] is the
+     * book last opened, shown as the first row (all books only, and only if the filter shows it).
+     */
     data class Loaded(
         val entries: List<LibraryEntry>,
         val list: ReadingList? = null,
         val filter: LibraryFilter = LibraryFilter.DEFAULT,
+        val continueReading: LibraryRow? = null,
+        val showCovers: Boolean = true,
     ) : LibraryScreenState
 }
 
@@ -66,6 +73,7 @@ class LibraryScreenViewModel(
     private val sortPreference: LibrarySortPreference,
     private val filterPreference: LibraryFilterPreference,
     private val groupSeriesPreference: LibraryGroupSeriesPreference,
+    private val showCoversPreference: LibraryShowCoversPreference,
     themePreference: ReaderThemePreference,
 ) : LightViewModel<Unit>() {
 
@@ -103,7 +111,12 @@ class LibraryScreenViewModel(
         if (refreshJob?.isActive == true) return
         refreshJob = viewModelScope.launch {
             if (!choicesLoaded) {
-                choices = SortAndFilter(sortPreference.load(), filterPreference.load(), groupSeriesPreference.load())
+                choices = SortAndFilter(
+                    sortPreference.load(),
+                    filterPreference.load(),
+                    groupSeriesPreference.load(),
+                    showCoversPreference.load(),
+                )
                 choicesLoaded = true
             }
             books = withContext(Dispatchers.IO) {
@@ -129,6 +142,7 @@ class LibraryScreenViewModel(
             sortPreference.save(newChoices.sort)
             filterPreference.save(newChoices.filter)
             groupSeriesPreference.save(newChoices.groupSeries)
+            showCoversPreference.save(newChoices.showCovers)
         }
     }
 
@@ -147,7 +161,12 @@ class LibraryScreenViewModel(
         val shown = view
         if (shown !is LibraryView.OneList) {
             val entries = libraryEntries(books, positions, choices.sort, statuses, choices.filter, choices.groupSeries)
-            _state.value = LibraryScreenState.Loaded(entries, filter = choices.filter)
+            _state.value = LibraryScreenState.Loaded(
+                entries,
+                filter = choices.filter,
+                continueReading = continueReadingRow(books, positions, statuses, choices.filter),
+                showCovers = choices.showCovers,
+            )
             return
         }
         val (list, slugs) = DatabaseQueue.read {
@@ -162,7 +181,7 @@ class LibraryScreenViewModel(
         }
         // A list always shows its books one by one, never grouped into series.
         val entries = listRows(books, positions, slugs, statuses).map { LibraryEntry.Book(it) }
-        _state.value = LibraryScreenState.Loaded(entries, list)
+        _state.value = LibraryScreenState.Loaded(entries, list, showCovers = choices.showCovers)
     }
 }
 
@@ -185,6 +204,7 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
         LibrarySortPreference(lightContext.dataStore),
         LibraryFilterPreference(lightContext.dataStore),
         LibraryGroupSeriesPreference(lightContext.dataStore),
+        LibraryShowCoversPreference(lightContext.dataStore),
         ReaderThemePreference(lightContext.dataStore),
     )
 
@@ -210,6 +230,8 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
                             entries = current.entries,
                             onSelectBook = ::openBook,
                             onSelectSeries = ::openSeries,
+                            continueReading = current.continueReading,
+                            coverFile = if (current.showCovers) ::smallCoverFile else null,
                         )
                     } else if (current.list != null) {
                         CenteredMessage("No books in this list yet.\n\nAdd one from a book's Contents.")
@@ -260,8 +282,11 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
 
     private fun openSeries(series: LibraryEntry.Series) {
         val books = series.rows.map { it.meta }
-        navigateTo(screenFactory = { SeriesScreen(it, series.name, books, libraryStore) })
+        val showCovers = viewModel.choices.showCovers
+        navigateTo(screenFactory = { SeriesScreen(it, series.name, books, libraryStore, showCovers) })
     }
+
+    private fun smallCoverFile(book: BookMeta) = libraryStore.coverFile(book, CoverSize.SMALL)
 }
 
 private fun preparingText(remaining: Int): String =

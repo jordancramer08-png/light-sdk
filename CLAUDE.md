@@ -97,9 +97,12 @@ reader/
     Footnotes.kt        NoteFinder: a note marker's link → the note's text, in any file of the book
     ContentFilter.kt    drops covers, title pages, ads, embedded TOCs, praise pages
     Series.kt           series + number: OPF metadata (calibre, then EPUB 3), else file name
+    Cover.kt            findCover: the cover image's bytes (no decoding here)
     WordCount.kt        countWords (runs of non-space holding a letter or digit)
   data/
-    LibraryStore.kt     scans shared/books/*.epub, caches parsed books
+    LibraryStore.kt     scans shared/books/*.epub, caches parsed books (and their covers)
+    CoverImages.kt      CoverSize, CoverImages.save: cover bytes → cover-small.png + cover-large.png
+                        (BitmapFactory with inSampleSize; phone only), sampleSize (unit-tested)
     BookMeta.kt         cached meta.json model (kotlinx-serialization)
     ReaderDatabase.kt   the one Room database (version 3) + readerDatabase() shared instance,
                         and MigrationToVersion3 (the 2 -> 3 backfill)
@@ -110,6 +113,7 @@ reader/
     LibrarySortPreference.kt  remembered library sort (DataStore)
     LibraryFilterPreference.kt  remembered library Show filter (DataStore)
     LibraryGroupSeriesPreference.kt  remembered Group series On/Off (DataStore)
+    LibraryShowCoversPreference.kt   remembered Show covers On/Off (DataStore)
     ReaderSettingsPreference.kt  remembered size, typeface, line spacing, margins, alignment,
                                  progress line On/Off (DataStore)
     ReadingSpeedPreference.kt    remembered reading speed, characters a minute (DataStore)
@@ -133,7 +137,10 @@ reader/
   LibraryScreen.kt, SortFilterScreen.kt, ContentsScreen.kt, ReaderScreen.kt, ReadingSettingsScreen.kt,
   ThemeScreen.kt, ListsScreen.kt, ListNameScreen.kt, DeleteListScreen.kt, ListBooksScreen.kt,
   AddToListScreen.kt, BookDetailsScreen.kt, SeriesScreen.kt, NoteScreen.kt, Divider.kt, RowIconButton.kt
-  LibraryEntryList.kt   the book / series rows list, shared by LibraryScreen and SeriesScreen
+  LibraryEntryList.kt   the book / series rows list (covers, Continue reading row), shared by
+                        LibraryScreen and SeriesScreen
+  BookCover.kt          CoverCache (covers read off the main thread, kept in memory) and BookCover
+                        (a row's cover, or the placeholder block with the title's first letter)
   UniformRow.kt         a fixed-height row (divider included) for LightLazyScrollView lists
 tool/schemas/           Room's saved schema for each database version (checked in)
 ```
@@ -147,6 +154,20 @@ chapter's place in the contents: `depth` and `parents` (the titles of the NCX / 
 above it, outermost first) (`PARSER_VERSION` 3). Delete cache folders whose EPUB is gone.
 Parsing runs on `Dispatchers.IO`, one book at a time; the library shows "Preparing N books…"
 meanwhile.
+
+**Covers (`PARSER_VERSION` 5).** While a book is prepared, `findCover` (epub/, pure Kotlin)
+returns the cover's bytes, trying in order: the OPF `<meta name="cover" content="id">` item (or
+a path there instead of an id), an EPUB 3 item with `properties="cover-image"`, an image item
+whose id or file name holds "cover", then the first `<img src>` / SVG `<image xlink:href>` in
+the first spine file (even `linear="no"`). A candidate whose file is missing, empty or over
+20 MB is skipped. `LibraryStore` hands the bytes to `CoverImages.save` (data/, Android), which
+decodes them with `BitmapFactory` at a power-of-2 `inSampleSize` that keeps them at least
+480 × 720, and writes `cover-small.png` (fills 150 × 225, for Library rows) and
+`cover-large.png` (fits 480 × 720, for Book Details) into `library/<slug>/`, never scaled up.
+A cover Android can't read (e.g. SVG) or a failed save leaves no cover files and the book
+readable. `saveCover` is a `LibraryStore` parameter so its PC tests use a stand-in. meta.json
+doesn't change: a missing `cover-small.png` means no cover. (Checked on the PC library: every
+readable book names its cover by `meta name="cover"` or `cover-image`.)
 
 **Formatting (`PARSER_VERSION` 3).** `NNN.txt` stays plain text, and saved places are still
 character offsets into it (a scene break adds a "⁂" paragraph, so a place saved before
@@ -264,14 +285,19 @@ like `Cemetery of Forgotten Books 01. The Shadow of the Wind - Carlos Ruiz Zafó
 handful at a time, not the whole library. On the phone the files sit flat in
 `shared/books/`, with names flattened to plain ASCII by the send script.
 
-- **Four sort orders and a Show filter**, chosen from a sort icon (`LightIcons.REVERSE_ORDER`
+- **Six sort orders and a Show filter**, chosen from a sort icon (`LightIcons.REVERSE_ORDER`
   — the SDK has no dedicated sort icon) in the right slot of the Library top bar. It opens
   `SortFilterScreen`, titled "Sort & Filter": "Sort by" Author A–Z, Author Z–A, Title A–Z,
-  Title Z–A, then "Show" All, Want to Read, Reading, Finished (reading status, §9), then
-  "Group series" On, Off. The current choice in each section is marked with a filled circle
-  (`SELECT_ON`, others `SELECT_OFF`). Tapping any row returns all three choices
-  (`SortAndFilter`) and redraws the list; back leaves them unchanged. The filter and
-  grouping apply to all books only, not to a list.
+  Title Z–A, Recently read, Recently added, then "Show" All, Want to Read, Reading, Finished
+  (reading status, §9), then "Group series" On, Off, then "Show covers" On, Off. The current
+  choice in each section is marked with a filled circle (`SELECT_ON`, others `SELECT_OFF`).
+  Tapping any row returns all four choices (`SortAndFilter`) and redraws the list; back
+  leaves them unchanged. The filter and grouping apply to all books only, not to a list;
+  Show covers applies to every Library list and to SeriesScreen.
+- **Recently read**: last opened first — by the saved place's `updatedAt`, which the reader
+  writes when a book opens, on every turn and on leaving it — then books never opened, by
+  title (as Title A–Z). **Recently added**: newest EPUB first, by its modified time on the
+  phone (the day the send script copied it; Book Details' "Added" date).
 - All comparisons are case- and accent-insensitive ("le Carré" and "Le Carre" group
   together). Author comes from the EPUB metadata; title from the EPUB metadata with a
   leading "The", "A" or "An" ignored ("The Shadow of the Wind" sorts under S).
@@ -281,23 +307,41 @@ handful at a time, not the whole library. On the phone the files sit flat in
   matched case- and accent-insensitively) show as one row — series name, the first book's
   author, "N books · M finished" (lighter) — which opens SeriesScreen. The filter runs
   first, so a series row counts only the books the filter shows, and a series with only one
-  book shown is a normal book row. A series row sorts by its name (title orders) or its
-  first book's author, ties by that book's file name. Off: every book is its own row.
-- All three are remembered in `lightContext.dataStore`: key `library_sort` (the enum name;
+  book shown is a normal book row. A series row sorts by its name (title orders), its
+  first book's author, or its most recent book (Recently read: the latest `updatedAt` of its
+  books, a never-opened series by name; Recently added: its newest EPUB), ties by its first
+  book's file name. Off: every book is its own row. One comparator orders book and series
+  rows alike (`libraryOrder`).
+- All four are remembered in `lightContext.dataStore`: key `library_sort` (the enum name;
   missing or unknown = Author A–Z), key `library_filter` (the `LibraryFilter` name;
-  missing or unknown = All) and key `library_group_series` (a boolean; missing = On).
-  Logic: `LibraryList.kt` (`LibrarySort`, `libraryRows`), `ReadingStatus.kt`
-  (`LibraryFilter`) and `SeriesGroups.kt` (`libraryEntries`); storage:
-  `data/LibrarySortPreference.kt`, `data/LibraryFilterPreference.kt`,
-  `data/LibraryGroupSeriesPreference.kt`.
+  missing or unknown = All), key `library_group_series` (a boolean; missing = On) and key
+  `library_show_covers` (a boolean; missing = On).
+  Logic: `LibraryList.kt` (`LibrarySort`, `libraryRows`, `libraryOrder`,
+  `continueReadingRow`, `coverLetter`), `ReadingStatus.kt` (`LibraryFilter`) and
+  `SeriesGroups.kt` (`libraryEntries`); storage: `data/LibrarySortPreference.kt`,
+  `data/LibraryFilterPreference.kt`, `data/LibraryGroupSeriesPreference.kt`,
+  `data/LibraryShowCoversPreference.kt`.
 - Row: title (from the EPUB metadata, one line), author (lighter), progress ("Not started" or
   "NN% read", computed from chapter char counts as in the September `LibraryScreen`; a
-  Finished book shows "Finished" instead, in the accent like "NN% read").
+  Finished book shows "Finished" instead, in the accent like "NN% read"). With Show covers
+  On, the book's small cover sits at the left (3.6 × 5.4 grid units, cropped to fill; a
+  series row shows its first book's cover). A book with no cover gets a plain block tinted
+  with the text color, holding the title's first letter or digit (lighter); the block is
+  blank while the picture loads. Covers are read on `Dispatchers.IO` and kept in
+  `CoverCache` (in memory, oldest dropped past 16 MB, keyed by slug + size + the book's
+  source stamp, so a re-prepared book never shows an old picture).
+- **Continue reading** (all books only, never in a list): the first row, tinted with the
+  accent (12%) and labelled "Continue reading" in the accent, then the title and its progress
+  (lighter), with its cover when covers are on. It is the book with the latest saved place
+  among the books on the phone that can open (`continueReadingRow`); tapping it opens the
+  book at that place. Hidden when no book has been opened, or when the Show filter hides
+  that book (the next most recent isn't used instead). The book keeps its normal row too.
 - Empty library: "No books on this device yet." centered, lighter text. When a Show filter
   leaves nothing: "No books marked Finished." (the filter's name).
 - The list is a `LightLazyScrollView` (only rows on screen are drawn). That view needs every
-  row the same height, so each row is a `UniformRow` of 7 grid units: title, author and
-  progress (or series name, author, count) one line each, ellipsized.
+  row the same height, so each row (the Continue reading row too) is a `UniformRow` of 7
+  grid units: title, author and progress (or series name, author, count) one line each,
+  ellipsized, beside the cover.
 
 **Long lists and huge books.** Some books have hundreds of chapters (C.S. Lewis Complete
 Works: 746). Any list that can grow long uses `LightLazyScrollView` + `UniformRow` with
@@ -310,7 +354,7 @@ than a blink the screen says "Preparing…" instead of freezing or showing a sta
 **LibraryScreen** (`@InitialScreen`) — top bar: the lists icon (`LightIcons.LARGE_LIST`) on
 the left (→ ListsScreen), "Library" or the shown list's name, and on the right the sort icon
 (→ Sort & Filter, §8) for all books, or a pencil (→ ListBooksScreen) when a list is shown. Tap a
-book → ReaderScreen. A list shows only its books, in the list's own order (sorting doesn't
+book → ReaderScreen. All books opens with the Continue reading row (§8) when there is one. A list shows only its books, in the list's own order (sorting doesn't
 apply); a book no longer on the phone is skipped but stays in the list. A list always shows
 individual books, never series rows. The Library opens on all books each launch (the chosen
 list isn't remembered). Empty list: "No books in this list yet." centered, lighter.
@@ -424,7 +468,9 @@ with the chapter being read as the top row. Bottom bar: "ADD TO LIST" (→ AddTo
 reader (above) or by hand on Book Details. Status reads and writes go through
 `DatabaseQueue`, so a change made just before leaving a screen is always saved.
 
-**BookDetailsScreen** — top bar: back, "Details". The title (Subheading) and
+**BookDetailsScreen** — top bar: back, "Details". The large cover (`cover-large.png`, 14
+grid units tall, fitted and centered; read before the page shows, so nothing jumps; left
+out when the book has none, whatever Show covers says), then the title (Subheading) and
 author (lighter) at the top, then "Status" with three rows (Want to Read, Reading,
 Finished), the current one `SELECT_ON`; tapping one saves it at once. That is the only
 thing that can be changed here. Then "Label   value" rows (label lighter, value right-aligned,

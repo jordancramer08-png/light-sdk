@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.reader.data.BookMeta
+import com.thelightphone.reader.data.CoverSize
 import com.thelightphone.reader.data.DatabaseQueue
 import com.thelightphone.reader.data.LibraryStore
 import com.thelightphone.reader.data.ReadingPositionRepository
@@ -60,6 +61,7 @@ class SeriesScreen(
     private val seriesName: String,
     private val books: List<BookMeta>,
     private val libraryStore: LibraryStore,
+    private val showCovers: Boolean,
 ) : LightScreen<Unit, SeriesViewModel>(sealedActivity) {
 
     override val viewModelClass: Class<SeriesViewModel>
@@ -81,7 +83,13 @@ class SeriesScreen(
                 center = LightTopBarCenter.Text(seriesName),
                 modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
             )
-            entries?.let { LibraryEntryList(entries = it, onSelectBook = ::openBook) }
+            entries?.let {
+                LibraryEntryList(
+                    entries = it,
+                    onSelectBook = ::openBook,
+                    coverFile = if (showCovers) { book -> libraryStore.coverFile(book, CoverSize.SMALL) } else null,
+                )
+            }
         }
     }
 

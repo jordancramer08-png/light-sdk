@@ -33,7 +33,8 @@ class EpubLibraryReportTest {
             try {
                 val book = EpubParser.parse(file)
                 val notes = book.chapters.flatMap { c -> c.styles.filter { it.style == TextStyleKind.NOTE } }
-                summaryLines.add("${file.name}\t\"${book.title}\" by ${book.author}\t${book.chapters.size} chapters\t${notes.size} notes")
+                val cover = book.cover?.let { "cover ${(it.size + 1023) / 1024} KB" } ?: "no cover"
+                summaryLines.add("${file.name}\t\"${book.title}\" by ${book.author}\t${book.chapters.size} chapters\t${notes.size} notes\t$cover")
 
                 val detail = StringBuilder()
                 detail.append("== ${file.name} ==\n")

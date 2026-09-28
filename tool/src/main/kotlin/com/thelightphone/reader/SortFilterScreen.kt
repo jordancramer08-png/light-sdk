@@ -20,18 +20,19 @@ import com.thelightphone.sdk.ui.gridUnitsAsDp
 import com.thelightphone.sdk.ui.lightClickable
 
 /**
- * The library's order, which books it shows, and whether each series is one row, chosen
- * together on the Sort & Filter screen.
+ * The library's order, which books it shows, whether each series is one row, and whether rows
+ * show covers, chosen together on the Sort & Filter screen.
  */
 data class SortAndFilter(
     val sort: LibrarySort,
     val filter: LibraryFilter,
     val groupSeries: Boolean = true,
+    val showCovers: Boolean = true,
 )
 
 /**
- * Sort & Filter (CLAUDE.md 8): the four library orders, then a Show section (All, Want to
- * Read, Reading, Finished), then Group series (On, Off). The current choice in each section
+ * Sort & Filter (CLAUDE.md 8): the library orders, then a Show section (All, Want to
+ * Read, Reading, Finished), then Group series (On, Off), then Show covers (On, Off). The current choice in each section
  * has a filled circle, the others an empty one, so it reads without color. Tapping any row
  * hands the new choices back to LibraryScreen; back leaves them all unchanged.
  */
@@ -70,21 +71,20 @@ class SortFilterScreen(
                     if (i != LibraryFilter.entries.lastIndex) HairlineDivider()
                 }
 
-                SectionHeading("Group series", modifier = Modifier.padding(top = 1.5f.gridUnitsAsDp()))
-                ChoiceRow(
-                    label = "On",
-                    isCurrent = current.groupSeries,
-                    onSelect = { goBack(current.copy(groupSeries = true)) },
-                )
-                HairlineDivider()
-                ChoiceRow(
-                    label = "Off",
-                    isCurrent = !current.groupSeries,
-                    onSelect = { goBack(current.copy(groupSeries = false)) },
-                )
+                OnOffSection("Group series", current.groupSeries) { goBack(current.copy(groupSeries = it)) }
+                OnOffSection("Show covers", current.showCovers) { goBack(current.copy(showCovers = it)) }
             }
         }
     }
+}
+
+/** A heading, then On and Off rows; [isOn] marks the current one. */
+@Composable
+private fun OnOffSection(heading: String, isOn: Boolean, onSelect: (Boolean) -> Unit) {
+    SectionHeading(heading, modifier = Modifier.padding(top = 1.5f.gridUnitsAsDp()))
+    ChoiceRow(label = "On", isCurrent = isOn, onSelect = { onSelect(true) })
+    HairlineDivider()
+    ChoiceRow(label = "Off", isCurrent = !isOn, onSelect = { onSelect(false) })
 }
 
 @Composable

@@ -16,7 +16,8 @@ import java.io.File
  *
  * EPUBs sit in `<filesDir>/shared/books/`. Each one is parsed once and cached as
  * `<filesDir>/library/<slug>/meta.json` plus `001.txt`, `002.txt`, … (plain text) and,
- * for chapters with any italic, bold, quotes or scene breaks, `001.styles.json`, … Later opens
+ * for chapters with any italic, bold, quotes or scene breaks, `001.styles.json`, …, and when
+ * the book has a cover, `cover-small.png` and `cover-large.png` ([CoverSize]). Later opens
  * read the cache. A book is parsed again when its file size or modified time
  * changes, or when [PARSER_VERSION] is bumped. Cache folders whose EPUB is gone
  * are deleted.
@@ -29,6 +30,8 @@ class LibraryStore(
     private val libraryDir: File,
     private val parse: (File) -> Book = EpubParser::parse,
     private val parserVersion: Int = PARSER_VERSION,
+    /** Writes a cover's two PNGs into a folder; false if the bytes aren't a readable picture. */
+    private val saveCover: (ByteArray, File) -> Boolean = CoverImages::save,
 ) {
     constructor(filesDir: File) : this(File(filesDir, "shared/books"), File(filesDir, "library"))
 
@@ -83,6 +86,12 @@ class LibraryStore(
         }
     }
 
+    /**
+     * Where this book's cover picture of [size] is kept. The file is missing when the book
+     * has no cover (or it couldn't be read). Only a path: nothing is read here.
+     */
+    fun coverFile(book: BookMeta, size: CoverSize): File = File(File(libraryDir, book.slug), size.fileName)
+
     // --- cache rules ----------------------------------------------------------
 
     /**
@@ -131,8 +140,22 @@ class LibraryStore(
                 parents = chapter.parents,
             )
         }
+        book.cover?.let { saveCoverQuietly(it, folder) }
         val meta = BookMeta(slug, book.title, book.author, chapters, stamp, series = book.series, seriesNumber = book.seriesNumber)
         return writeMeta(meta)
+    }
+
+    /** A cover that can't be read (or is too big to decode) just leaves the book without one. */
+    private fun saveCoverQuietly(bytes: ByteArray, folder: File) {
+        val saved = try {
+            saveCover(bytes, folder)
+        } catch (e: Exception) {
+            false
+        } catch (e: OutOfMemoryError) {
+            false
+        }
+        // Never leave one picture without the other (a half-written cover).
+        if (!saved) CoverSize.entries.forEach { File(folder, it.fileName).delete() }
     }
 
     /** A book we can't open is still cached, so it isn't re-parsed on every launch. */

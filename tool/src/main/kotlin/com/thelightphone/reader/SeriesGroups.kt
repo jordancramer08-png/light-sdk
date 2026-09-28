@@ -17,11 +17,23 @@ sealed interface LibraryEntry {
     val fileName: String
     val key: String
 
+    /** When its book (a series: its most recent book) was last read, or null if never. */
+    val lastReadAt: Long?
+
+    /** When its EPUB (a series: its newest one) was put on the phone. */
+    val addedAt: Long
+
+    /** The book whose cover the row shows (a series: its first book). */
+    val coverBook: BookMeta
+
     data class Book(val row: LibraryRow) : LibraryEntry {
         override val title get() = row.meta.title
         override val author get() = row.meta.author
         override val fileName get() = row.meta.source.fileName
         override val key get() = row.meta.slug
+        override val lastReadAt get() = row.lastReadAt
+        override val addedAt get() = row.meta.source.modified
+        override val coverBook get() = row.meta
     }
 
     /** Two or more books of one series, [rows] in number order. */
@@ -32,6 +44,9 @@ sealed interface LibraryEntry {
 
         // Slugs never hold a ":", so this can't clash with a book's key.
         override val key get() = "series:" + sortKey(name)
+        override val lastReadAt get() = rows.mapNotNull { it.lastReadAt }.maxOrNull()
+        override val addedAt get() = rows.maxOf { it.meta.source.modified }
+        override val coverBook get() = rows.first().meta
 
         val finishedCount: Int get() = rows.count { it.status == ReadingStatus.FINISHED }
 
@@ -43,7 +58,8 @@ sealed interface LibraryEntry {
 /**
  * The library's entries: the same books [libraryRows] shows, in the chosen order. With
  * [groupSeries] on, books of one series (same name, ignoring case and accents) become a
- * single entry, sorted by the series name (title orders) or its first book's author. A
+ * single entry, sorted by the series name (title orders), its first book's author, or its
+ * most recently read or added book (the Recently orders). A
  * series with only one book shown stays a normal book row. The filter is applied first, so
  * a series row counts only the books the filter lets through.
  */
@@ -67,7 +83,7 @@ fun libraryEntries(
             else -> null
         }
     }
-    return entries.sortedWith(entryComparator(sort).thenBy { it.fileName })
+    return entries.sortedWith(libraryOrder(sort))
 }
 
 /** The series row, named after its first book (in number order). */
@@ -80,10 +96,3 @@ private fun seriesEntry(members: List<LibraryRow>): LibraryEntry.Series {
 private val seriesOrder: Comparator<LibraryRow> =
     compareBy<LibraryRow, BigDecimal?>(nullsLast(naturalOrder())) { it.meta.seriesNumber?.toBigDecimalOrNull() }
         .thenBy { it.meta.source.fileName }
-
-private fun entryComparator(sort: LibrarySort): Comparator<LibraryEntry> = when (sort) {
-    LibrarySort.AUTHOR_A_TO_Z -> compareBy { sortKey(it.author) }
-    LibrarySort.AUTHOR_Z_TO_A -> compareByDescending { sortKey(it.author) }
-    LibrarySort.TITLE_A_TO_Z -> compareBy { titleSortKey(it.title) }
-    LibrarySort.TITLE_Z_TO_A -> compareByDescending { titleSortKey(it.title) }
-}

@@ -37,6 +37,8 @@ object EpubFixture {
         spineIncludesNav: Boolean = false,
         /** Raw OPF metadata lines, e.g. a series `<meta>`. */
         extraMetadata: String = "",
+        /** Raw manifest `<item>`s, e.g. a cover image (its bytes go in [rawEntries]). */
+        extraManifest: String = "",
     ): File {
         val opfDir = "OEBPS/"
         val manifest = StringBuilder()
@@ -46,6 +48,7 @@ object EpubFixture {
             val linearAttr = if (!c.linear) """ linear="no"""" else ""
             spine.append("""<itemref idref="${c.id}"$linearAttr/>""")
         }
+        manifest.append(extraManifest)
         if (tocStyle == TocStyle.NCX) manifest.append("""<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>""")
         if (tocStyle == TocStyle.NAV) {
             manifest.append("""<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>""")

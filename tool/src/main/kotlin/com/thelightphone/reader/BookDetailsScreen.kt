@@ -1,18 +1,23 @@
 package com.thelightphone.reader
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.reader.data.BookMeta
+import com.thelightphone.reader.data.CoverSize
 import com.thelightphone.reader.data.DatabaseQueue
+import com.thelightphone.reader.data.LibraryStore
 import com.thelightphone.reader.data.ReadingPositionRepository
 import com.thelightphone.reader.data.ReadingStatusRepository
 import com.thelightphone.reader.data.readerDatabase
@@ -35,9 +40,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 class BookDetailsViewModel(
     private val bookMeta: BookMeta,
+    private val coverFile: File,
     private val readingPositionRepository: ReadingPositionRepository,
     private val readingStatusRepository: ReadingStatusRepository,
 ) : LightViewModel<Unit>() {
@@ -50,8 +57,13 @@ class BookDetailsViewModel(
     private val _status = MutableStateFlow<ReadingStatus?>(null)
     val status: StateFlow<ReadingStatus?> = _status.asStateFlow()
 
+    /** The large cover, read before the rows show so the page doesn't jump; Missing if there is none. */
+    var cover: CoverPicture = CoverPicture.Missing
+        private set
+
     init {
         viewModelScope.launch {
+            cover = CoverCache.load(coverFile, CoverCache.key(bookMeta, CoverSize.LARGE))
             val position = withContext(Dispatchers.IO) { readingPositionRepository.get(bookMeta.slug) }
             _rows.value = bookDetailRows(bookMeta, position)
         }
@@ -82,6 +94,7 @@ class BookDetailsScreen(
 
     override fun createViewModel() = BookDetailsViewModel(
         bookMeta,
+        LibraryStore(lightContext.filesDir).coverFile(bookMeta, CoverSize.LARGE),
         ReadingPositionRepository.getInstance { lightContext.readerDatabase() },
         ReadingStatusRepository.getInstance { lightContext.readerDatabase() },
     )
@@ -102,6 +115,7 @@ class BookDetailsScreen(
             if (shownRows != null && shownStatus != null) {
                 DetailsList(
                     bookMeta = bookMeta,
+                    cover = viewModel.cover,
                     status = shownStatus,
                     onStatusChange = viewModel::changeStatus,
                     rows = shownRows,
@@ -115,6 +129,7 @@ class BookDetailsScreen(
 @Composable
 private fun DetailsList(
     bookMeta: BookMeta,
+    cover: CoverPicture,
     status: ReadingStatus,
     onStatusChange: (ReadingStatus) -> Unit,
     rows: List<DetailRow>,
@@ -125,6 +140,17 @@ private fun DetailsList(
             .fillMaxWidth()
             .padding(horizontal = 1f.gridUnitsAsDp()),
     ) {
+        if (cover is CoverPicture.Found) {
+            Image(
+                bitmap = cover.image,
+                contentDescription = null, // the title is written just below
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(COVER_HEIGHT_GRID_UNITS.gridUnitsAsDp())
+                    .padding(bottom = 1f.gridUnitsAsDp()),
+            )
+        }
         Column(modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp())) {
             LightText(text = bookMeta.title, variant = LightTextVariant.Subheading)
             LightText(text = bookMeta.author, variant = LightTextVariant.Copy, lighten = true)
@@ -184,6 +210,9 @@ private fun DetailRowView(row: DetailRow) {
         )
     }
 }
+
+/** The cover's height at the top of the page (its width follows its shape). */
+private const val COVER_HEIGHT_GRID_UNITS = 14f
 
 /** The label column's share of the row width. */
 private const val LABEL_WEIGHT = 0.4f

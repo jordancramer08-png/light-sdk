@@ -25,6 +25,8 @@ data class Book(
     /** The series this book belongs to, if any, and its place in it ("1", "2.5"). */
     val series: String? = null,
     val seriesNumber: String? = null,
+    /** The cover image's bytes as stored in the EPUB (JPEG, PNG, …), or null if none was found. */
+    val cover: ByteArray? = null,
 )
 
 /** Raised when an EPUB can't be converted (e.g. it's DRM-protected). */
@@ -36,11 +38,11 @@ class InvalidEpubException(message: String) : EpubParseException(message)
  * Bump this whenever a change here (or in HtmlText / ContentFilter) would change a
  * book's chapters or text. The library cache sees the new number and re-parses every book.
  */
-const val PARSER_VERSION = 4 // 2: series, and word counts. 3: italic/bold/quotes/scene breaks, nested contents. 4: notes
+const val PARSER_VERSION = 5 // 2: series, and word counts. 3: italic/bold/quotes/scene breaks, nested contents. 4: notes. 5: covers
 
 private const val CONTAINER_PATH = "META-INF/container.xml"
 private const val DRM_MARKER_PATH = "META-INF/encryption.xml"
-private val CONTENT_MEDIA_TYPES = setOf("application/xhtml+xml", "text/html")
+internal val CONTENT_MEDIA_TYPES = setOf("application/xhtml+xml", "text/html")
 
 /**
  * Parses an EPUB into a [Book]: container.xml -> OPF -> metadata (dc:title,
@@ -48,7 +50,7 @@ private val CONTENT_MEDIA_TYPES = setOf("application/xhtml+xml", "text/html")
  * only xhtml/html media types) -> chapter titles and their nesting from the NCX
  * first, nav.xhtml fallback -> HTML flattened to text (italic, bold, quotes and
  * scene breaks kept as style ranges; note markers matched to their notes) -> non-content filtering -> untitled
- * chapters numbered "Chapter N". Ported from `convert.py` (see CLAUDE.md
+ * chapters numbered "Chapter N" -> the cover image's bytes ([findCover]). Ported from `convert.py` (see CLAUDE.md
  * section 7) — the phone parses EPUBs itself instead of reading pre-converted
  * text from the PC.
  */
@@ -98,7 +100,8 @@ object EpubParser {
 
             if (chapters.isEmpty()) throw InvalidEpubException("no readable chapters found")
             val series = readSeries(opfText) ?: seriesFromFileName(file.name)
-            return Book(title, author, chapters, series?.name, series?.number)
+            val cover = findCover(zip, opfRoot, manifest, spineItems.map { it.first })
+            return Book(title, author, chapters, series?.name, series?.number, cover)
         }
     }
 }
@@ -118,7 +121,7 @@ fun slugify(title: String): String {
 
 // --- OPF / NCX / nav parsing -------------------------------------------------
 
-private data class ManifestItem(val href: String, val mediaType: String, val properties: Set<String>)
+internal data class ManifestItem(val href: String, val mediaType: String, val properties: Set<String>)
 
 private fun findOpfPath(zip: ZipFile): String {
     val root = parseXml(readZipText(zip, CONTAINER_PATH))

@@ -56,6 +56,12 @@ android {
     }
 }
 
+// Room writes each database version's schema here (tool/schemas/). The files are
+// checked in: the 1 -> 2 migration is generated from them, and its test reads them.
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget(rootProject.ext["jvmTarget"] as String))

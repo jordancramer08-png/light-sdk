@@ -16,7 +16,10 @@ import androidx.lifecycle.viewModelScope
 import com.thelightphone.reader.data.BookMeta
 import com.thelightphone.reader.data.LibrarySortPreference
 import com.thelightphone.reader.data.LibraryStore
-import com.thelightphone.reader.data.ReaderDatabase
+import com.thelightphone.reader.data.ReadingList
+import com.thelightphone.reader.data.ReadingListQueue
+import com.thelightphone.reader.data.ReadingListRepository
+import com.thelightphone.reader.data.readerDatabase
 import com.thelightphone.reader.data.ReaderThemePreference
 import com.thelightphone.reader.data.ReadingPosition
 import com.thelightphone.reader.data.ReadingPositionRepository
@@ -25,7 +28,6 @@ import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
-import com.thelightphone.sdk.buildDatabase
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightScrollView
@@ -50,12 +52,14 @@ sealed interface LibraryScreenState {
     /** New or changed EPUBs are being parsed; [remaining] counts down. */
     data class Preparing(val remaining: Int) : LibraryScreenState
 
-    data class Loaded(val rows: List<LibraryRow>) : LibraryScreenState
+    /** [list] is the reading list being shown, or null for all books. */
+    data class Loaded(val rows: List<LibraryRow>, val list: ReadingList? = null) : LibraryScreenState
 }
 
 class LibraryScreenViewModel(
     private val libraryStore: LibraryStore,
     private val readingPositionRepository: ReadingPositionRepository,
+    private val readingListRepository: ReadingListRepository,
     private val sortPreference: LibrarySortPreference,
     themePreference: ReaderThemePreference,
 ) : LightViewModel<Unit>() {
@@ -72,6 +76,11 @@ class LibraryScreenViewModel(
         private set
     private var books = emptyList<BookMeta>()
     private var positions = emptyMap<String, ReadingPosition>()
+    private var booksLoaded = false
+
+    /** All books, or one reading list. Starts on all books each time the app opens. */
+    var view: LibraryView = LibraryView.AllBooks
+        private set
 
     init {
         // The Library opens first, so the saved theme is read here, once per launch.
@@ -99,7 +108,8 @@ class LibraryScreenViewModel(
             positions = withContext(Dispatchers.IO) {
                 readingPositionRepository.getAll().associateBy { it.bookSlug }
             }
-            showRows()
+            booksLoaded = true
+            showCurrentView()
         }
     }
 
@@ -107,12 +117,38 @@ class LibraryScreenViewModel(
     fun changeSort(newSort: LibrarySort) {
         sort = newSort
         sortLoaded = true
-        if (_state.value is LibraryScreenState.Loaded) showRows()
+        showAgain()
         viewModelScope.launch { sortPreference.save(newSort) }
     }
 
-    private fun showRows() {
-        _state.value = LibraryScreenState.Loaded(libraryRows(books, positions, sort))
+    /** Shows all books or one list (picked on the Lists screen). */
+    fun changeView(newView: LibraryView) {
+        view = newView
+        showAgain()
+    }
+
+    /** Redraws with the books already loaded. Before they are, the running refresh will draw. */
+    private fun showAgain() {
+        if (booksLoaded) viewModelScope.launch { showCurrentView() }
+    }
+
+    private suspend fun showCurrentView() {
+        val shown = view
+        if (shown !is LibraryView.OneList) {
+            _state.value = LibraryScreenState.Loaded(libraryRows(books, positions, sort))
+            return
+        }
+        val (list, slugs) = ReadingListQueue.read {
+            readingListRepository.list(shown.listId) to readingListRepository.bookSlugs(shown.listId)
+        }
+        if (view != shown) return // a different choice was made while this one loaded
+        if (list == null) {
+            // The list was deleted: fall back to all books.
+            view = LibraryView.AllBooks
+            showCurrentView()
+            return
+        }
+        _state.value = LibraryScreenState.Loaded(listRows(books, positions, slugs), list)
     }
 }
 
@@ -122,9 +158,7 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
 
     private val libraryStore = LibraryStore(lightContext.filesDir)
 
-    private val readingPositionRepository = ReadingPositionRepository.getInstance {
-        lightContext.buildDatabase(ReaderDatabase::class.java, ReadingPositionRepository.DATABASE_NAME)
-    }
+    private val readingPositionRepository = ReadingPositionRepository.getInstance { lightContext.readerDatabase() }
 
     override val viewModelClass: Class<LibraryScreenViewModel>
         get() = LibraryScreenViewModel::class.java
@@ -132,6 +166,7 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
     override fun createViewModel() = LibraryScreenViewModel(
         libraryStore,
         readingPositionRepository,
+        ReadingListRepository.getInstance { lightContext.readerDatabase() },
         LibrarySortPreference(lightContext.dataStore),
         ReaderThemePreference(lightContext.dataStore),
     )
@@ -141,9 +176,11 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
         val state by viewModel.state.collectAsState()
 
         ThemedScreen {
+            val shownList = (state as? LibraryScreenState.Loaded)?.list
             LightTopBar(
-                center = LightTopBarCenter.Text("Library"),
-                rightButton = LightBarButton.LightIcon(icon = LightIcons.REVERSE_ORDER, onClick = ::openSort),
+                leftButton = LightBarButton.LightIcon(icon = LightIcons.LARGE_LIST, onClick = ::openLists),
+                center = LightTopBarCenter.Text(shownList?.name ?: "Library"),
+                rightButton = rightButton(state),
                 modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
             )
 
@@ -151,13 +188,41 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
                 is LibraryScreenState.Loading -> Unit
                 is LibraryScreenState.Preparing -> CenteredMessage(preparingText(current.remaining))
                 is LibraryScreenState.Loaded ->
-                    if (current.rows.isEmpty()) {
-                        CenteredMessage("No books on this device yet.")
-                    } else {
+                    if (current.rows.isNotEmpty()) {
                         BookList(rows = current.rows, onSelect = ::openBook)
+                    } else if (current.list != null) {
+                        CenteredMessage("No books in this list yet.\n\nAdd one from a book's Contents.")
+                    } else {
+                        CenteredMessage("No books on this device yet.")
                     }
             }
         }
+    }
+
+    /**
+     * All books: the sort button. One list: a pencil to rearrange it (a list keeps its own
+     * order, so sorting doesn't apply).
+     */
+    private fun rightButton(state: LibraryScreenState): LightBarButton {
+        val loaded = state as? LibraryScreenState.Loaded
+        val list = loaded?.list
+        return if (list != null) {
+            LightBarButton.LightIcon(icon = LightIcons.PENCIL, onClick = { openListBooks(list, loaded.rows) })
+        } else {
+            LightBarButton.LightIcon(icon = LightIcons.REVERSE_ORDER, onClick = ::openSort)
+        }
+    }
+
+    private fun openLists() {
+        navigateTo(
+            screenFactory = { ListsScreen(it, viewModel.view) },
+            resultCallback = { chosen -> viewModel.changeView(chosen) },
+        )
+    }
+
+    /** The Library refreshes when it comes back, so changes made there show up. */
+    private fun openListBooks(list: ReadingList, rows: List<LibraryRow>) {
+        navigateTo(screenFactory = { ListBooksScreen(it, list.id, list.name, rows.map { row -> row.meta }) })
     }
 
     private fun openSort() {

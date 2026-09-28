@@ -25,14 +25,13 @@ import androidx.lifecycle.viewModelScope
 import com.thelightphone.reader.data.BookMeta
 import com.thelightphone.reader.data.ChapterMeta
 import com.thelightphone.reader.data.LibraryStore
-import com.thelightphone.reader.data.ReaderDatabase
+import com.thelightphone.reader.data.readerDatabase
 import com.thelightphone.reader.data.ReaderTextSizePreference
 import com.thelightphone.reader.data.ReadingPositionRepository
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
-import com.thelightphone.sdk.buildDatabase
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightTopBar
@@ -282,9 +281,7 @@ class ReaderScreen(
     private val libraryStore: LibraryStore,
 ) : LightScreen<Unit, ReaderScreenViewModel>(sealedActivity) {
 
-    private val readingPositionRepository = ReadingPositionRepository.getInstance {
-        lightContext.buildDatabase(ReaderDatabase::class.java, ReadingPositionRepository.DATABASE_NAME)
-    }
+    private val readingPositionRepository = ReadingPositionRepository.getInstance { lightContext.readerDatabase() }
 
     override val viewModelClass: Class<ReaderScreenViewModel>
         get() = ReaderScreenViewModel::class.java

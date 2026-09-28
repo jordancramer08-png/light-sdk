@@ -18,8 +18,6 @@ class ReadingPositionRepository private constructor(database: ReaderDatabase) {
     }
 
     companion object {
-        const val DATABASE_NAME = "reading_position.db"
-
         @Volatile
         private var instance: ReadingPositionRepository? = null
 

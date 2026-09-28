@@ -9,6 +9,7 @@ import com.thelightphone.reader.data.ChapterMeta
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.ui.LightBarButton
+import com.thelightphone.sdk.ui.LightBottomBar
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
@@ -22,7 +23,7 @@ import com.thelightphone.sdk.ui.lightClickable
  * The book's chapters, reachable from the reading screen (CLAUDE.md 9). Tapping a chapter
  * hands its index back to the calling ReaderScreen via [goBack] rather than navigating
  * onward, so the jump happens in place instead of pushing a new reading screen onto the
- * back stack.
+ * back stack. "Add to list" at the bottom opens AddToListScreen for this book.
  */
 class ContentsScreen(
     sealedActivity: SealedLightActivity,
@@ -41,15 +42,25 @@ class ContentsScreen(
                 modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
             )
 
-            ChapterList(bookMeta = bookMeta, onSelect = { chapter -> goBack(chapter.index) })
+            ChapterList(
+                bookMeta = bookMeta,
+                onSelect = { chapter -> goBack(chapter.index) },
+                modifier = Modifier.weight(1f),
+            )
+            LightBottomBar(items = listOf(LightBarButton.Text(text = "ADD TO LIST", onClick = ::openAddToList)))
         }
+    }
+
+    /** Nothing comes back: the lists are saved as they're switched on and off. */
+    private fun openAddToList() {
+        navigateTo(screenFactory = { AddToListScreen(it, bookMeta) })
     }
 }
 
 @Composable
-private fun ChapterList(bookMeta: BookMeta, onSelect: (ChapterMeta) -> Unit) {
+private fun ChapterList(bookMeta: BookMeta, onSelect: (ChapterMeta) -> Unit, modifier: Modifier = Modifier) {
     LightScrollView(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 1f.gridUnitsAsDp()),
     ) {

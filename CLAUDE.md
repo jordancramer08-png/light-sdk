@@ -89,7 +89,10 @@ reader/
   data/
     LibraryStore.kt     scans shared/books/*.epub, caches parsed books
     BookMeta.kt         cached meta.json model (kotlinx-serialization)
-    ReadingPosition*.kt Room entity / dao / database / repository
+    ReaderDatabase.kt   the one Room database (version 2) + readerDatabase() shared instance
+    ReadingPosition*.kt Room entity / dao / repository for saved places
+    ReadingList*.kt     Room entities / dao / repository for reading lists;
+                        ReadingListQueue runs list reads + writes one at a time, in order
     LibrarySortPreference.kt  remembered library sort (DataStore)
     ReaderTextSizePreference.kt  remembered reading text size (DataStore)
     ReaderThemePreference.kt     remembered reading theme (DataStore)
@@ -97,8 +100,11 @@ reader/
   ReaderTypography.kt   reader body + heading TextStyles at a size (shared with TextSizeScreen)
   ReaderTheme.kt        the four themes: LightColors + accent each
   ReaderThemeController.kt  the app-wide current theme; ThemedScreen frame every screen uses
+  ReadingLists.kt       list logic: LibraryView, listRows, neighbourSlug (pure Kotlin, unit-tested)
   LibraryScreen.kt, SortScreen.kt, ContentsScreen.kt, ReaderScreen.kt, TextSizeScreen.kt,
-  ThemeScreen.kt, Divider.kt
+  ThemeScreen.kt, ListsScreen.kt, ListNameScreen.kt, DeleteListScreen.kt, ListBooksScreen.kt,
+  AddToListScreen.kt, Divider.kt, RowIconButton.kt
+tool/schemas/           Room's saved schema for each database version (checked in)
 ```
 
 **Parse once, then cache.** The first time a book is seen (or its file size / modified time
@@ -133,12 +139,24 @@ git ls-tree -r --name-only f59672f -- tool      # the full list
   (`META-INF/encryption.xml` = skip the book, show it as "Can't open (DRM)") → encoding
   (declared, then UTF-8, then cp1252).
 - **Keep the slug rule identical** (`slugify(title)`: lowercase, non-alphanumerics → `-`) and
-  keep chapter numbering 1-based after filtering. With the Room model below unchanged, a phone
-  that still has the September app's database keeps its saved places after this upgrade.
+  keep chapter numbering 1-based after filtering. With the `reading_position` table below
+  unchanged, a phone that still has the September app's database keeps its saved places.
   Two books with the same slug: append `-2`, `-3` in file-name order.
-- **Room model unchanged:** database `reading_position.db`, version 1, table
-  `reading_position(bookSlug PK, chapterIndex, charOffset, updatedAt)`. Built with
-  `lightContext.buildDatabase(...)`.
+- **Saved places table unchanged:** database `reading_position.db`, table
+  `reading_position(bookSlug PK, chapterIndex, charOffset, updatedAt)`, exactly as the
+  September app made it. Opened once with `lightContext.readerDatabase()` (wraps
+  `buildDatabase`) and shared by every repository.
+- **Database versions.** 1 = saved places. 2 = adds `reading_list(id PK auto, name,
+  createdAt)` and `reading_list_book(listId, bookSlug, sortOrder, addedAt; PK listId+bookSlug)`.
+  Books are keyed by slug, like saved places. **Never use a destructive migration**: every
+  version bump needs a migration that keeps saved places, plus a test. The SDK's
+  `buildDatabase` can't take hand-written `Migration`s (and `Context` is blocked), so
+  migrations are Room `@AutoMigration`s declared on `ReaderDatabase`, generated from the
+  schema files in `tool/schemas/` (`ksp` arg `room.schemaLocation`). **Commit the new
+  `N.json` with each bump.** A change auto-migration can't infer (renaming or dropping a
+  column) needs an `AutoMigrationSpec`. `ReaderDatabaseMigrationTest` runs the generated
+  migration against a recording stand-in (no SQLite engine is allowed in PC tests) and
+  checks it only creates the new tables and leaves `reading_position` alone.
 - **ReaderScreen:** keep its approach — `TextMeasurer` pagination per chapter, position as
   (chapter, char offset of the page's first character) never a page number, left 30% tap =
   back, rest = forward, crossing chapter boundaries, the chapter heading on a chapter's first
@@ -178,8 +196,28 @@ handful at a time, not the whole library. On the phone the files sit flat in
 
 ## 9. Screens
 
-**LibraryScreen** (`@InitialScreen`) — top bar "Library" with the sort icon on the right
-(→ SortScreen, §8), the list, tap a book → ReaderScreen.
+**LibraryScreen** (`@InitialScreen`) — top bar: the lists icon (`LightIcons.LARGE_LIST`) on
+the left (→ ListsScreen), "Library" or the shown list's name, and on the right the sort icon
+(→ SortScreen, §8) for all books, or a pencil (→ ListBooksScreen) when a list is shown. Tap a
+book → ReaderScreen. A list shows only its books, in the list's own order (sorting doesn't
+apply); a book no longer on the phone is skipped but stays in the list. The Library opens on
+all books each launch (the chosen list isn't remembered). Empty list: "No books in this list
+yet." centered, lighter.
+
+**ListsScreen** — top bar: back, "Lists", + (→ ListNameScreen, new list). "All books", then
+the lists A–Z; the one shown now is marked `SELECT_ON`. Tapping a row hands it back to the
+Library (`goBack(LibraryView)`). Each list has a pencil (rename, via ListNameScreen) and a
+bin (→ DeleteListScreen: "Delete this list? The books stay on your phone." + DELETE).
+
+**ListNameScreen** — `LightTextInputEditor`, one line, SAVE. Hands back the tidied name; an
+empty name or back hands back nothing.
+
+**ListBooksScreen** — rearranges one list: each book has up / down arrows (none at the top /
+bottom) and × to take it out of the list (the book stays on the phone). Saved at once.
+
+**AddToListScreen** — from Contents' "ADD TO LIST" bar button: every list with an on/off
+switch (`TOGGLE_STATE_ON/OFF`); tapping a row puts the book at the end of that list or takes
+it out. Any number of lists.
 
 **ReaderScreen** — top bar: back, the current chapter title, and a `LightIcons.LIST` button
 that opens Contents. Paged text below (§7). Tapping the chapter title opens TextSizeScreen.
@@ -207,7 +245,8 @@ the enum name; missing/unknown = Dark), and goes back. A theme change never re-p
 book. Every screen draws inside `ThemedScreen { }`.
 
 **ContentsScreen** — the book's chapters; tapping one returns its index to ReaderScreen via
-`goBack(index)`, which jumps to that chapter's start in place.
+`goBack(index)`, which jumps to that chapter's start in place. Bottom bar: "ADD TO LIST"
+(→ AddToListScreen).
 
 Quiet, fast, readable. No streaks, no stats, no notifications.
 

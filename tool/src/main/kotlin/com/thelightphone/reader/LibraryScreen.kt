@@ -1,21 +1,18 @@
 package com.thelightphone.reader
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.reader.data.BookMeta
 import com.thelightphone.reader.data.LibraryFilterPreference
+import com.thelightphone.reader.data.LibraryGroupSeriesPreference
 import com.thelightphone.reader.data.LibrarySortPreference
 import com.thelightphone.reader.data.LibraryStore
 import com.thelightphone.reader.data.ReadingList
@@ -33,13 +30,11 @@ import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcons
-import com.thelightphone.sdk.ui.LightLazyScrollView
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
-import com.thelightphone.sdk.ui.lightClickable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,7 +52,7 @@ sealed interface LibraryScreenState {
 
     /** [list] is the reading list being shown, or null for all books. */
     data class Loaded(
-        val rows: List<LibraryRow>,
+        val entries: List<LibraryEntry>,
         val list: ReadingList? = null,
         val filter: LibraryFilter = LibraryFilter.DEFAULT,
     ) : LibraryScreenState
@@ -70,6 +65,7 @@ class LibraryScreenViewModel(
     private val readingStatusRepository: ReadingStatusRepository,
     private val sortPreference: LibrarySortPreference,
     private val filterPreference: LibraryFilterPreference,
+    private val groupSeriesPreference: LibraryGroupSeriesPreference,
     themePreference: ReaderThemePreference,
 ) : LightViewModel<Unit>() {
 
@@ -107,7 +103,7 @@ class LibraryScreenViewModel(
         if (refreshJob?.isActive == true) return
         refreshJob = viewModelScope.launch {
             if (!choicesLoaded) {
-                choices = SortAndFilter(sortPreference.load(), filterPreference.load())
+                choices = SortAndFilter(sortPreference.load(), filterPreference.load(), groupSeriesPreference.load())
                 choicesLoaded = true
             }
             books = withContext(Dispatchers.IO) {
@@ -124,7 +120,7 @@ class LibraryScreenViewModel(
         }
     }
 
-    /** Re-orders and filters the list right away, and saves the choices for next time. */
+    /** Re-orders, filters and groups the list right away, and saves the choices for next time. */
     fun changeSortAndFilter(newChoices: SortAndFilter) {
         choices = newChoices
         choicesLoaded = true
@@ -132,6 +128,7 @@ class LibraryScreenViewModel(
         viewModelScope.launch {
             sortPreference.save(newChoices.sort)
             filterPreference.save(newChoices.filter)
+            groupSeriesPreference.save(newChoices.groupSeries)
         }
     }
 
@@ -149,8 +146,8 @@ class LibraryScreenViewModel(
     private suspend fun showCurrentView() {
         val shown = view
         if (shown !is LibraryView.OneList) {
-            val rows = libraryRows(books, positions, choices.sort, statuses, choices.filter)
-            _state.value = LibraryScreenState.Loaded(rows, filter = choices.filter)
+            val entries = libraryEntries(books, positions, choices.sort, statuses, choices.filter, choices.groupSeries)
+            _state.value = LibraryScreenState.Loaded(entries, filter = choices.filter)
             return
         }
         val (list, slugs) = DatabaseQueue.read {
@@ -163,7 +160,9 @@ class LibraryScreenViewModel(
             showCurrentView()
             return
         }
-        _state.value = LibraryScreenState.Loaded(listRows(books, positions, slugs, statuses), list)
+        // A list always shows its books one by one, never grouped into series.
+        val entries = listRows(books, positions, slugs, statuses).map { LibraryEntry.Book(it) }
+        _state.value = LibraryScreenState.Loaded(entries, list)
     }
 }
 
@@ -185,6 +184,7 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
         ReadingStatusRepository.getInstance { lightContext.readerDatabase() },
         LibrarySortPreference(lightContext.dataStore),
         LibraryFilterPreference(lightContext.dataStore),
+        LibraryGroupSeriesPreference(lightContext.dataStore),
         ReaderThemePreference(lightContext.dataStore),
     )
 
@@ -205,8 +205,12 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
                 is LibraryScreenState.Loading -> Unit
                 is LibraryScreenState.Preparing -> CenteredMessage(preparingText(current.remaining))
                 is LibraryScreenState.Loaded ->
-                    if (current.rows.isNotEmpty()) {
-                        BookList(rows = current.rows, onSelect = ::openBook)
+                    if (current.entries.isNotEmpty()) {
+                        LibraryEntryList(
+                            entries = current.entries,
+                            onSelectBook = ::openBook,
+                            onSelectSeries = ::openSeries,
+                        )
                     } else if (current.list != null) {
                         CenteredMessage("No books in this list yet.\n\nAdd one from a book's Contents.")
                     } else {
@@ -224,7 +228,7 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
         val loaded = state as? LibraryScreenState.Loaded
         val list = loaded?.list
         return if (list != null) {
-            LightBarButton.LightIcon(icon = LightIcons.PENCIL, onClick = { openListBooks(list, loaded.rows) })
+            LightBarButton.LightIcon(icon = LightIcons.PENCIL, onClick = { openListBooks(list, loaded.entries) })
         } else {
             LightBarButton.LightIcon(icon = LightIcons.REVERSE_ORDER, onClick = ::openSortAndFilter)
         }
@@ -238,8 +242,9 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
     }
 
     /** The Library refreshes when it comes back, so changes made there show up. */
-    private fun openListBooks(list: ReadingList, rows: List<LibraryRow>) {
-        navigateTo(screenFactory = { ListBooksScreen(it, list.id, list.name, rows.map { row -> row.meta }) })
+    private fun openListBooks(list: ReadingList, entries: List<LibraryEntry>) {
+        val books = entries.filterIsInstance<LibraryEntry.Book>().map { it.row.meta }
+        navigateTo(screenFactory = { ListBooksScreen(it, list.id, list.name, books) })
     }
 
     private fun openSortAndFilter() {
@@ -251,6 +256,11 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
 
     private fun openBook(meta: BookMeta) {
         navigateTo(screenFactory = { ReaderScreen(it, meta, libraryStore) })
+    }
+
+    private fun openSeries(series: LibraryEntry.Series) {
+        val books = series.rows.map { it.meta }
+        navigateTo(screenFactory = { SeriesScreen(it, series.name, books, libraryStore) })
     }
 }
 
@@ -270,64 +280,6 @@ private fun CenteredMessage(message: String) {
             variant = LightTextVariant.Copy,
             lighten = true,
             align = TextAlign.Center,
-        )
-    }
-}
-
-/**
- * Each book row is this tall (grid units), divider included: title, author and progress
- * are one line each (about 5.3 units together), so every row is the same height — the
- * lazy list needs that.
- */
-private const val BOOK_ROW_GRID_UNITS = 7f
-
-/** Only the rows on screen are drawn, so a long library scrolls smoothly. */
-@Composable
-private fun BookList(rows: List<LibraryRow>, onSelect: (BookMeta) -> Unit) {
-    LightLazyScrollView(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 1f.gridUnitsAsDp()),
-        uniformItemHeightGridUnits = BOOK_ROW_GRID_UNITS,
-    ) {
-        itemsIndexed(rows, key = { _, row -> row.meta.slug }) { index, row ->
-            // Books we can't open aren't tappable; the row says why.
-            val tap = if (row.canOpen) Modifier.lightClickable { onSelect(row.meta) } else Modifier
-            UniformRow(
-                heightGridUnits = BOOK_ROW_GRID_UNITS,
-                showDivider = index != rows.lastIndex,
-                modifier = tap,
-            ) {
-                BookRowView(row = row, modifier = Modifier.fillMaxWidth())
-            }
-        }
-    }
-}
-
-@Composable
-private fun BookRowView(row: LibraryRow, modifier: Modifier = Modifier) {
-    Column(modifier = modifier) {
-        LightText(
-            text = row.meta.title,
-            variant = LightTextVariant.Copy,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        if (row.canOpen) {
-            LightText(
-                text = row.meta.author,
-                variant = LightTextVariant.Detail,
-                lighten = true,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        // "NN% read" in the accent color; "Not started" and problems stay lighter.
-        LightText(
-            text = row.statusText,
-            variant = LightTextVariant.Detail,
-            lighten = !row.isStarted,
-            color = if (row.isStarted) LocalReaderAccent.current else null,
         )
     }
 }

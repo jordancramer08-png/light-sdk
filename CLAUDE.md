@@ -99,6 +99,7 @@ reader/
     DatabaseQueue.kt    runs list and status reads + writes one at a time, in order
     LibrarySortPreference.kt  remembered library sort (DataStore)
     LibraryFilterPreference.kt  remembered library Show filter (DataStore)
+    LibraryGroupSeriesPreference.kt  remembered Group series On/Off (DataStore)
     ReaderSettingsPreference.kt  remembered size, typeface, line spacing, margins (DataStore)
     ReaderThemePreference.kt     remembered reading theme (DataStore)
   ReaderTextSize.kt     the five text sizes (pure Kotlin, unit-tested)
@@ -109,10 +110,12 @@ reader/
   ReaderThemeController.kt  the app-wide current theme; ThemedScreen frame every screen uses
   ReadingLists.kt       list logic: LibraryView, listRows, neighbourSlug (pure Kotlin, unit-tested)
   ReadingStatus.kt      ReadingStatus, LibraryFilter, statusAfterOpening (pure Kotlin, unit-tested)
+  SeriesGroups.kt       LibraryEntry (a book or a series row), libraryEntries (pure Kotlin, unit-tested)
   BookDetails.kt        the Book Details rows: reading time, time left, sizes, dates (pure Kotlin, unit-tested)
   LibraryScreen.kt, SortFilterScreen.kt, ContentsScreen.kt, ReaderScreen.kt, ReadingSettingsScreen.kt,
   ThemeScreen.kt, ListsScreen.kt, ListNameScreen.kt, DeleteListScreen.kt, ListBooksScreen.kt,
-  AddToListScreen.kt, BookDetailsScreen.kt, Divider.kt, RowIconButton.kt
+  AddToListScreen.kt, BookDetailsScreen.kt, SeriesScreen.kt, Divider.kt, RowIconButton.kt
+  LibraryEntryList.kt   the book / series rows list, shared by LibraryScreen and SeriesScreen
   UniformRow.kt         a fixed-height row (divider included) for LightLazyScrollView lists
 tool/schemas/           Room's saved schema for each database version (checked in)
 ```
@@ -198,20 +201,29 @@ handful at a time, not the whole library. On the phone the files sit flat in
 - **Four sort orders and a Show filter**, chosen from a sort icon (`LightIcons.REVERSE_ORDER`
   — the SDK has no dedicated sort icon) in the right slot of the Library top bar. It opens
   `SortFilterScreen`, titled "Sort & Filter": "Sort by" Author A–Z, Author Z–A, Title A–Z,
-  Title Z–A, then "Show" All, Want to Read, Reading, Finished (reading status, §9). The
-  current choice in each section is marked with a filled circle (`SELECT_ON`, others
-  `SELECT_OFF`). Tapping any row returns both choices (`SortAndFilter`) and redraws the
-  list; back leaves both unchanged. The filter applies to all books only, not to a list.
+  Title Z–A, then "Show" All, Want to Read, Reading, Finished (reading status, §9), then
+  "Group series" On, Off. The current choice in each section is marked with a filled circle
+  (`SELECT_ON`, others `SELECT_OFF`). Tapping any row returns all three choices
+  (`SortAndFilter`) and redraws the list; back leaves them unchanged. The filter and
+  grouping apply to all books only, not to a list.
 - All comparisons are case- and accent-insensitive ("le Carré" and "Le Carre" group
   together). Author comes from the EPUB metadata; title from the EPUB metadata with a
   leading "The", "A" or "An" ignored ("The Shadow of the Wind" sorts under S).
 - Ties always fall back to **file name, A to Z** — even in Author Z–A — so an author's
   series stays in order (01, 02, …).
-- Both are remembered in `lightContext.dataStore`: key `library_sort` (the enum name;
-  missing or unknown = Author A–Z) and key `library_filter` (the `LibraryFilter` name;
-  missing or unknown = All). Logic: `LibraryList.kt` (`LibrarySort`, `libraryRows`) and
-  `ReadingStatus.kt` (`LibraryFilter`); storage: `data/LibrarySortPreference.kt`,
-  `data/LibraryFilterPreference.kt`.
+- **Group series** (default On): books of one series (`series` in meta.json, §6; names
+  matched case- and accent-insensitively) show as one row — series name, the first book's
+  author, "N books · M finished" (lighter) — which opens SeriesScreen. The filter runs
+  first, so a series row counts only the books the filter shows, and a series with only one
+  book shown is a normal book row. A series row sorts by its name (title orders) or its
+  first book's author, ties by that book's file name. Off: every book is its own row.
+- All three are remembered in `lightContext.dataStore`: key `library_sort` (the enum name;
+  missing or unknown = Author A–Z), key `library_filter` (the `LibraryFilter` name;
+  missing or unknown = All) and key `library_group_series` (a boolean; missing = On).
+  Logic: `LibraryList.kt` (`LibrarySort`, `libraryRows`), `ReadingStatus.kt`
+  (`LibraryFilter`) and `SeriesGroups.kt` (`libraryEntries`); storage:
+  `data/LibrarySortPreference.kt`, `data/LibraryFilterPreference.kt`,
+  `data/LibraryGroupSeriesPreference.kt`.
 - Row: title (from the EPUB metadata, one line), author (lighter), progress ("Not started" or
   "NN% read", computed from chapter char counts as in the September `LibraryScreen`; a
   Finished book shows "Finished" instead, in the accent like "NN% read").
@@ -219,7 +231,7 @@ handful at a time, not the whole library. On the phone the files sit flat in
   leaves nothing: "No books marked Finished." (the filter's name).
 - The list is a `LightLazyScrollView` (only rows on screen are drawn). That view needs every
   row the same height, so each row is a `UniformRow` of 7 grid units: title, author and
-  progress one line each, ellipsized.
+  progress (or series name, author, count) one line each, ellipsized.
 
 **Long lists and huge books.** Some books have hundreds of chapters (C.S. Lewis Complete
 Works: 746). Any list that can grow long uses `LightLazyScrollView` + `UniformRow` with
@@ -233,9 +245,14 @@ than a blink the screen says "Preparing…" instead of freezing or showing a sta
 the left (→ ListsScreen), "Library" or the shown list's name, and on the right the sort icon
 (→ Sort & Filter, §8) for all books, or a pencil (→ ListBooksScreen) when a list is shown. Tap a
 book → ReaderScreen. A list shows only its books, in the list's own order (sorting doesn't
-apply); a book no longer on the phone is skipped but stays in the list. The Library opens on
-all books each launch (the chosen list isn't remembered). Empty list: "No books in this list
-yet." centered, lighter.
+apply); a book no longer on the phone is skipped but stays in the list. A list always shows
+individual books, never series rows. The Library opens on all books each launch (the chosen
+list isn't remembered). Empty list: "No books in this list yet." centered, lighter.
+
+**SeriesScreen** — top bar: back, the series name. The series' books (those in the Library's
+series row) in number order (1, 2, 2.5, 10; no number last; ties by file name), drawn with
+the Library's own book rows; tapping one opens it in ReaderScreen. Progress and status are
+re-read each time it comes to the front.
 
 **ListsScreen** — top bar: back, "Lists", + (→ ListNameScreen, new list). "All books", then
 the lists A–Z; the one shown now is marked `SELECT_ON`. Tapping a row hands it back to the

@@ -19,14 +19,21 @@ import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import com.thelightphone.sdk.ui.lightClickable
 
-/** The library's order and which books it shows, chosen together on the Sort & Filter screen. */
-data class SortAndFilter(val sort: LibrarySort, val filter: LibraryFilter)
+/**
+ * The library's order, which books it shows, and whether each series is one row, chosen
+ * together on the Sort & Filter screen.
+ */
+data class SortAndFilter(
+    val sort: LibrarySort,
+    val filter: LibraryFilter,
+    val groupSeries: Boolean = true,
+)
 
 /**
  * Sort & Filter (CLAUDE.md 8): the four library orders, then a Show section (All, Want to
- * Read, Reading, Finished). The current choice in each section has a filled circle, the
- * others an empty one, so it reads without color. Tapping any row hands the new pair back
- * to LibraryScreen; back leaves both unchanged.
+ * Read, Reading, Finished), then Group series (On, Off). The current choice in each section
+ * has a filled circle, the others an empty one, so it reads without color. Tapping any row
+ * hands the new choices back to LibraryScreen; back leaves them all unchanged.
  */
 class SortFilterScreen(
     sealedActivity: SealedLightActivity,
@@ -62,6 +69,19 @@ class SortFilterScreen(
                     )
                     if (i != LibraryFilter.entries.lastIndex) HairlineDivider()
                 }
+
+                SectionHeading("Group series", modifier = Modifier.padding(top = 1.5f.gridUnitsAsDp()))
+                ChoiceRow(
+                    label = "On",
+                    isCurrent = current.groupSeries,
+                    onSelect = { goBack(current.copy(groupSeries = true)) },
+                )
+                HairlineDivider()
+                ChoiceRow(
+                    label = "Off",
+                    isCurrent = !current.groupSeries,
+                    onSelect = { goBack(current.copy(groupSeries = false)) },
+                )
             }
         }
     }

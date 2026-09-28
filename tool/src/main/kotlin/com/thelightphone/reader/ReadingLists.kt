@@ -21,10 +21,11 @@ fun listRows(
     books: List<BookMeta>,
     positions: Map<String, ReadingPosition>,
     listSlugs: List<String>,
+    statuses: Map<String, ReadingStatus> = emptyMap(),
 ): List<LibraryRow> {
     val booksBySlug = books.associateBy { it.slug }
     return listSlugs.mapNotNull { slug ->
-        booksBySlug[slug]?.let { LibraryRow(it, statusText(it, positions[it.slug])) }
+        booksBySlug[slug]?.let { libraryRow(it, positions, statuses) }
     }
 }
 

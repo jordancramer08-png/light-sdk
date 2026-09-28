@@ -39,6 +39,13 @@ class ReadingListsTest {
     }
 
     @Test
+    fun listRowsShowFinished() {
+        val statuses = mapOf("b" to ReadingStatus.FINISHED)
+        val rows = listRows(listOf(book("a"), book("b")), emptyMap(), listOf("a", "b"), statuses)
+        assertEquals(listOf("Not started", "Finished"), rows.map { it.statusText })
+    }
+
+    @Test
     fun neighbourAboveAndBelow() {
         val shown = listOf("a", "b", "c")
         assertEquals("a", neighbourSlug(shown, "b", up = true))

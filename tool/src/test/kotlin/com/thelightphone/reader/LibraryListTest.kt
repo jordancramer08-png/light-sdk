@@ -136,4 +136,51 @@ class LibraryListTest {
         assertFalse(rows.getValue("b").isStarted)
         assertFalse(rows.getValue("c").isStarted)
     }
+
+    @Test
+    fun finishedBooksSayFinishedInsteadOfAPercentage() {
+        val meta = book("a.epub", chapterChars = listOf(100, 100))
+        val row = libraryRows(
+            listOf(meta),
+            mapOf("a" to position("a", 1, 50)),
+            statuses = mapOf("a" to ReadingStatus.FINISHED),
+        ).single()
+        assertEquals("Finished", row.statusText)
+        assertTrue(row.isStarted)
+    }
+
+    @Test
+    fun finishedNeverHidesWhyABookCantOpen() {
+        val drm = book("a.epub", problem = BookProblem.DRM, chapterChars = emptyList())
+        assertEquals("Can't open (DRM)", statusText(drm, null, ReadingStatus.FINISHED))
+    }
+
+    @Test
+    fun booksWithoutAStatusAreWantToRead() {
+        val row = libraryRows(listOf(book("a.epub")), emptyMap()).single()
+        assertEquals(ReadingStatus.WANT_TO_READ, row.status)
+        assertEquals("Not started", row.statusText)
+    }
+
+    @Test
+    fun filterKeepsOnlyMatchingBooksInSortOrder() {
+        val books = listOf(
+            book("c.epub", author = "Carr"),
+            book("a.epub", author = "Adams"),
+            book("b.epub", author = "Bell"),
+            book("d.epub", author = "Dunn"),
+        )
+        val statuses = mapOf(
+            "a" to ReadingStatus.READING,
+            "b" to ReadingStatus.FINISHED,
+            "c" to ReadingStatus.READING,
+        )
+        fun shown(filter: LibraryFilter) =
+            libraryRows(books, emptyMap(), LibrarySort.AUTHOR_A_TO_Z, statuses, filter).map { it.meta.slug }
+
+        assertEquals(listOf("a", "b", "c", "d"), shown(LibraryFilter.ALL))
+        assertEquals(listOf("a", "c"), shown(LibraryFilter.READING))
+        assertEquals(listOf("b"), shown(LibraryFilter.FINISHED))
+        assertEquals(listOf("d"), shown(LibraryFilter.WANT_TO_READ))
+    }
 }

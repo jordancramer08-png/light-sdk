@@ -11,7 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.reader.data.ReadingList
-import com.thelightphone.reader.data.ReadingListQueue
+import com.thelightphone.reader.data.DatabaseQueue
 import com.thelightphone.reader.data.ReadingListRepository
 import com.thelightphone.reader.data.readerDatabase
 import com.thelightphone.sdk.LightScreen
@@ -53,12 +53,12 @@ class ListsScreenViewModel(
     fun delete(listId: Long) = changeThenReload { repository.delete(listId) }
 
     private fun changeThenReload(change: () -> Unit) {
-        ReadingListQueue.write(change)
+        DatabaseQueue.write(change)
         reload()
     }
 
     private fun reload() {
-        viewModelScope.launch { _lists.value = ReadingListQueue.read { repository.lists() } }
+        viewModelScope.launch { _lists.value = DatabaseQueue.read { repository.lists() } }
     }
 }
 

@@ -13,13 +13,25 @@ import java.text.Normalizer
 /** One row on the library screen. */
 data class LibraryRow(
     val meta: BookMeta,
-    /** "Not started", "NN% read", or why the book can't be opened. */
+    /** "Not started", "NN% read", "Finished", or why the book can't be opened. */
     val statusText: String,
+    val status: ReadingStatus = ReadingStatus.DEFAULT,
 ) {
     val canOpen: Boolean get() = meta.problem == null
 
-    /** True when the status is "NN% read" (drawn in the theme's accent). */
-    val isStarted: Boolean get() = canOpen && statusText.endsWith(READ_SUFFIX)
+    /** True when the row shows "NN% read" or "Finished" (drawn in the theme's accent). */
+    val isStarted: Boolean
+        get() = canOpen && (statusText.endsWith(READ_SUFFIX) || status == ReadingStatus.FINISHED)
+}
+
+/** One book's row. [statuses] holds only books with a saved status; the rest are Want to Read. */
+fun libraryRow(
+    meta: BookMeta,
+    positions: Map<String, ReadingPosition>,
+    statuses: Map<String, ReadingStatus>,
+): LibraryRow {
+    val status = statuses[meta.slug] ?: ReadingStatus.DEFAULT
+    return LibraryRow(meta, statusText(meta, positions[meta.slug], status), status)
 }
 
 private const val READ_SUFFIX = "% read"
@@ -41,17 +53,21 @@ enum class LibrarySort(val label: String) {
 }
 
 /**
- * The library rows in the chosen order. Ties always fall back to the EPUB file name,
- * A to Z, so an author's series stays in order (01, 02, …) even when authors run Z to A.
+ * The library rows in the chosen order, keeping only the books [filter] shows. Ties always
+ * fall back to the EPUB file name, A to Z, so an author's series stays in order (01, 02, …)
+ * even when authors run Z to A.
  */
 fun libraryRows(
     books: List<BookMeta>,
     positions: Map<String, ReadingPosition>,
     sort: LibrarySort = LibrarySort.DEFAULT,
+    statuses: Map<String, ReadingStatus> = emptyMap(),
+    filter: LibraryFilter = LibraryFilter.DEFAULT,
 ): List<LibraryRow> =
     books
         .sortedWith(comparatorFor(sort).thenBy { it.source.fileName })
-        .map { LibraryRow(it, statusText(it, positions[it.slug])) }
+        .map { libraryRow(it, positions, statuses) }
+        .filter { filter.shows(it.status) }
 
 private fun comparatorFor(sort: LibrarySort): Comparator<BookMeta> = when (sort) {
     LibrarySort.AUTHOR_A_TO_Z -> compareBy { sortKey(it.author) }
@@ -73,10 +89,16 @@ fun sortKey(text: String): String =
         .lowercase()
         .trim()
 
-fun statusText(meta: BookMeta, position: ReadingPosition?): String = when (meta.problem) {
-    BookProblem.DRM -> "Can't open (DRM)"
-    BookProblem.UNREADABLE -> "Can't open"
-    null -> progressText(meta, position)
+/** A Finished book says so instead of a percentage. */
+fun statusText(
+    meta: BookMeta,
+    position: ReadingPosition?,
+    status: ReadingStatus = ReadingStatus.DEFAULT,
+): String = when {
+    meta.problem == BookProblem.DRM -> "Can't open (DRM)"
+    meta.problem == BookProblem.UNREADABLE -> "Can't open"
+    status == ReadingStatus.FINISHED -> ReadingStatus.FINISHED.label
+    else -> progressText(meta, position)
 }
 
 /**

@@ -15,7 +15,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.reader.data.BookMeta
 import com.thelightphone.reader.data.ReadingList
-import com.thelightphone.reader.data.ReadingListQueue
+import com.thelightphone.reader.data.DatabaseQueue
 import com.thelightphone.reader.data.ReadingListRepository
 import com.thelightphone.reader.data.readerDatabase
 import com.thelightphone.sdk.LightScreen
@@ -50,7 +50,7 @@ class AddToListViewModel(
 
     init {
         viewModelScope.launch {
-            _state.value = ReadingListQueue.read {
+            _state.value = DatabaseQueue.read {
                 AddToListState(repository.lists(), repository.listIdsContaining(bookSlug))
             }
         }
@@ -63,7 +63,7 @@ class AddToListViewModel(
         _state.value = current.copy(
             listIdsWithBook = if (isIn) current.listIdsWithBook - listId else current.listIdsWithBook + listId,
         )
-        ReadingListQueue.write {
+        DatabaseQueue.write {
             if (isIn) repository.removeBook(listId, bookSlug) else repository.addBook(listId, bookSlug)
         }
     }

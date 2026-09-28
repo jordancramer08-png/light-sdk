@@ -7,16 +7,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.reader.data.BookMeta
+import com.thelightphone.reader.data.DatabaseQueue
 import com.thelightphone.reader.data.ReadingPositionRepository
+import com.thelightphone.reader.data.ReadingStatusRepository
 import com.thelightphone.reader.data.readerDatabase
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.ui.LightBarButton
+import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
@@ -24,6 +28,7 @@ import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
+import com.thelightphone.sdk.ui.lightClickable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -34,23 +39,38 @@ import kotlinx.coroutines.withContext
 class BookDetailsViewModel(
     private val bookMeta: BookMeta,
     private val readingPositionRepository: ReadingPositionRepository,
+    private val readingStatusRepository: ReadingStatusRepository,
 ) : LightViewModel<Unit>() {
 
     /** Null until the saved place has been read (a moment at most). */
     private val _rows = MutableStateFlow<List<DetailRow>?>(null)
     val rows: StateFlow<List<DetailRow>?> = _rows.asStateFlow()
 
+    /** Null until the saved status has been read. */
+    private val _status = MutableStateFlow<ReadingStatus?>(null)
+    val status: StateFlow<ReadingStatus?> = _status.asStateFlow()
+
     init {
         viewModelScope.launch {
             val position = withContext(Dispatchers.IO) { readingPositionRepository.get(bookMeta.slug) }
             _rows.value = bookDetailRows(bookMeta, position)
         }
+        viewModelScope.launch {
+            _status.value = DatabaseQueue.read { readingStatusRepository.get(bookMeta.slug) }
+        }
+    }
+
+    /** Shows the new status at once and saves it (the save finishes even if the screen closes). */
+    fun changeStatus(newStatus: ReadingStatus) {
+        _status.value = newStatus
+        DatabaseQueue.write { readingStatusRepository.set(bookMeta.slug, newStatus) }
     }
 }
 
 /**
  * Facts about one book, reached from its Contents screen (CLAUDE.md 9): title and author
- * at the top, then series, length, reading time, progress and file details. Read only.
+ * at the top, then its reading status (the one thing that can be changed here), then
+ * series, length, reading time, progress and file details.
  */
 class BookDetailsScreen(
     sealedActivity: SealedLightActivity,
@@ -63,11 +83,13 @@ class BookDetailsScreen(
     override fun createViewModel() = BookDetailsViewModel(
         bookMeta,
         ReadingPositionRepository.getInstance { lightContext.readerDatabase() },
+        ReadingStatusRepository.getInstance { lightContext.readerDatabase() },
     )
 
     @Composable
     override fun Content() {
         val rows by viewModel.rows.collectAsState()
+        val status by viewModel.status.collectAsState()
 
         ThemedScreen {
             LightTopBar(
@@ -75,13 +97,29 @@ class BookDetailsScreen(
                 center = LightTopBarCenter.Text("Details"),
                 modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
             )
-            rows?.let { DetailsList(bookMeta, it, modifier = Modifier.weight(1f)) }
+            val shownRows = rows
+            val shownStatus = status
+            if (shownRows != null && shownStatus != null) {
+                DetailsList(
+                    bookMeta = bookMeta,
+                    status = shownStatus,
+                    onStatusChange = viewModel::changeStatus,
+                    rows = shownRows,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun DetailsList(bookMeta: BookMeta, rows: List<DetailRow>, modifier: Modifier = Modifier) {
+private fun DetailsList(
+    bookMeta: BookMeta,
+    status: ReadingStatus,
+    onStatusChange: (ReadingStatus) -> Unit,
+    rows: List<DetailRow>,
+    modifier: Modifier = Modifier,
+) {
     LightScrollView(
         modifier = modifier
             .fillMaxWidth()
@@ -92,9 +130,34 @@ private fun DetailsList(bookMeta: BookMeta, rows: List<DetailRow>, modifier: Mod
             LightText(text = bookMeta.author, variant = LightTextVariant.Copy, lighten = true)
         }
         HairlineDivider()
+        StatusChoices(current = status, onSelect = onStatusChange)
+        HairlineDivider()
         rows.forEachIndexed { i, row ->
             DetailRowView(row)
             if (i != rows.lastIndex) HairlineDivider()
+        }
+    }
+}
+
+/**
+ * "Status" then Want to Read, Reading, Finished: the current one has a filled circle, the
+ * others an empty one, so it reads without color. Tapping one sets it.
+ */
+@Composable
+private fun StatusChoices(current: ReadingStatus, onSelect: (ReadingStatus) -> Unit) {
+    Column(modifier = Modifier.padding(top = 0.75f.gridUnitsAsDp())) {
+        LightText(text = "Status", variant = LightTextVariant.Copy, lighten = true)
+        ReadingStatus.entries.forEach { status ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .lightClickable { onSelect(status) }
+                    .padding(vertical = 0.5f.gridUnitsAsDp()),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                LightText(text = status.label, variant = LightTextVariant.Copy, modifier = Modifier.weight(1f))
+                LightIcon(icon = if (status == current) LightIcons.SELECT_ON else LightIcons.SELECT_OFF)
+            }
         }
     }
 }

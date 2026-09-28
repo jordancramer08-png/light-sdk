@@ -1,7 +1,9 @@
 package com.thelightphone.reader.data
 
+import androidx.room.migration.Migration
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.SQLiteStatement
+import com.thelightphone.reader.ReadingStatus
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
@@ -14,24 +16,27 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Checks the database upgrade from version 1 (saved places only) to version 2 (plus
- * reading lists) keeps every saved reading position.
+ * Checks each database upgrade keeps every saved reading position (and, from version 2 on,
+ * every reading list): 1 -> 2 adds reading lists, 2 -> 3 adds reading status.
  *
  * The build rules allow no SQLite engine in PC tests, so this runs Room's generated
- * Migration against a stand-in connection that records each SQL statement, then checks
+ * Migrations against a stand-in connection that records each SQL statement, then checks
  * those statements against the schemas Room saved in `tool/schemas/`. On the phone,
- * Room also compares the migrated tables with version 2 before opening the database.
+ * Room also compares the migrated tables with the new version before opening the database.
  */
 class ReaderDatabaseMigrationTest {
 
     private val schemaDir = File("schemas/com.thelightphone.reader.data.ReaderDatabase")
 
-    private fun runMigration(): List<String> {
+    private fun statementsOf(migration: Migration): List<String> {
         val connection = RecordingConnection()
-        val migration = ReaderDatabase_AutoMigration_1_2_Impl()
         migration.migrate(connection)
         return connection.statements
     }
+
+    private fun runMigration(): List<String> = statementsOf(ReaderDatabase_AutoMigration_1_2_Impl())
+
+    private fun runMigrationTo3(): List<String> = statementsOf(ReaderDatabase_AutoMigration_2_3_Impl())
 
     /** The schema's tables by name. */
     private fun entities(version: Int): Map<String, JsonObject> {
@@ -40,6 +45,8 @@ class ReaderDatabaseMigrationTest {
             .map { it.jsonObject }
             .associateBy { it.getValue("tableName").jsonPrimitive.content }
     }
+
+    // --- 1 -> 2: reading lists -------------------------------------------------
 
     @Test
     fun migratesFromVersion1To2() {
@@ -82,6 +89,67 @@ class ReaderDatabaseMigrationTest {
             entity.getValue("createSql").jsonPrimitive.content.replace("\${TABLE_NAME}", name)
         }.toSet()
         assertEquals(expected, runMigration().toSet())
+    }
+
+    // --- 2 -> 3: reading status ------------------------------------------------
+
+    @Test
+    fun migratesFromVersion2To3() {
+        val migration = ReaderDatabase_AutoMigration_2_3_Impl()
+        assertEquals(2, migration.startVersion)
+        assertEquals(3, migration.endVersion)
+    }
+
+    @Test
+    fun version3IsTheCurrentVersionAndEveryStepHasAMigration() {
+        val latest = schemaDir.listFiles().orEmpty().mapNotNull { it.nameWithoutExtension.toIntOrNull() }.max()
+        assertEquals(3, latest)
+        val steps = listOf(ReaderDatabase_AutoMigration_1_2_Impl(), ReaderDatabase_AutoMigration_2_3_Impl())
+        assertEquals((1 until latest).map { it to it + 1 }, steps.map { it.startVersion to it.endVersion })
+    }
+
+    @Test
+    fun createsTheStatusTableThenFillsIt() {
+        val newTables = entities(3).filterKeys { it !in entities(2) }
+        assertEquals(setOf("reading_status"), newTables.keys)
+        val createSql = newTables.getValue("reading_status").getValue("createSql").jsonPrimitive.content
+            .replace("\${TABLE_NAME}", "reading_status")
+
+        assertEquals(listOf(createSql, MigrationToVersion3.BACKFILL_READING_STATUS_SQL), runMigrationTo3())
+    }
+
+    @Test
+    fun booksWithASavedPlaceStartAsReading() {
+        val backfill = MigrationToVersion3.BACKFILL_READING_STATUS_SQL
+        assertTrue(backfill.startsWith("INSERT OR IGNORE INTO reading_status "))
+        assertTrue(backfill.contains("FROM reading_position"))
+        assertTrue(backfill.contains("'${ReadingStatus.READING.name}'"))
+    }
+
+    @Test
+    fun version3OnlyReadsSavedPlacesAndListsNeverChangesThem() {
+        for (sql in runMigrationTo3()) {
+            val upper = sql.uppercase()
+            // Whole words only: the column `updatedAt` isn't an UPDATE.
+            for (word in listOf("DROP", "DELETE", "ALTER", "UPDATE", "RENAME", "REPLACE")) {
+                assertFalse(Regex("\\b$word\\b").containsMatchIn(upper), "migration contains $word: $sql")
+            }
+            assertFalse(sql.contains("reading_list"), "migration touches reading lists: $sql")
+            if (upper.startsWith("INSERT")) {
+                assertTrue(sql.startsWith("INSERT OR IGNORE INTO reading_status "), "writes elsewhere: $sql")
+            } else {
+                assertFalse(sql.contains("reading_position"), "migration touches saved places: $sql")
+            }
+        }
+    }
+
+    @Test
+    fun savedPlacesAndListTablesAreIdenticalInVersions2And3() {
+        val v2 = entities(2)
+        val v3 = entities(3)
+        for (table in listOf("reading_position", "reading_list", "reading_list_book")) {
+            assertEquals(v2.getValue(table), v3.getValue(table), "table $table changed")
+        }
     }
 }
 

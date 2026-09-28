@@ -26,10 +26,12 @@ import androidx.compose.ui.unit.Constraints
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.reader.data.BookMeta
 import com.thelightphone.reader.data.ChapterMeta
+import com.thelightphone.reader.data.DatabaseQueue
 import com.thelightphone.reader.data.LibraryStore
 import com.thelightphone.reader.data.readerDatabase
 import com.thelightphone.reader.data.ReaderSettingsPreference
 import com.thelightphone.reader.data.ReadingPositionRepository
+import com.thelightphone.reader.data.ReadingStatusRepository
 import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
@@ -95,6 +97,7 @@ class ReaderScreenViewModel(
     private val bookMeta: BookMeta,
     private val libraryStore: LibraryStore,
     private val readingPositionRepository: ReadingPositionRepository,
+    private val readingStatusRepository: ReadingStatusRepository,
     private val settingsPreference: ReaderSettingsPreference,
 ) : LightViewModel<Unit>() {
 
@@ -130,6 +133,8 @@ class ReaderScreenViewModel(
 
     init {
         viewModelScope.launch { _settings.value = settingsPreference.load() }
+        // Opening the book makes it Reading (unless it's already Reading or Finished).
+        DatabaseQueue.write { readingStatusRepository.markOpened(bookMeta.slug) }
     }
 
     /** From ReadingSettingsScreen: use the new settings for every book, and remember them. */
@@ -157,9 +162,9 @@ class ReaderScreenViewModel(
         viewModelScope.launch {
             val saved = withContext(Dispatchers.IO) { readingPositionRepository.get(bookMeta.slug) }
             if (saved != null && chapter(saved.chapterIndex) != null) {
-                loadChapter(saved.chapterIndex, saved.charOffset)
+                loadChapter(saved.chapterIndex, saved.charOffset, isReopening = true)
             } else {
-                loadChapter(currentChapterIndex, 0)
+                loadChapter(currentChapterIndex, 0, isReopening = true)
             }
         }
     }
@@ -195,8 +200,14 @@ class ReaderScreenViewModel(
     /**
      * Reads (or reuses) a chapter's text and pages, then shows the page holding [targetOffset].
      * [keepAnchor] is for re-paging: the reader's place stays [targetOffset] exactly.
+     * [isReopening] is for going back to the saved place when the book opens.
      */
-    private fun loadChapter(chapterIndex: Int, targetOffset: Int, keepAnchor: Boolean = false) {
+    private fun loadChapter(
+        chapterIndex: Int,
+        targetOffset: Int,
+        keepAnchor: Boolean = false,
+        isReopening: Boolean = false,
+    ) {
         val layout = pageLayout ?: return
         val chapter = chapter(chapterIndex) ?: return
 
@@ -219,12 +230,14 @@ class ReaderScreenViewModel(
             currentChapterIndex = chapter.index
             currentText = text
             currentPages = pages
-            showPage(pageIndexFor(pages, text, targetOffset))
+            // Re-paging or reopening isn't the reader moving, so it never marks the book Finished.
+            showPage(pageIndexFor(pages, text, targetOffset), movedByReader = !keepAnchor && !isReopening)
             if (keepAnchor) anchorOffset = targetOffset
         }
     }
 
-    private fun showPage(pageIndex: Int) {
+    /** [movedByReader]: a page turn or a Contents jump, as opposed to reopening or re-paging. */
+    private fun showPage(pageIndex: Int, movedByReader: Boolean = true) {
         currentPageIndex = pageIndex
         val page = currentPages[pageIndex]
         anchorOffset = page.start
@@ -235,7 +248,14 @@ class ReaderScreenViewModel(
             isChapterStart = pageIndex == 0,
         )
         savePosition()
+        if (movedByReader && isLastPageOfBook()) {
+            DatabaseQueue.write { readingStatusRepository.markFinished(bookMeta.slug) }
+        }
     }
+
+    private fun isLastPageOfBook(): Boolean =
+        currentChapterIndex == bookMeta.chapters.lastOrNull()?.index &&
+            currentPageIndex == currentPages.lastIndex
 
     /** Autosave on every page turn. */
     private fun savePosition() {
@@ -313,6 +333,7 @@ class ReaderScreen(
         bookMeta,
         libraryStore,
         readingPositionRepository,
+        ReadingStatusRepository.getInstance { lightContext.readerDatabase() },
         ReaderSettingsPreference(lightContext.dataStore),
     )
 

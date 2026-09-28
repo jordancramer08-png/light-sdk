@@ -9,12 +9,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Every reading-list read and write goes through here, one at a time and in order, off
- * the main thread. So a change made just before leaving a screen is always saved (even
+ * Every reading-list and reading-status read and write goes through here, one at a time
+ * and in order, off the main thread. So a change made just before leaving a screen is always saved (even
  * though the screen is gone), and the next screen always reads it back.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-object ReadingListQueue {
+object DatabaseQueue {
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO.limitedParallelism(1)
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
 

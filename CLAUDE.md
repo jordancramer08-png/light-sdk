@@ -91,11 +91,14 @@ reader/
   data/
     LibraryStore.kt     scans shared/books/*.epub, caches parsed books
     BookMeta.kt         cached meta.json model (kotlinx-serialization)
-    ReaderDatabase.kt   the one Room database (version 2) + readerDatabase() shared instance
+    ReaderDatabase.kt   the one Room database (version 3) + readerDatabase() shared instance,
+                        and MigrationToVersion3 (the 2 -> 3 backfill)
     ReadingPosition*.kt Room entity / dao / repository for saved places
-    ReadingList*.kt     Room entities / dao / repository for reading lists;
-                        ReadingListQueue runs list reads + writes one at a time, in order
+    ReadingList*.kt     Room entities / dao / repository for reading lists
+    BookStatus*.kt, ReadingStatusRepository.kt  Room entity / dao / repository for reading status
+    DatabaseQueue.kt    runs list and status reads + writes one at a time, in order
     LibrarySortPreference.kt  remembered library sort (DataStore)
+    LibraryFilterPreference.kt  remembered library Show filter (DataStore)
     ReaderSettingsPreference.kt  remembered size, typeface, line spacing, margins (DataStore)
     ReaderThemePreference.kt     remembered reading theme (DataStore)
   ReaderTextSize.kt     the five text sizes (pure Kotlin, unit-tested)
@@ -105,8 +108,9 @@ reader/
   ReaderTheme.kt        the four themes: LightColors + accent each
   ReaderThemeController.kt  the app-wide current theme; ThemedScreen frame every screen uses
   ReadingLists.kt       list logic: LibraryView, listRows, neighbourSlug (pure Kotlin, unit-tested)
+  ReadingStatus.kt      ReadingStatus, LibraryFilter, statusAfterOpening (pure Kotlin, unit-tested)
   BookDetails.kt        the Book Details rows: reading time, time left, sizes, dates (pure Kotlin, unit-tested)
-  LibraryScreen.kt, SortScreen.kt, ContentsScreen.kt, ReaderScreen.kt, ReadingSettingsScreen.kt,
+  LibraryScreen.kt, SortFilterScreen.kt, ContentsScreen.kt, ReaderScreen.kt, ReadingSettingsScreen.kt,
   ThemeScreen.kt, ListsScreen.kt, ListNameScreen.kt, DeleteListScreen.kt, ListBooksScreen.kt,
   AddToListScreen.kt, BookDetailsScreen.kt, Divider.kt, RowIconButton.kt
   UniformRow.kt         a fixed-height row (divider included) for LightLazyScrollView lists
@@ -156,15 +160,21 @@ git ls-tree -r --name-only f59672f -- tool      # the full list
   `buildDatabase`) and shared by every repository.
 - **Database versions.** 1 = saved places. 2 = adds `reading_list(id PK auto, name,
   createdAt)` and `reading_list_book(listId, bookSlug, sortOrder, addedAt; PK listId+bookSlug)`.
-  Books are keyed by slug, like saved places. **Never use a destructive migration**: every
-  version bump needs a migration that keeps saved places, plus a test. The SDK's
-  `buildDatabase` can't take hand-written `Migration`s (and `Context` is blocked), so
-  migrations are Room `@AutoMigration`s declared on `ReaderDatabase`, generated from the
-  schema files in `tool/schemas/` (`ksp` arg `room.schemaLocation`). **Commit the new
-  `N.json` with each bump.** A change auto-migration can't infer (renaming or dropping a
-  column) needs an `AutoMigrationSpec`. `ReaderDatabaseMigrationTest` runs the generated
-  migration against a recording stand-in (no SQLite engine is allowed in PC tests) and
-  checks it only creates the new tables and leaves `reading_position` alone.
+  3 = adds `reading_status(bookSlug PK, status, updatedAt)` (`status` = the `ReadingStatus`
+  enum name as text; no row = Want to Read), and fills it: every book with a saved place
+  starts as `READING`. Books are keyed by slug, like saved places. **Never use a destructive
+  migration**: every version bump needs a migration that keeps saved places and reading
+  lists, plus a test. The SDK's `buildDatabase` can't take hand-written `Migration`s (it is
+  a bare `Room.databaseBuilder(...).build()`, and `Context` is blocked), so migrations are
+  Room `@AutoMigration`s declared on `ReaderDatabase`, generated from the schema files in
+  `tool/schemas/` (`ksp` arg `room.schemaLocation`). **Commit the new `N.json` with each
+  bump.** Hand-written SQL (a data step like the 2 -> 3 backfill, or a change auto-migration
+  can't infer, like renaming or dropping a column) goes in an `AutoMigrationSpec`:
+  `onPostMigrate(connection)` runs right after Room's generated statements, inside the same
+  migration. `ReaderDatabaseMigrationTest` runs each generated migration against a
+  recording stand-in (no SQLite engine is allowed in PC tests) and checks the exact
+  statements, that every version step has a migration, and that `reading_position` and the
+  list tables are unchanged and never written.
 - **ReaderScreen:** keep its approach — `TextMeasurer` pagination per chapter, position as
   (chapter, char offset of the page's first character) never a page number, left 30% tap =
   back, rest = forward, crossing chapter boundaries, the chapter heading on a chapter's first
@@ -185,22 +195,28 @@ like `Cemetery of Forgotten Books 01. The Shadow of the Wind - Carlos Ruiz Zafó
 handful at a time, not the whole library. On the phone the files sit flat in
 `shared/books/`, with names flattened to plain ASCII by the send script.
 
-- **Four sort orders**, chosen from a sort icon (`LightIcons.REVERSE_ORDER` — the SDK has
-  no dedicated sort icon) in the right slot of the Library top bar. It opens `SortScreen`:
-  Author A–Z, Author Z–A, Title A–Z, Title Z–A, the current one marked with a filled
-  circle (`SELECT_ON`, others `SELECT_OFF`). Tapping one returns it and re-orders the list;
-  back leaves the order unchanged.
+- **Four sort orders and a Show filter**, chosen from a sort icon (`LightIcons.REVERSE_ORDER`
+  — the SDK has no dedicated sort icon) in the right slot of the Library top bar. It opens
+  `SortFilterScreen`, titled "Sort & Filter": "Sort by" Author A–Z, Author Z–A, Title A–Z,
+  Title Z–A, then "Show" All, Want to Read, Reading, Finished (reading status, §9). The
+  current choice in each section is marked with a filled circle (`SELECT_ON`, others
+  `SELECT_OFF`). Tapping any row returns both choices (`SortAndFilter`) and redraws the
+  list; back leaves both unchanged. The filter applies to all books only, not to a list.
 - All comparisons are case- and accent-insensitive ("le Carré" and "Le Carre" group
   together). Author comes from the EPUB metadata; title from the EPUB metadata with a
   leading "The", "A" or "An" ignored ("The Shadow of the Wind" sorts under S).
 - Ties always fall back to **file name, A to Z** — even in Author Z–A — so an author's
   series stays in order (01, 02, …).
-- The choice is remembered in `lightContext.dataStore` (key `library_sort`, the enum name;
-  anything missing or unknown means Author A–Z, the default). Logic: `LibraryList.kt`
-  (`LibrarySort`, `libraryRows`), storage: `data/LibrarySortPreference.kt`.
+- Both are remembered in `lightContext.dataStore`: key `library_sort` (the enum name;
+  missing or unknown = Author A–Z) and key `library_filter` (the `LibraryFilter` name;
+  missing or unknown = All). Logic: `LibraryList.kt` (`LibrarySort`, `libraryRows`) and
+  `ReadingStatus.kt` (`LibraryFilter`); storage: `data/LibrarySortPreference.kt`,
+  `data/LibraryFilterPreference.kt`.
 - Row: title (from the EPUB metadata, one line), author (lighter), progress ("Not started" or
-  "NN% read", computed from chapter char counts as in the September `LibraryScreen`).
-- Empty library: "No books on this device yet." centered, lighter text.
+  "NN% read", computed from chapter char counts as in the September `LibraryScreen`; a
+  Finished book shows "Finished" instead, in the accent like "NN% read").
+- Empty library: "No books on this device yet." centered, lighter text. When a Show filter
+  leaves nothing: "No books marked Finished." (the filter's name).
 - The list is a `LightLazyScrollView` (only rows on screen are drawn). That view needs every
   row the same height, so each row is a `UniformRow` of 7 grid units: title, author and
   progress one line each, ellipsized.
@@ -215,7 +231,7 @@ than a blink the screen says "Preparing…" instead of freezing or showing a sta
 
 **LibraryScreen** (`@InitialScreen`) — top bar: the lists icon (`LightIcons.LARGE_LIST`) on
 the left (→ ListsScreen), "Library" or the shown list's name, and on the right the sort icon
-(→ SortScreen, §8) for all books, or a pencil (→ ListBooksScreen) when a list is shown. Tap a
+(→ Sort & Filter, §8) for all books, or a pencil (→ ListBooksScreen) when a list is shown. Tap a
 book → ReaderScreen. A list shows only its books, in the list's own order (sorting doesn't
 apply); a book no longer on the phone is skipped but stays in the list. The Library opens on
 all books each launch (the chosen list isn't remembered). Empty list: "No books in this list
@@ -237,7 +253,10 @@ switch (`TOGGLE_STATE_ON/OFF`); tapping a row puts the book at the end of that l
 it out. Any number of lists.
 
 **ReaderScreen** — top bar: back, the current chapter title, and a `LightIcons.LIST` button
-that opens Contents. Paged text below (§7).
+that opens Contents. Paged text below (§7). Opening a book makes a Want to Read book
+Reading (Reading and Finished stay as they are). A page turn or Contents jump that lands on
+the last page of the last chapter makes it Finished; reopening the book on that page, or
+re-paging, does not (so a hand-set status isn't undone just by opening the book).
 If a chapter takes more than 300 ms to read and page (a huge chapter, or the library still
 busy), the page area shows "Preparing…" (lighter, centered) and taps are ignored until the
 page is ready. Tapping the chapter title opens ReadingSettingsScreen.
@@ -282,8 +301,15 @@ book. Every screen draws inside `ThemedScreen { }`.
 read as the top row. Bottom bar: "ADD TO LIST" (→ AddToListScreen), "DETAILS"
 (→ BookDetailsScreen).
 
-**BookDetailsScreen** — top bar: back, "Details". Read only. The title (Subheading) and
-author (lighter) at the top, then "Label   value" rows (label lighter, value right-aligned,
+**Reading status** — each book is Want to Read (default, no row saved), Reading or Finished
+(`ReadingStatus`, stored in the `reading_status` table, §7). Set automatically by the
+reader (above) or by hand on Book Details. Status reads and writes go through
+`DatabaseQueue`, so a change made just before leaving a screen is always saved.
+
+**BookDetailsScreen** — top bar: back, "Details". The title (Subheading) and
+author (lighter) at the top, then "Status" with three rows (Want to Read, Reading,
+Finished), the current one `SELECT_ON`; tapping one saves it at once. That is the only
+thing that can be changed here. Then "Label   value" rows (label lighter, value right-aligned,
 long values wrap) in a `LightScrollView`: Series ("Name, book N"; the row is left out when
 there's none), Chapters, Words, Reading time and Time left (at 250 words a minute: "About
 6 h 20 min"; time left counts later chapters' words plus the unread share of the current

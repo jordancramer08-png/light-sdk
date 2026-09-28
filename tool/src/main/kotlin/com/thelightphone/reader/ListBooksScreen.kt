@@ -15,7 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import com.thelightphone.reader.data.BookMeta
-import com.thelightphone.reader.data.ReadingListQueue
+import com.thelightphone.reader.data.DatabaseQueue
 import com.thelightphone.reader.data.ReadingListRepository
 import com.thelightphone.reader.data.readerDatabase
 import com.thelightphone.sdk.SealedLightActivity
@@ -73,12 +73,12 @@ class ListBooksScreen(
             this[from] = books[to]
             this[to] = book
         }
-        ReadingListQueue.write { repository.swapBooks(listId, book.slug, neighbour) }
+        DatabaseQueue.write { repository.swapBooks(listId, book.slug, neighbour) }
     }
 
     private fun remove(book: BookMeta) {
         books = books - book
-        ReadingListQueue.write { repository.removeBook(listId, book.slug) }
+        DatabaseQueue.write { repository.removeBook(listId, book.slug) }
     }
 }
 

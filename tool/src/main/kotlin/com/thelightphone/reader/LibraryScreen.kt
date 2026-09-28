@@ -1,14 +1,13 @@
 package com.thelightphone.reader
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -18,6 +17,7 @@ import com.thelightphone.reader.data.BookMeta
 import com.thelightphone.reader.data.LibrarySortPreference
 import com.thelightphone.reader.data.LibraryStore
 import com.thelightphone.reader.data.ReaderDatabase
+import com.thelightphone.reader.data.ReaderThemePreference
 import com.thelightphone.reader.data.ReadingPosition
 import com.thelightphone.reader.data.ReadingPositionRepository
 import com.thelightphone.sdk.InitialScreen
@@ -31,9 +31,6 @@ import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
-import com.thelightphone.sdk.ui.LightTheme
-import com.thelightphone.sdk.ui.LightThemeController
-import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
@@ -60,6 +57,7 @@ class LibraryScreenViewModel(
     private val libraryStore: LibraryStore,
     private val readingPositionRepository: ReadingPositionRepository,
     private val sortPreference: LibrarySortPreference,
+    themePreference: ReaderThemePreference,
 ) : LightViewModel<Unit>() {
 
     private val _state = MutableStateFlow<LibraryScreenState>(LibraryScreenState.Loading)
@@ -74,6 +72,11 @@ class LibraryScreenViewModel(
         private set
     private var books = emptyList<BookMeta>()
     private var positions = emptyMap<String, ReadingPosition>()
+
+    init {
+        // The Library opens first, so the saved theme is read here, once per launch.
+        viewModelScope.launch { ReaderThemeController.loadOnce(themePreference) }
+    }
 
     /** Runs every time the library comes to the front, so new books and new progress show up. */
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
@@ -130,35 +133,29 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
         libraryStore,
         readingPositionRepository,
         LibrarySortPreference(lightContext.dataStore),
+        ReaderThemePreference(lightContext.dataStore),
     )
 
     @Composable
     override fun Content() {
-        val themeColors by LightThemeController.colors.collectAsState()
         val state by viewModel.state.collectAsState()
 
-        LightTheme(colors = themeColors) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(LightThemeTokens.colors.background),
-            ) {
-                LightTopBar(
-                    center = LightTopBarCenter.Text("Library"),
-                    rightButton = LightBarButton.LightIcon(icon = LightIcons.REVERSE_ORDER, onClick = ::openSort),
-                    modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
-                )
+        ThemedScreen {
+            LightTopBar(
+                center = LightTopBarCenter.Text("Library"),
+                rightButton = LightBarButton.LightIcon(icon = LightIcons.REVERSE_ORDER, onClick = ::openSort),
+                modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
+            )
 
-                when (val current = state) {
-                    is LibraryScreenState.Loading -> Unit
-                    is LibraryScreenState.Preparing -> CenteredMessage(preparingText(current.remaining))
-                    is LibraryScreenState.Loaded ->
-                        if (current.rows.isEmpty()) {
-                            CenteredMessage("No books on this device yet.")
-                        } else {
-                            BookList(rows = current.rows, onSelect = ::openBook)
-                        }
-                }
+            when (val current = state) {
+                is LibraryScreenState.Loading -> Unit
+                is LibraryScreenState.Preparing -> CenteredMessage(preparingText(current.remaining))
+                is LibraryScreenState.Loaded ->
+                    if (current.rows.isEmpty()) {
+                        CenteredMessage("No books on this device yet.")
+                    } else {
+                        BookList(rows = current.rows, onSelect = ::openBook)
+                    }
             }
         }
     }
@@ -237,10 +234,12 @@ private fun BookRowView(row: LibraryRow, modifier: Modifier = Modifier) {
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        // "NN% read" in the accent color; "Not started" and problems stay lighter.
         LightText(
             text = row.statusText,
             variant = LightTextVariant.Detail,
-            lighten = true,
+            lighten = !row.isStarted,
+            color = if (row.isStarted) LocalReaderAccent.current else null,
         )
     }
 }

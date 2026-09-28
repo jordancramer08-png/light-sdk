@@ -39,12 +39,15 @@ fun readerBodyStyle(size: ReaderTextSize): TextStyle {
     )
 }
 
-/** The chapter heading on a chapter's first page, grown with the body text. Measured and drawn with this one style. */
+/**
+ * The chapter heading on a chapter's first page, grown with the body text, in the theme's
+ * accent color. Measured and drawn with this one style.
+ */
 @Composable
 fun readerHeadingStyle(size: ReaderTextSize): TextStyle {
     val base = LightThemeTokens.typography.heading
     return base.copy(
-        color = LightThemeTokens.colors.content,
+        color = LocalReaderAccent.current,
         fontSize = base.fontSize.scaledForReading(size.scale),
         lineHeight = base.lineHeight.scaledForReading(size.scale),
         letterSpacing = base.letterSpacing.scaledForReading(size.scale),

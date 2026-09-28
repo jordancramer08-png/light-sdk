@@ -13,8 +13,9 @@ plain, and explain what you changed in plain words at the end of each phase.
 ## 1. Platform constraints (non-negotiable)
 
 - **Target:** Light Phone III on LightOS. **1080 × 1240, 3.92".** API 34. **No Google Play
-  Services.** Jordan's phone shows color, but design for monochrome: color never carries
-  meaning.
+  Services.** Jordan's phone has grayscale turned off and shows full color, so this app may
+  use color (the reading themes and their accent, §9). Keep it quiet, and never let color be
+  the only way something is shown — a label, icon or position must say it too.
 - **All app code in the `tool` module**, package `com.thelightphone.reader`, using primitives
   from `sdk/client` and `sdk/ui`.
 - **Kotlin, Compose, Coroutines, MVVM.** Screens extend `LightScreen` (or `SimpleLightScreen`);
@@ -91,9 +92,13 @@ reader/
     ReadingPosition*.kt Room entity / dao / database / repository
     LibrarySortPreference.kt  remembered library sort (DataStore)
     ReaderTextSizePreference.kt  remembered reading text size (DataStore)
+    ReaderThemePreference.kt     remembered reading theme (DataStore)
   ReaderTextSize.kt     the five text sizes (pure Kotlin, unit-tested)
   ReaderTypography.kt   reader body + heading TextStyles at a size (shared with TextSizeScreen)
-  LibraryScreen.kt, SortScreen.kt, ContentsScreen.kt, ReaderScreen.kt, TextSizeScreen.kt, Divider.kt
+  ReaderTheme.kt        the four themes: LightColors + accent each
+  ReaderThemeController.kt  the app-wide current theme; ThemedScreen frame every screen uses
+  LibraryScreen.kt, SortScreen.kt, ContentsScreen.kt, ReaderScreen.kt, TextSizeScreen.kt,
+  ThemeScreen.kt, Divider.kt
 ```
 
 **Parse once, then cache.** The first time a book is seen (or its file size / modified time
@@ -189,7 +194,17 @@ nothing (the size name, not the tone, says where you are). Back returns the size
 in `lightContext.dataStore` (key `reader_text_size`, the enum name; missing/unknown =
 Medium). Re-pagination anchors at the reader's place — the first character of the page last
 turned or jumped to (`anchorOffset`), which re-paging does not move — so switching sizes
-back and forth never drifts off the passage.
+back and forth never drifts off the passage. Below the stepper, a "Theme  <name>" row opens
+ThemeScreen.
+
+**ThemeScreen** — top bar: back, "Theme". Four rows, each drawn in its own colors as a
+preview, the current one marked `SELECT_ON`: **Dark** (default, the SDK dark look), Light,
+Sepia, Night (dark gray, warm text). Each is a `LightColors` plus an accent color
+(`ReaderTheme`); the accent colors the chapter heading on a chapter's first page and the
+"NN% read" text in the library. Tapping a row applies it to every screen at once
+(`ReaderThemeController`), remembers it in `lightContext.dataStore` (key `reader_theme`,
+the enum name; missing/unknown = Dark), and goes back. A theme change never re-pages the
+book. Every screen draws inside `ThemedScreen { }`.
 
 **ContentsScreen** — the book's chapters; tapping one returns its index to ReaderScreen via
 `goBack(index)`, which jumps to that chapter's start in place.

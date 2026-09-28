@@ -12,9 +12,8 @@ import com.thelightphone.sdk.ui.designVerticalPxToDp
 private const val HAIRLINE_THICKNESS_PX = 2f
 
 /**
- * A thin structural rule for separating rows and sections. Uses the same secondary
- * tone as other de-emphasized text (CLAUDE.md 1: monochrome screen, so separation
- * comes from position and weight, not a new color meaning).
+ * A thin structural rule for separating rows and sections, in the theme's secondary
+ * tone (the same as de-emphasized text).
  */
 @Composable
 fun HairlineDivider(modifier: Modifier = Modifier) {

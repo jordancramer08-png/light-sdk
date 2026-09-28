@@ -1,10 +1,7 @@
 package com.thelightphone.reader
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicText
@@ -23,9 +20,6 @@ import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
-import com.thelightphone.sdk.ui.LightTheme
-import com.thelightphone.sdk.ui.LightThemeController
-import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
@@ -41,7 +35,7 @@ private const val SAMPLE_TEXT =
 /**
  * Picks the reading text size. − and + step through the five sizes; the sample below is
  * drawn with exactly the reader's page style, at the same width. Back hands the size to
- * ReaderScreen, which saves it and re-pages the book.
+ * ReaderScreen, which saves it and re-pages the book. The Theme row opens ThemeScreen.
  */
 class TextSizeScreen(
     sealedActivity: SealedLightActivity,
@@ -52,38 +46,53 @@ class TextSizeScreen(
 
     @Composable
     override fun Content() {
-        val themeColors by LightThemeController.colors.collectAsState()
-
-        LightTheme(colors = themeColors) {
-            Column(
+        ThemedScreen {
+            LightTopBar(
+                leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack(size) }),
+                center = LightTopBarCenter.Text("Text Size"),
+            )
+            SizeStepper(
+                size = size,
+                onSmaller = { size.smaller?.let { size = it } },
+                onLarger = { size.larger?.let { size = it } },
+            )
+            HairlineDivider(modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp()))
+            ThemeRow(onClick = ::openTheme)
+            HairlineDivider(modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp()))
+            Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .background(LightThemeTokens.colors.background),
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .clipToBounds()
+                    .padding(
+                        horizontal = READER_MARGIN_GRID_UNITS.gridUnitsAsDp(),
+                        vertical = 1f.gridUnitsAsDp(),
+                    ),
             ) {
-                LightTopBar(
-                    leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack(size) }),
-                    center = LightTopBarCenter.Text("Text Size"),
-                )
-                SizeStepper(
-                    size = size,
-                    onSmaller = { size.smaller?.let { size = it } },
-                    onLarger = { size.larger?.let { size = it } },
-                )
-                HairlineDivider(modifier = Modifier.padding(horizontal = 1f.gridUnitsAsDp()))
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .clipToBounds()
-                        .padding(
-                            horizontal = READER_MARGIN_GRID_UNITS.gridUnitsAsDp(),
-                            vertical = 1f.gridUnitsAsDp(),
-                        ),
-                ) {
-                    BasicText(text = SAMPLE_TEXT, style = readerBodyStyle(size))
-                }
+                BasicText(text = SAMPLE_TEXT, style = readerBodyStyle(size))
             }
         }
+    }
+
+    /** The theme applies to every screen as soon as it is picked, so nothing comes back here. */
+    private fun openTheme() {
+        navigateTo(screenFactory = { ThemeScreen(it) })
+    }
+}
+
+/** "Theme          Sepia" — tap to open the Theme screen. */
+@Composable
+private fun ThemeRow(onClick: () -> Unit) {
+    val theme by ReaderThemeController.theme.collectAsState()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .lightClickable(onClick = onClick)
+            .padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.75f.gridUnitsAsDp()),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        LightText(text = "Theme", variant = LightTextVariant.Copy, modifier = Modifier.weight(1f))
+        LightText(text = theme.label, variant = LightTextVariant.Copy, lighten = true)
     }
 }
 

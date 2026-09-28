@@ -1,6 +1,5 @@
 package com.thelightphone.reader
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -9,10 +8,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
@@ -35,9 +35,6 @@ import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.buildDatabase
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcons
-import com.thelightphone.sdk.ui.LightTheme
-import com.thelightphone.sdk.ui.LightThemeController
-import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
@@ -72,10 +69,14 @@ data class PageLayout(
     val widthPx: Int,
     val heightPx: Int,
 ) {
+    /** Color doesn't change where pages break, so a new theme alone never re-pages the book. */
     fun sameMetricsAs(other: PageLayout) =
         widthPx == other.widthPx && heightPx == other.heightPx && headingGapPx == other.headingGapPx &&
-            bodyStyle == other.bodyStyle && headingStyle == other.headingStyle
+            bodyStyle.withoutColor() == other.bodyStyle.withoutColor() &&
+            headingStyle.withoutColor() == other.headingStyle.withoutColor()
 }
+
+private fun TextStyle.withoutColor() = copy(color = Color.Unspecified)
 
 /**
  * Pages through one book (CLAUDE.md 7). Each chapter is measured once against the reading
@@ -297,26 +298,19 @@ class ReaderScreen(
 
     @Composable
     override fun Content() {
-        val themeColors by LightThemeController.colors.collectAsState()
         val state by viewModel.state.collectAsState()
         val textSize by viewModel.textSize.collectAsState()
         val topTitle = (state as? ReaderScreenState.Loaded)?.chapterTitle ?: bookMeta.title
 
-        LightTheme(colors = themeColors) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(LightThemeTokens.colors.background),
-            ) {
-                LightTopBar(
-                    leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
-                    center = LightTopBarCenter.Text(topTitle, onClick = ::openTextSize),
-                    rightButton = LightBarButton.LightIcon(icon = LightIcons.LIST, onClick = ::openContents),
-                )
-                // Nothing is drawn until the saved text size is known (a moment at most).
-                textSize?.let { size ->
-                    PageArea(state, size, modifier = Modifier.weight(1f).fillMaxWidth())
-                }
+        ThemedScreen {
+            LightTopBar(
+                leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
+                center = LightTopBarCenter.Text(topTitle, onClick = ::openTextSize),
+                rightButton = LightBarButton.LightIcon(icon = LightIcons.LIST, onClick = ::openContents),
+            )
+            // Nothing is drawn until the saved text size is known (a moment at most).
+            textSize?.let { size ->
+                PageArea(state, size, modifier = Modifier.weight(1f).fillMaxWidth())
             }
         }
     }

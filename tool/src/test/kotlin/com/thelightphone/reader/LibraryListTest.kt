@@ -123,4 +123,17 @@ class LibraryListTest {
         assertEquals("Can't open", statusText(broken, null))
         assertTrue(libraryRows(listOf(book("c.epub")), emptyMap()).single().canOpen)
     }
+
+    @Test
+    fun onlyBooksWithProgressShowTheAccent() {
+        val started = book("a.epub", chapterChars = listOf(100, 100))
+        val fresh = book("b.epub")
+        val drm = book("c.epub", problem = BookProblem.DRM, chapterChars = emptyList())
+        val rows = libraryRows(listOf(started, fresh, drm), mapOf("a" to position("a", 2, 0)))
+            .associateBy { it.meta.slug }
+        assertEquals("50% read", rows.getValue("a").statusText)
+        assertTrue(rows.getValue("a").isStarted)
+        assertFalse(rows.getValue("b").isStarted)
+        assertFalse(rows.getValue("c").isStarted)
+    }
 }

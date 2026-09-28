@@ -17,7 +17,12 @@ data class LibraryRow(
     val statusText: String,
 ) {
     val canOpen: Boolean get() = meta.problem == null
+
+    /** True when the status is "NN% read" (drawn in the theme's accent). */
+    val isStarted: Boolean get() = canOpen && statusText.endsWith(READ_SUFFIX)
 }
+
+private const val READ_SUFFIX = "% read"
 
 /** The four ways the library can be ordered, as shown on the sort screen. */
 enum class LibrarySort(val label: String) {
@@ -86,5 +91,5 @@ fun progressText(meta: BookMeta, position: ReadingPosition?): String {
         .filter { it.index < position.chapterIndex }
         .sumOf { it.chars.toLong() } + position.charOffset
     val percent = (readChars * 100 / totalChars).coerceIn(0, 100)
-    return "$percent% read"
+    return "$percent$READ_SUFFIX"
 }

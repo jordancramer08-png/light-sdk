@@ -124,9 +124,8 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
         }
     }
 
-    // TODO(phase 4): open ReaderScreen instead; Contents will be reached from there.
     private fun openBook(meta: BookMeta) {
-        navigateTo(screenFactory = { ContentsScreen(it, meta) })
+        navigateTo(screenFactory = { ReaderScreen(it, meta, libraryStore) })
     }
 }
 

@@ -4,6 +4,7 @@ import com.thelightphone.reader.epub.Book
 import com.thelightphone.reader.epub.DrmProtectedException
 import com.thelightphone.reader.epub.EpubParser
 import com.thelightphone.reader.epub.PARSER_VERSION
+import com.thelightphone.reader.epub.countWords
 import com.thelightphone.reader.epub.slugify
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -102,9 +103,16 @@ class LibraryStore(
         val chapters = book.chapters.mapIndexed { i, chapter ->
             val fileName = chapterFileName(i + 1)
             File(folder, fileName).writeText(chapter.text)
-            ChapterMeta(index = i + 1, title = chapter.title, file = fileName, chars = chapter.text.length)
+            ChapterMeta(
+                index = i + 1,
+                title = chapter.title,
+                file = fileName,
+                chars = chapter.text.length,
+                words = countWords(chapter.text),
+            )
         }
-        return writeMeta(BookMeta(slug, book.title, book.author, chapters, stamp))
+        val meta = BookMeta(slug, book.title, book.author, chapters, stamp, series = book.series, seriesNumber = book.seriesNumber)
+        return writeMeta(meta)
     }
 
     /** A book we can't open is still cached, so it isn't re-parsed on every launch. */

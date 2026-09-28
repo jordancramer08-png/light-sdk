@@ -26,7 +26,8 @@ import com.thelightphone.sdk.ui.lightClickable
  * The book's chapters, reachable from the reading screen (CLAUDE.md 9). Tapping a chapter
  * hands its index back to the calling ReaderScreen via [goBack] rather than navigating
  * onward, so the jump happens in place instead of pushing a new reading screen onto the
- * back stack. It opens scrolled to the chapter being read. "Add to list" at the bottom opens AddToListScreen for this book.
+ * back stack. It opens scrolled to the chapter being read. "Add to list" at the bottom opens
+ * AddToListScreen for this book; "Details" opens BookDetailsScreen.
  */
 class ContentsScreen(
     sealedActivity: SealedLightActivity,
@@ -52,13 +53,22 @@ class ContentsScreen(
                 onSelect = { chapter -> goBack(chapter.index) },
                 modifier = Modifier.weight(1f),
             )
-            LightBottomBar(items = listOf(LightBarButton.Text(text = "ADD TO LIST", onClick = ::openAddToList)))
+            LightBottomBar(
+                items = listOf(
+                    LightBarButton.Text(text = "ADD TO LIST", onClick = ::openAddToList),
+                    LightBarButton.Text(text = "DETAILS", onClick = ::openDetails),
+                ),
+            )
         }
     }
 
     /** Nothing comes back: the lists are saved as they're switched on and off. */
     private fun openAddToList() {
         navigateTo(screenFactory = { AddToListScreen(it, bookMeta) })
+    }
+
+    private fun openDetails() {
+        navigateTo(screenFactory = { BookDetailsScreen(it, bookMeta) })
     }
 }
 

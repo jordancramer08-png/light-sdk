@@ -35,6 +35,8 @@ object EpubFixture {
         drm: Boolean = false,
         rawEntries: Map<String, ByteArray> = emptyMap(),
         spineIncludesNav: Boolean = false,
+        /** Raw OPF metadata lines, e.g. a series `<meta>`. */
+        extraMetadata: String = "",
     ): File {
         val opfDir = "OEBPS/"
         val manifest = StringBuilder()
@@ -55,6 +57,7 @@ object EpubFixture {
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     ${title?.let { "<dc:title>${escape(it)}</dc:title>" } ?: ""}
     ${author?.let { "<dc:creator>${escape(it)}</dc:creator>" } ?: ""}
+    $extraMetadata
   </metadata>
   <manifest>$manifest</manifest>
   <spine${if (tocStyle == TocStyle.NCX) """ toc="ncx"""" else ""}>$spine</spine>

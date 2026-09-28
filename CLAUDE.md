@@ -86,6 +86,8 @@ reader/
     EpubParser.kt       zip → Book(title, author, chapters[title, text])
     HtmlText.kt         XHTML → plain text (paragraphs split by one blank line)
     ContentFilter.kt    drops covers, title pages, ads, embedded TOCs, praise pages
+    Series.kt           series + number: OPF metadata (calibre, then EPUB 3), else file name
+    WordCount.kt        countWords (runs of non-space holding a letter or digit)
   data/
     LibraryStore.kt     scans shared/books/*.epub, caches parsed books
     BookMeta.kt         cached meta.json model (kotlinx-serialization)
@@ -103,9 +105,10 @@ reader/
   ReaderTheme.kt        the four themes: LightColors + accent each
   ReaderThemeController.kt  the app-wide current theme; ThemedScreen frame every screen uses
   ReadingLists.kt       list logic: LibraryView, listRows, neighbourSlug (pure Kotlin, unit-tested)
+  BookDetails.kt        the Book Details rows: reading time, time left, sizes, dates (pure Kotlin, unit-tested)
   LibraryScreen.kt, SortScreen.kt, ContentsScreen.kt, ReaderScreen.kt, ReadingSettingsScreen.kt,
   ThemeScreen.kt, ListsScreen.kt, ListNameScreen.kt, DeleteListScreen.kt, ListBooksScreen.kt,
-  AddToListScreen.kt, Divider.kt, RowIconButton.kt
+  AddToListScreen.kt, BookDetailsScreen.kt, Divider.kt, RowIconButton.kt
   UniformRow.kt         a fixed-height row (divider included) for LightLazyScrollView lists
 tool/schemas/           Room's saved schema for each database version (checked in)
 ```
@@ -113,8 +116,10 @@ tool/schemas/           Room's saved schema for each database version (checked i
 **Parse once, then cache.** The first time a book is seen (or its file size / modified time
 changes, or `PARSER_VERSION` is bumped), parse it and write
 `<filesDir>/library/<slug>/meta.json` + `001.txt`, `002.txt`, … Every later open reads the
-cache. Delete cache folders whose EPUB is gone. Parsing runs on `Dispatchers.IO`, one book at
-a time; the library shows "Preparing N books…" meanwhile.
+cache. meta.json also holds the series (`series`, `seriesNumber`, when there is one) and each
+chapter's word count (`words`), counted once at this step (`PARSER_VERSION` 2). Delete cache
+folders whose EPUB is gone. Parsing runs on `Dispatchers.IO`, one book at a time; the library
+shows "Preparing N books…" meanwhile.
 
 **Parse with plain Kotlin string handling, not `XmlPullParser` / `android.util.Xml`.** EPUB
 XHTML in the wild is often not valid XML (HTML entities like `&nbsp;`, stray tags), and the
@@ -274,7 +279,20 @@ book. Every screen draws inside `ThemedScreen { }`.
 **ContentsScreen** — the book's chapters; tapping one returns its index to ReaderScreen via
 `goBack(index)`, which jumps to that chapter's start in place. A `LightLazyScrollView` of
 4-grid-unit `UniformRow`s (titles one line, ellipsized); it opens with the chapter being
-read as the top row. Bottom bar: "ADD TO LIST" (→ AddToListScreen).
+read as the top row. Bottom bar: "ADD TO LIST" (→ AddToListScreen), "DETAILS"
+(→ BookDetailsScreen).
+
+**BookDetailsScreen** — top bar: back, "Details". Read only. The title (Subheading) and
+author (lighter) at the top, then "Label   value" rows (label lighter, value right-aligned,
+long values wrap) in a `LightScrollView`: Series ("Name, book N"; the row is left out when
+there's none), Chapters, Words, Reading time and Time left (at 250 words a minute: "About
+6 h 20 min"; time left counts later chapters' words plus the unread share of the current
+chapter, by characters; no saved place = the whole book), Progress (the library's "NN% read"),
+File (name), File size, Added (the EPUB's modified time on the phone — the send script's `cp`
+sets it to the day it was sent), Last read (the saved place's `updatedAt`, or "Not yet").
+Dates use the phone's medium date format. Logic: `BookDetails.kt` (`bookDetailRows`).
+Series: calibre `calibre:series` / `calibre:series_index`, then EPUB 3
+`belongs-to-collection` + `group-position`, then the file name `Series NN. Title - Author.epub`.
 
 Quiet, fast, readable. No streaks, no stats, no notifications.
 

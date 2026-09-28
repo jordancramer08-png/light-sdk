@@ -7,7 +7,14 @@ import java.nio.charset.CodingErrorAction
 import java.util.zip.ZipFile
 
 data class Chapter(val title: String, val text: String)
-data class Book(val title: String, val author: String, val chapters: List<Chapter>)
+data class Book(
+    val title: String,
+    val author: String,
+    val chapters: List<Chapter>,
+    /** The series this book belongs to, if any, and its place in it ("1", "2.5"). */
+    val series: String? = null,
+    val seriesNumber: String? = null,
+)
 
 /** Raised when an EPUB can't be converted (e.g. it's DRM-protected). */
 sealed class EpubParseException(message: String) : Exception(message)
@@ -18,7 +25,7 @@ class InvalidEpubException(message: String) : EpubParseException(message)
  * Bump this whenever a change here (or in HtmlText / ContentFilter) would change a
  * book's chapters or text. The library cache sees the new number and re-parses every book.
  */
-const val PARSER_VERSION = 1
+const val PARSER_VERSION = 2 // 2: series, and word counts in the cache
 
 private const val CONTAINER_PATH = "META-INF/container.xml"
 private const val DRM_MARKER_PATH = "META-INF/encryption.xml"
@@ -40,7 +47,8 @@ object EpubParser {
 
             val opfPath = findOpfPath(zip)
             val opfDir = zipDirname(opfPath)
-            val opfRoot = parseXml(readZipText(zip, opfPath))
+            val opfText = readZipText(zip, opfPath)
+            val opfRoot = parseXml(opfText)
 
             val (title, author) = readMetadata(opfRoot)
             val manifest = readManifest(opfRoot, opfDir)
@@ -64,7 +72,8 @@ object EpubParser {
             }
 
             if (chapters.isEmpty()) throw InvalidEpubException("no readable chapters found")
-            return Book(title = title, author = author, chapters = chapters)
+            val series = readSeries(opfText) ?: seriesFromFileName(file.name)
+            return Book(title, author, chapters, series?.name, series?.number)
         }
     }
 }

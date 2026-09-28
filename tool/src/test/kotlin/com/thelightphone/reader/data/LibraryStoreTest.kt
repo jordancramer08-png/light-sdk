@@ -3,6 +3,7 @@ package com.thelightphone.reader.data
 import com.thelightphone.reader.epub.EpubFixture
 import com.thelightphone.reader.epub.EpubParser
 import com.thelightphone.reader.epub.PARSER_VERSION
+import com.thelightphone.reader.epub.countWords
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.AfterTest
@@ -66,6 +67,29 @@ class LibraryStoreTest {
         val text = store().chapterText(book, book.chapters[0])!!
         assertTrue(text.startsWith("Sea Story 1"))
         assertEquals(text.length, book.chapters[0].chars)
+    }
+
+    @Test
+    fun wordCountsAreStoredPerChapter() {
+        val chapter = EpubFixture.chapter("c1", "One", listOf(EpubFixture.longParagraph("Words here")))
+        EpubFixture.build(title = "Counted", chapters = listOf(chapter)).copyTo(File(booksDir, "a.epub"))
+
+        val book = store().refresh().single()
+        val text = store().chapterText(book, book.chapters[0])!!
+
+        assertEquals(countWords(text), book.chapters[0].words)
+        assertTrue(book.words > 0)
+        assertEquals(book, store().book(book.slug)) // survives the trip through meta.json
+    }
+
+    @Test
+    fun seriesIsStored() {
+        addBook("Sea Tales 02. Sea Story - Ann Author.epub", "Sea Story")
+
+        val book = store().refresh().single()
+
+        assertEquals("Sea Tales", book.series)
+        assertEquals("2", book.seriesNumber)
     }
 
     @Test

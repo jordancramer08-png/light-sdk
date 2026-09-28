@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -19,6 +20,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
 import androidx.lifecycle.viewModelScope
@@ -34,11 +36,14 @@ import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcons
+import com.thelightphone.sdk.ui.LightText
+import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -49,6 +54,10 @@ import kotlin.math.roundToInt
 
 sealed interface ReaderScreenState {
     data object Loading : ReaderScreenState
+
+    /** A chapter is taking a while to read and page (a huge one): "Preparing…" shows. */
+    data class Preparing(val chapterTitle: String) : ReaderScreenState
+
     data class Loaded(
         val chapterTitle: String,
         val pageText: String,
@@ -98,7 +107,9 @@ class ReaderScreenViewModel(
 
     private var pageLayout: PageLayout? = null
 
-    private var currentChapterIndex: Int = bookMeta.chapters.firstOrNull()?.index ?: 1
+    /** The chapter being read; Contents opens scrolled to it. */
+    var currentChapterIndex: Int = bookMeta.chapters.firstOrNull()?.index ?: 1
+        private set
     private var currentText: String = ""
     private var currentPages: List<PageRange> = emptyList()
     private var currentPageIndex: Int = 0
@@ -159,7 +170,7 @@ class ReaderScreenViewModel(
     }
 
     fun nextPage() {
-        if (currentPages.isEmpty()) return
+        if (isLoading() || currentPages.isEmpty()) return
         if (currentPageIndex < currentPages.lastIndex) {
             showPage(currentPageIndex + 1)
         } else {
@@ -168,13 +179,16 @@ class ReaderScreenViewModel(
     }
 
     fun previousPage() {
-        if (currentPages.isEmpty()) return
+        if (isLoading() || currentPages.isEmpty()) return
         if (currentPageIndex > 0) {
             showPage(currentPageIndex - 1)
         } else {
             chapter(currentChapterIndex - 1)?.let { loadChapter(it.index, Int.MAX_VALUE) }
         }
     }
+
+    /** While a chapter is loading, taps are ignored so they can't land on the old chapter. */
+    private fun isLoading() = loadJob?.isActive == true
 
     private fun chapter(index: Int): ChapterMeta? = bookMeta.chapters.firstOrNull { it.index == index }
 
@@ -188,6 +202,11 @@ class ReaderScreenViewModel(
 
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
+            // Usually done in a blink. If not, say so rather than show a stale or empty page.
+            val slowNotice = launch {
+                delay(PREPARING_NOTICE_DELAY_MS)
+                _state.value = ReaderScreenState.Preparing(chapter.title)
+            }
             val text = chapterTextCache.getOrPut(chapter.index) {
                 withContext(Dispatchers.IO) {
                     withExtraParagraphSpacing(libraryStore.chapterText(bookMeta, chapter).orEmpty())
@@ -196,6 +215,7 @@ class ReaderScreenViewModel(
             val pages = pageCache.getOrPut(chapter.index) {
                 withContext(Dispatchers.Default) { pageChapter(layout, chapter.title, text) }
             }
+            slowNotice.cancel()
             currentChapterIndex = chapter.index
             currentText = text
             currentPages = pages
@@ -271,6 +291,9 @@ private fun TextLayoutResult.lines(text: String): List<TextLine> =
         )
     }
 
+/** How long a chapter may take to appear before "Preparing…" is shown. */
+private const val PREPARING_NOTICE_DELAY_MS = 300L
+
 private const val BACK_TAP_ZONE_FRACTION = 0.3f
 private const val READER_TOP_BOTTOM_GRID_UNITS = 0.75f
 private const val HEADING_GAP_GRID_UNITS = 1f
@@ -297,7 +320,11 @@ class ReaderScreen(
     override fun Content() {
         val state by viewModel.state.collectAsState()
         val textSize by viewModel.textSize.collectAsState()
-        val topTitle = (state as? ReaderScreenState.Loaded)?.chapterTitle ?: bookMeta.title
+        val topTitle = when (val current = state) {
+            is ReaderScreenState.Loaded -> current.chapterTitle
+            is ReaderScreenState.Preparing -> current.chapterTitle
+            ReaderScreenState.Loading -> bookMeta.title
+        }
 
         ThemedScreen {
             LightTopBar(
@@ -314,7 +341,7 @@ class ReaderScreen(
 
     private fun openContents() {
         navigateTo(
-            screenFactory = { ContentsScreen(it, bookMeta) },
+            screenFactory = { ContentsScreen(it, bookMeta, viewModel.currentChapterIndex) },
             resultCallback = { chapterIndex -> viewModel.jumpToChapter(chapterIndex) },
         )
     }
@@ -359,6 +386,15 @@ class ReaderScreen(
                 )
             }
 
+            if (state is ReaderScreenState.Preparing) {
+                LightText(
+                    text = "Preparing…",
+                    variant = LightTextVariant.Copy,
+                    lighten = true,
+                    align = TextAlign.Center,
+                    modifier = Modifier.align(Alignment.Center),
+                )
+            }
             if (state is ReaderScreenState.Loaded) {
                 Column(modifier = Modifier.fillMaxSize()) {
                     if (state.isChapterStart) {

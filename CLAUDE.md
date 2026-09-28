@@ -104,6 +104,7 @@ reader/
   LibraryScreen.kt, SortScreen.kt, ContentsScreen.kt, ReaderScreen.kt, TextSizeScreen.kt,
   ThemeScreen.kt, ListsScreen.kt, ListNameScreen.kt, DeleteListScreen.kt, ListBooksScreen.kt,
   AddToListScreen.kt, Divider.kt, RowIconButton.kt
+  UniformRow.kt         a fixed-height row (divider included) for LightLazyScrollView lists
 tool/schemas/           Room's saved schema for each database version (checked in)
 ```
 
@@ -193,6 +194,15 @@ handful at a time, not the whole library. On the phone the files sit flat in
 - Row: title (from the EPUB metadata, one line), author (lighter), progress ("Not started" or
   "NN% read", computed from chapter char counts as in the September `LibraryScreen`).
 - Empty library: "No books on this device yet." centered, lighter text.
+- The list is a `LightLazyScrollView` (only rows on screen are drawn). That view needs every
+  row the same height, so each row is a `UniformRow` of 7 grid units: title, author and
+  progress one line each, ellipsized.
+
+**Long lists and huge books.** Some books have hundreds of chapters (C.S. Lewis Complete
+Works: 746). Any list that can grow long uses `LightLazyScrollView` + `UniformRow` with
+one-line, ellipsized text — never a plain `LightScrollView` with a row per item. Nothing
+slow (parsing, reading chapter files, paging) runs on the main thread; if it takes longer
+than a blink the screen says "Preparing…" instead of freezing or showing a stale page.
 
 ## 9. Screens
 
@@ -221,6 +231,9 @@ it out. Any number of lists.
 
 **ReaderScreen** — top bar: back, the current chapter title, and a `LightIcons.LIST` button
 that opens Contents. Paged text below (§7). Tapping the chapter title opens TextSizeScreen.
+If a chapter takes more than 300 ms to read and page (a huge chapter, or the library still
+busy), the page area shows "Preparing…" (lighter, centered) and taps are ignored until the
+page is ready.
 
 **TextSizeScreen** — top bar: back, "Text Size". Below it "−  <size name>  +" (drawn as
 text: the SDK has no minus icon), then a sample paragraph drawn with exactly the reader's
@@ -245,8 +258,9 @@ the enum name; missing/unknown = Dark), and goes back. A theme change never re-p
 book. Every screen draws inside `ThemedScreen { }`.
 
 **ContentsScreen** — the book's chapters; tapping one returns its index to ReaderScreen via
-`goBack(index)`, which jumps to that chapter's start in place. Bottom bar: "ADD TO LIST"
-(→ AddToListScreen).
+`goBack(index)`, which jumps to that chapter's start in place. A `LightLazyScrollView` of
+4-grid-unit `UniformRow`s (titles one line, ellipsized); it opens with the chapter being
+read as the top row. Bottom bar: "ADD TO LIST" (→ AddToListScreen).
 
 Quiet, fast, readable. No streaks, no stats, no notifications.
 

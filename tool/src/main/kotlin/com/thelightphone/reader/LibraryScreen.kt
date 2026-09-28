@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
@@ -30,7 +31,7 @@ import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcons
-import com.thelightphone.sdk.ui.LightScrollView
+import com.thelightphone.sdk.ui.LightLazyScrollView
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightTopBar
@@ -257,25 +258,31 @@ private fun CenteredMessage(message: String) {
     }
 }
 
+/**
+ * Each book row is this tall (grid units), divider included: title, author and progress
+ * are one line each (about 5.3 units together), so every row is the same height — the
+ * lazy list needs that.
+ */
+private const val BOOK_ROW_GRID_UNITS = 7f
+
+/** Only the rows on screen are drawn, so a long library scrolls smoothly. */
 @Composable
 private fun BookList(rows: List<LibraryRow>, onSelect: (BookMeta) -> Unit) {
-    LightScrollView(
+    LightLazyScrollView(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 1f.gridUnitsAsDp()),
+        uniformItemHeightGridUnits = BOOK_ROW_GRID_UNITS,
     ) {
-        rows.forEachIndexed { index, row ->
+        itemsIndexed(rows, key = { _, row -> row.meta.slug }) { index, row ->
             // Books we can't open aren't tappable; the row says why.
             val tap = if (row.canOpen) Modifier.lightClickable { onSelect(row.meta) } else Modifier
-            BookRowView(
-                row = row,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .then(tap)
-                    .padding(vertical = 0.75f.gridUnitsAsDp()),
-            )
-            if (index != rows.lastIndex) {
-                HairlineDivider()
+            UniformRow(
+                heightGridUnits = BOOK_ROW_GRID_UNITS,
+                showDivider = index != rows.lastIndex,
+                modifier = tap,
+            ) {
+                BookRowView(row = row, modifier = Modifier.fillMaxWidth())
             }
         }
     }

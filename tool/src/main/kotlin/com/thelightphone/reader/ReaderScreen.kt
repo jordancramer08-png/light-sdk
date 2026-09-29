@@ -59,7 +59,7 @@ import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import com.thelightphone.sdk.ui.lightClickable
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -96,9 +96,10 @@ sealed interface ReaderScreenState {
 /**
  * Everything pagination needs to know about the screen: the reading area's size in pixels,
  * and the exact styles the page and heading are drawn with. [accent] colors the note markers.
+ * Only plain values, so two equal layouts are equal (the TextMeasurer is passed separately:
+ * the screen gets a new one each time it comes back, and that must not re-page the book).
  */
 data class PageLayout(
-    val measurer: TextMeasurer,
     val bodyStyle: TextStyle,
     val headingStyle: TextStyle,
     val headingGapPx: Int,
@@ -136,9 +137,9 @@ class ReaderScreenViewModel(
     private val _settings = MutableStateFlow<ReaderSettings?>(null)
     val settings: StateFlow<ReaderSettings?> = _settings.asStateFlow()
 
-    private var pageLayout: PageLayout? = null
+    private var measurer: TextMeasurer? = null
 
-    /** The chapter being read; Contents opens scrolled to it. */
+    /** The chapter on screen; Contents opens scrolled to it. */
     var currentChapterIndex: Int = bookMeta.chapters.firstOrNull()?.index ?: 1
         private set
     private var currentText: AnnotatedString = AnnotatedString("")
@@ -146,15 +147,14 @@ class ReaderScreenViewModel(
     private var currentPageIndex: Int = 0
 
     /**
-     * The character the reader is at: the first character of the page they last turned or
-     * jumped to. Re-paging (a new size, typeface, spacing or margin) keeps it, so changing back and forth
-     * always returns to the same passage instead of creeping backwards.
+     * The reader's place: the chapter and first character of the page last turned or jumped
+     * to (set before a jump's load starts). Re-paging (a new size, typeface, spacing or margin)
+     * keeps it, so changing back and forth always returns to the same passage.
      */
-    private var anchorOffset: Int = 0
+    private val loader = ChapterLoader(viewModelScope, currentChapterIndex, PageLayout::sameMetricsAs, ::loadChapter)
 
     private val chapterTextCache = mutableMapOf<Int, AnnotatedString>()
     private val pageCache = mutableMapOf<Int, List<PageRange>>()
-    private var loadJob: Job? = null
 
     /**
      * The laid-out text of the last few chapters read, which pages are drawn from. Only a few
@@ -183,6 +183,7 @@ class ReaderScreenViewModel(
     init {
         viewModelScope.launch { _settings.value = settingsPreference.load() }
         viewModelScope.launch { _charsPerMinute.value = speedPreference.load() }
+        loadSavedPosition()
         // Opening the book makes it Reading (unless it's already Reading or Finished).
         DatabaseQueue.write { readingStatusRepository.markOpened(bookMeta.slug) }
     }
@@ -198,39 +199,36 @@ class ReaderScreenViewModel(
         viewModelScope.launch { settingsPreference.save(settings) }
     }
 
-    /** Called once the reading area has a size. Nothing can be paged before that. */
-    fun configureLayout(layout: PageLayout) {
+    /**
+     * Called whenever the reading area is drawn with a size. Nothing can be paged before that.
+     * The same layout again (coming back from Contents, say) does nothing at all.
+     */
+    fun configureLayout(layout: PageLayout, measurer: TextMeasurer) {
         if (layout.widthPx <= 0 || layout.heightPx <= 0) return
-        val previous = pageLayout
-        pageLayout = layout
-        if (previous == null) {
-            loadSavedPosition()
-        } else if (!layout.sameMetricsAs(previous)) {
-            // Page breaks move with the new style or width, so re-page from the same character.
-            pageCache.clear()
+        this.measurer = measurer
+        loader.configureLayout(layout) { change ->
+            // Page breaks move with a new style or size: re-page from the same character.
+            if (change == LayoutChange.METRICS) pageCache.clear()
+            // Colors alone (a new theme): same pages, text laid out again in the new colors.
             layoutCache.clear()
-            loadChapter(currentChapterIndex, anchorOffset, keepAnchor = true)
-        } else if (layout != previous) {
-            // Only the colors changed (a new theme): same pages, text laid out again in the new colors.
-            layoutCache.clear()
-            loadChapter(currentChapterIndex, anchorOffset, keepAnchor = true)
         }
     }
 
+    /** The first page shows once both this and the layout are known. */
     private fun loadSavedPosition() {
         viewModelScope.launch {
             val saved = withContext(Dispatchers.IO) { readingPositionRepository.get(bookMeta.slug) }
             if (saved != null && chapter(saved.chapterIndex) != null) {
-                loadChapter(saved.chapterIndex, saved.charOffset, isReopening = true)
+                loader.reopenAt(saved.chapterIndex, saved.charOffset)
             } else {
-                loadChapter(currentChapterIndex, 0, isReopening = true)
+                loader.reopenAt(currentChapterIndex, 0)
             }
         }
     }
 
-    /** From ContentsScreen: go to the start of that chapter. */
+    /** From ContentsScreen (a chapter or a heading): go to the start of that chapter. */
     fun jumpToChapter(chapterIndex: Int) {
-        loadChapter(chapterIndex, 0)
+        if (chapter(chapterIndex) != null) loader.moveTo(chapterIndex, 0)
     }
 
     fun nextPage() {
@@ -241,7 +239,7 @@ class ReaderScreenViewModel(
         } else {
             chapter(currentChapterIndex + 1)?.let {
                 timePageJustRead()
-                loadChapter(it.index, 0)
+                loader.moveTo(it.index, 0)
             }
         }
     }
@@ -265,31 +263,23 @@ class ReaderScreenViewModel(
         if (currentPageIndex > 0) {
             showPage(currentPageIndex - 1)
         } else {
-            chapter(currentChapterIndex - 1)?.let { loadChapter(it.index, Int.MAX_VALUE) }
+            chapter(currentChapterIndex - 1)?.let { loader.moveTo(it.index, Int.MAX_VALUE) }
         }
     }
 
     /** While a chapter is loading, taps are ignored so they can't land on the old chapter. */
-    private fun isLoading() = loadJob?.isActive == true
+    private fun isLoading() = loader.isLoading
 
     private fun chapter(index: Int): ChapterMeta? = bookMeta.chapters.firstOrNull { it.index == index }
 
     /**
-     * Reads (or reuses) a chapter's text and pages, then shows the page holding [targetOffset].
-     * [keepAnchor] is for re-paging: the reader's place stays [targetOffset] exactly.
-     * [isReopening] is for going back to the saved place when the book opens.
+     * Reads (or reuses) a chapter's text and pages, then shows the page holding the request's
+     * offset. Run by [loader], which cancels it when a newer load starts.
      */
-    private fun loadChapter(
-        chapterIndex: Int,
-        targetOffset: Int,
-        keepAnchor: Boolean = false,
-        isReopening: Boolean = false,
-    ) {
-        val layout = pageLayout ?: return
-        val chapter = chapter(chapterIndex) ?: return
-
-        loadJob?.cancel()
-        loadJob = viewModelScope.launch {
+    private suspend fun loadChapter(layout: PageLayout, request: ChapterLoad) {
+        val chapter = chapter(request.chapterIndex) ?: return
+        val measurer = measurer ?: return
+        val (text, body, pages) = coroutineScope {
             // Usually done in a blink. If not, say so rather than show a stale or empty page.
             val slowNotice = launch {
                 delay(PREPARING_NOTICE_DELAY_MS)
@@ -299,20 +289,25 @@ class ReaderScreenViewModel(
                 withContext(Dispatchers.IO) { readStyledChapter(chapter) }
             }
             val body = layoutCache.getOrPut(chapter.index) {
-                withContext(Dispatchers.Default) { layOutChapter(layout, text) }
+                withContext(Dispatchers.Default) { layOutChapter(measurer, layout, text) }
             }
             val pages = pageCache.getOrPut(chapter.index) {
-                withContext(Dispatchers.Default) { pageChapter(layout, chapter.title, body) }
+                withContext(Dispatchers.Default) { pageChapter(measurer, layout, chapter.title, body) }
             }
             slowNotice.cancel()
-            currentChapterIndex = chapter.index
-            currentText = text
-            currentLayout = body
-            currentPages = pages
-            // Re-paging or reopening isn't the reader moving, so it never marks the book Finished.
-            showPage(pageIndexFor(pages, text.text, targetOffset), movedByReader = !keepAnchor && !isReopening)
-            if (keepAnchor) anchorOffset = targetOffset
+            Triple(text, body, pages)
         }
+        currentChapterIndex = chapter.index
+        currentText = text
+        currentLayout = body
+        currentPages = pages
+        // Re-paging or reopening isn't the reader moving, so it never marks the book Finished.
+        // Re-paging keeps the reader's place exactly, rather than moving it to the new page's start.
+        showPage(
+            pageIndexFor(pages, text.text, request.offset),
+            movedByReader = request.reason == LoadReason.MOVE,
+            keepPlace = request.reason == LoadReason.REPAGE,
+        )
     }
 
     /** The chapter's text with its styles, spaced out for the page (see [withExtraParagraphSpacing]). */
@@ -323,11 +318,11 @@ class ReaderScreenViewModel(
     }
 
     /** [movedByReader]: a page turn or a Contents jump, as opposed to reopening or re-paging. */
-    private fun showPage(pageIndex: Int, movedByReader: Boolean = true) {
+    private fun showPage(pageIndex: Int, movedByReader: Boolean = true, keepPlace: Boolean = false) {
         val body = currentLayout ?: return
         currentPageIndex = pageIndex
         val page = currentPages[pageIndex]
-        anchorOffset = page.start
+        if (!keepPlace) loader.pageShown(currentChapterIndex, page.start)
         val chapter = chapter(currentChapterIndex)
         // The page's lines: from its first character's line to its last character's line.
         val lastChar = (page.endExclusive - 1).coerceAtLeast(page.start)
@@ -397,8 +392,8 @@ class ReaderScreenViewModel(
  * [text] carries the italics, bold, quotes and scene breaks, since they change where lines
  * wrap. Pages are cut from this layout and drawn from it, so measured is drawn.
  */
-private fun layOutChapter(layout: PageLayout, text: AnnotatedString): TextLayoutResult =
-    layout.measurer.measure(
+private fun layOutChapter(measurer: TextMeasurer, layout: PageLayout, text: AnnotatedString): TextLayoutResult =
+    measurer.measure(
         withNoteColor(text, layout.accent),
         style = layout.bodyStyle,
         constraints = Constraints(maxWidth = layout.widthPx),
@@ -407,9 +402,9 @@ private fun layOutChapter(layout: PageLayout, text: AnnotatedString): TextLayout
     )
 
 /** Cuts the laid-out chapter into pages; the first is shorter by the heading above it. */
-private fun pageChapter(layout: PageLayout, title: String, body: TextLayoutResult): List<PageRange> {
+private fun pageChapter(measurer: TextMeasurer, layout: PageLayout, title: String, body: TextLayoutResult): List<PageRange> {
     val constraints = Constraints(maxWidth = layout.widthPx)
-    val headingHeightPx = layout.measurer
+    val headingHeightPx = measurer
         .measure(AnnotatedString(title), style = layout.headingStyle, constraints = constraints)
         .size.height
     val firstPageHeightPx = (layout.heightPx - headingHeightPx - layout.headingGapPx)
@@ -569,7 +564,8 @@ class ReaderScreen(
 
             LaunchedEffect(widthPx, heightPx, bodyStyle, headingStyle, headingGapPx, accent) {
                 viewModel.configureLayout(
-                    PageLayout(textMeasurer, bodyStyle, headingStyle, headingGapPx, widthPx, heightPx, accent),
+                    PageLayout(bodyStyle, headingStyle, headingGapPx, widthPx, heightPx, accent),
+                    textMeasurer,
                 )
             }
 

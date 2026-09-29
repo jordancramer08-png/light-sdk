@@ -185,6 +185,8 @@ reader/
   ReaderTypography.kt   reader body + heading TextStyles for a ReaderSettings (shared with ReadingSettingsScreen),
                         styledChapterText (chapter text + StyleRanges → AnnotatedString), withNoteColor
   NoteMarkers.kt        PageNote, pageNotes, nearestNote: which note marker a tap hit (unit-tested)
+  ChapterLoader.kt      the reader's place (chapter + character, set before a jump's load starts)
+                        and its chapter loads; an equal PageLayout does nothing (unit-tested)
   ReaderTheme.kt        the four themes: LightColors + accent each
   ReaderThemeController.kt  the app-wide current theme; ThemedScreen frame every screen uses
   ReadingLists.kt       list logic: LibraryView, listRows, neighbourSlug (pure Kotlin, unit-tested)

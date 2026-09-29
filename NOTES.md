@@ -4,6 +4,52 @@ Session-by-session notes for the Listen tool. `CLAUDE.md` says what the app does
 `PLAN.md` says how it's built. The older SDK recon below the line is still accurate
 reference for the SDK's UI kit, screens and sandbox rules.
 
+## Session 3 (2026-09-29): artists, albums, sorting, artwork — works on the phone
+
+**Built**
+- `music/Albums.kt`: `groupAlbums` (key = `groupKey(albumArtist)` + `groupKey(album)`,
+  case/accent/space-insensitive; songs in `TRACK_ORDER` = disc (0 → 1), track, path) and
+  `groupArtists` (by album artist; albums by year, undated last, then title).
+  `MusicLibraryState` now carries `albums` and `artists` (grouped on the IO thread in
+  `publish`) plus `album(key)`, `artist(key)`, `albumOf(song)`.
+- `music/Sorting.kt`: `sortSongs` / `sortAlbums` / `sortArtists`. Only the chosen field
+  is reversed for Z–A, so albums stay in track order. Keys use `sortKey()` (drops The/A/An).
+- `storage/Settings.kt`: `/sdcard/Listen/.state/settings.json` (`ListenSettings`:
+  `songSort`, `albumSort`, `artistSort` as `ListSort(field, descending)`). `Settings.load()`
+  runs from `ListenScreen.willShow()`; lists wait for `Settings.loaded` so they don't jump.
+  **Add later settings (theme, rewind, offload) to `ListenSettings`.**
+- `ui/SortScreen.kt`: generic sort screen (like the Reader's), opened from the top-bar
+  ⇅ (`REVERSE_ORDER`) icon via `ListTopBar(onSort = …)`.
+- Screens: `AlbumsScreen`, `ArtistsScreen` (both in `AlbumsScreen.kt`), `ArtistScreen`
+  (albums + "All songs") and `ArtistSongsScreen`, `AlbumScreen` (cover, details, Play /
+  Shuffle, tracks with disc headings). Shared rows in `music/MusicLists.kt`: `songRows`,
+  `albumRows`, `artistRows`, `MusicLazyList` (resets to the top when the sort changes),
+  `rememberSorted` (sorts on `Dispatchers.Default`).
+- `artwork/ArtworkCache.kt` replaces `SongArtwork`: `ArtSize.THUMB` 160 px / `LARGE` 800 px,
+  disk cache `filesDir/cache/art/<hash>-<px>.jpg` (a `.none` file = no art), 24 MB memory
+  LRU, 2 decodes at a time, one shared load per picture. `artwork/ArtImage.kt`: `ArtImage`
+  composable, `Album.artSource()`, `songArtSource(song, album)`. Art is on song rows, album
+  and artist rows, the album screen, Now Playing and the now-playing bar.
+- `PlaybackHub.playSongs(..., shuffle: Boolean?)`: album Play = shuffle off, Shuffle =
+  shuffle on from a random track; tapping a song in a list leaves shuffle as it is.
+  `QueueSource` kinds now include `album` and `artist` (key = album/artist key).
+- SDK change (in the Session 3 commit): `LightAudioService` resets ExoPlayer's shuffle
+  order to start at the current item whenever shuffle is turned on or the queue changes,
+  so no songs are skipped with repeat off (fixes the Session 2 shuffle concern). Test in
+  `LightAudioServiceTest`.
+- Version 0.3.0 (3). 10 new JVM tests (grouping, sorting, settings file).
+
+**For Session 4 (playlists)**
+- Album entries match on `albumKey(albumArtist, album)`; artist entries can use
+  `groupKey(name)` against both `Artist.key` (album artist) and `groupKey(song.artist)`.
+  An artist's albums are already in playlist order (`ARTIST_ALBUM_ORDER`: year, then title).
+- Add a `QueueSource.KIND_PLAYLIST` and reuse `songRows` / `albumRows` / `ArtImage` for
+  the playlist screens. "Add to playlist…" can go in the `ListTopBar` right slot on the album
+  and artist screens (the sort icon only sits on the three main lists).
+- The art disk cache is never trimmed. That's fine for about 270 albums (a few MB), but
+  consider cleaning it if books add many more covers.
+- Book covers (Session 5) can use `ArtSource(key, audioFile, folder, folderImages = listOf(cover))`.
+
 ## Session 2 (2026-09-29): playback and music resume — works on the phone
 
 **Built**

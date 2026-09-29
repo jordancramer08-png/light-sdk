@@ -30,7 +30,17 @@ class ComicStoreTest {
         return true
     }
 
-    private val store = ComicStore(comicsDir, cacheDir, ::fakeSaveCover)
+    /** Stands in for the detector: page bytes [n] give n panels on a 100 × 200 page; 0 can't be read. */
+    private val pagesLookedAt = mutableListOf<Int>()
+
+    private fun fakeFindPanels(bytes: ByteArray): PagePanels? {
+        val n = bytes.first().toInt()
+        pagesLookedAt.add(n)
+        if (n == 0) return null
+        return PagePanels(100, 200, (0 until n).map { PanelBox(0, it * 10, 100, it * 10 + 10) })
+    }
+
+    private val store = ComicStore(comicsDir, cacheDir, ::fakeSaveCover, ::fakeFindPanels)
 
     @AfterTest
     fun cleanUp() {
@@ -127,5 +137,59 @@ class ComicStoreTest {
     fun readsNotes() {
         File(comicsDir, "n.txt").writeText("﻿Line one\r\nLine two")
         assertEquals("Line one\nLine two", store.noteText("n.txt"))
+    }
+
+    @Test
+    fun looksForEachPagesPanelsOnceThenUsesTheCache() {
+        addComic("a.cbz", "1.jpg" to byteArrayOf(2), "2.jpg" to byteArrayOf(3))
+        val meta = assertNotNull(store.prepared("a.cbz"))
+        assertNull(store.cachedPanels(meta, "1.jpg"))
+
+        assertEquals(2, store.panels(meta, "1.jpg")?.panels?.size)
+        assertEquals(3, store.panels(meta, "2.jpg")?.panels?.size)
+        assertEquals(2, store.panels(meta, "1.jpg")?.panels?.size)
+        assertEquals(listOf(2, 3), pagesLookedAt) // each page looked at once
+
+        // Another screen's store reads the same panels.json.
+        val again = ComicStore(comicsDir, cacheDir, ::fakeSaveCover, ::fakeFindPanels)
+        assertEquals(PanelBox(0, 10, 100, 20), again.cachedPanels(meta, "1.jpg")?.panels?.get(1))
+        assertEquals(listOf(2, 3), pagesLookedAt)
+    }
+
+    @Test
+    fun anUnreadablePageIsNotCached() {
+        addComic("a.cbz", "1.jpg" to byteArrayOf(0))
+        val meta = assertNotNull(store.prepared("a.cbz"))
+        assertNull(store.panels(meta, "1.jpg"))
+        assertNull(store.panels(meta, "missing.jpg"))
+        assertNull(store.cachedPanels(meta, "1.jpg"))
+    }
+
+    @Test
+    fun panelsFromAnOlderDetectorAreLookedForAgain() {
+        addComic("a.cbz", "1.jpg" to byteArrayOf(2))
+        val meta = assertNotNull(store.prepared("a.cbz"))
+        File(cacheDir, "${ComicStore.cacheId("a.cbz")}/panels.json")
+            .writeText("""{"version":0,"pages":{"1.jpg":{"pageWidth":1,"pageHeight":1,"panels":[]}}}""")
+        assertNull(store.cachedPanels(meta, "1.jpg"))
+        assertEquals(2, store.panels(meta, "1.jpg")?.panels?.size)
+    }
+
+    @Test
+    fun aChangedComicDropsItsPanels() {
+        val path = "a.cbz"
+        addComic(path, "1.jpg" to byteArrayOf(2))
+        val old = assertNotNull(store.prepared(path))
+        store.panels(old, "1.jpg")
+        addComic(path, "1.jpg" to byteArrayOf(4))
+        File(comicsDir, path).setLastModified(File(comicsDir, path).lastModified() + 5_000)
+
+        val new = assertNotNull(store.prepared(path))
+        assertNull(store.cachedPanels(new, "1.jpg"))
+        assertEquals(4, store.panels(new, "1.jpg")?.panels?.size)
+        // Asking with the old details neither reads nor writes the new comic's panels.
+        assertNull(store.cachedPanels(old, "1.jpg"))
+        store.panels(old, "1.jpg")
+        assertEquals(4, store.cachedPanels(new, "1.jpg")?.panels?.size)
     }
 }

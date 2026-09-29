@@ -18,6 +18,9 @@ private val PAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp")
 /** A cover picture bigger than this is not read (a broken or odd file); the comic just has no cover. */
 const val MAX_COVER_BYTES = 30L * 1024 * 1024
 
+/** A page picture bigger than this (compressed) isn't shown or looked at: a broken or odd file. */
+const val MAX_PAGE_BYTES = 60L * 1024 * 1024
+
 /**
  * True when a zip entry is a page: a picture, not a folder, not hidden ("._001.jpg",
  * ".DS_Store"), and not in a Mac `__MACOSX` folder.

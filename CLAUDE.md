@@ -112,12 +112,17 @@ reader/
     ComicView.kt        the viewer's arithmetic: pageTap (tap zones), fitScale, PageZoom, PageGeometry
                         (zoom at a spot, pan limits, double-tap, visibleRegion, regionSampleSize),
                         fittedSize, openingPageIndex, pagesToKeep, sliderPage / sliderFraction
+    PanelDetector.kt    panel detection (§12 part 3): GrayImage, grayFromArgb, shrinkToLongSide,
+                        gutterLevel, searchPanels / detectPanels (XY-cut), PanelTuning (thresholds)
   data/
     LibraryStore.kt     scans shared/books/*.epub, caches parsed books (and their covers)
-    ComicStore.kt       lists shared/comics/ folders, caches each comic's page list + small cover
+    ComicStore.kt       lists shared/comics/ folders, caches each comic's page list + small cover,
+                        and each page's panels once looked for (panels)
     ComicMeta.kt        cached comic meta.json model (kotlinx-serialization)
+    ComicPanels.kt      cached panels.json model: ComicPanels, PagePanels, PanelBox
     ComicPageImages.kt  a page's bytes from the CBZ → a screen-fitted Bitmap (inSampleSize, then
-                        scaled), and BitmapRegionDecoder pieces for sharp zoom (phone only)
+                        scaled), BitmapRegionDecoder pieces for sharp zoom, and findPanels (a small
+                        gray copy → detectPanels) (phone only)
     CoverImages.kt      CoverSize, CoverImages.save: cover bytes → cover-small.png + cover-large.png
                         (or only the sizes asked for: saveSmall for comics)
                         (BitmapFactory with inSampleSize; phone only), sampleSize (unit-tested)
@@ -549,7 +554,8 @@ and Jordan has confirmed it on the phone (phases 3–5).
 ## 12. Comics (CBZ)
 
 Built in parts: 1 = PC send script, phone storage, the Comics section that lists comics
-(done); 2 = the full-page viewer (done). Parts 3–5 come next.
+(done); 2 = the full-page viewer (done); 3 = the panel detection engine, no UI yet (done,
+below). Parts 4–5 come next.
 
 **PC side.** `scripts\Send Comics to Phone.cmd` (→ `send-comics.ps1`). Jordan's comics are in
 `D:\Comics` (~7,700 files, reading-order folders up to 5 deep, e.g. `DC Comics\01. Book I -
@@ -644,6 +650,50 @@ either end). A single tap waits a moment to be sure it isn't a double-tap.
   `DatabaseQueue`); leaving the screen or pausing the app saves it and waits
   (`DatabaseQueue.writeNow`). Reaching the last page by a turn or the slider makes it
   Finished; reopening it there does not (as books).
+
+**Panel detection** (part 3; engine only, nothing on screen uses it yet). `comics/PanelDetector.kt`,
+plain Kotlin. A page is decoded small (`ComicPageImages.findPanels`: `inSampleSize` keeping at
+least 800 px on the long side), made gray (`grayFromArgb`: 0.299 R + 0.587 G + 0.114 B) and
+shrunk by averaging to 800 px on its long side (`shrinkToLongSide`, `PANEL_GRID_LONG_SIDE`).
+- **Gutter color** (`gutterLevel`): the outer 2% of the page all round. Pixels ≥ 160 are
+  light, ≤ 80 dark; whichever group is bigger, if it fills at least half the border
+  (`minBorderShare`), gives the gutter gray (its median). Otherwise (panels running off the
+  page) white is tried, then black, and the first reliable split is kept (`searchPanels`).
+- **Gutter pixel**: within 64 (`gutterTolerance`) of the gutter gray toward the ink (a light
+  gutter takes anything lighter too). 64, not 48, because old scans have white page edges but
+  yellowed gutters (~185).
+- **XY-cut**: trim gutter rows / columns off the edges, then cut into rows at every run of
+  gutter rows (a row is gutter when ≥ 95% of its pixels are, `gutterShare`: skewed scans clip a
+  panel corner) at least 2 px thick (0.25% of 800, `minGutterShare`: old scans' gutters are
+  that thin); if no rows, into columns; each piece again (8 levels at most). Rows top to
+  bottom, left to right inside a row = Western reading order.
+- **Slivers**: a piece thinner than 6% of the page across the cut (`minPanelShare`) is dropped
+  when under 2% of it is ink (`speckInkShare`: page numbers, specks), else joined to the
+  neighbour across the narrower gutter (caption strips).
+- **No panels** (the viewer will show the page whole) unless: 2–16 pieces (`maxPanels`),
+  none under 1% of the page (`minPanelArea`), none over 70% (`maxPanelArea`: a splash with a
+  strip), together covering ≥ 60% (`minCoverage`).
+- Panels come back in the page's own pixels (`PixelRect`, rounded outward).
+- **Cache**: `ComicStore.panels(meta, page)` reads `comic-library/<id>/panels.json`
+  (`ComicPanels`: `version` = `PANEL_DETECTOR_VERSION`, `pages` keyed by the page's name in the
+  CBZ → `PagePanels(pageWidth, pageHeight, panels)`, an empty list = whole page), else looks
+  and adds the page (written to a temp file, then moved over). A page that can't be read isn't
+  cached. Bump `PANEL_DETECTOR_VERSION` when the detector changes; the file goes with the
+  comic's folder when the comic changes.
+- **Known misses**: panels whose rows overlap by a few pixels or aren't straight (no clean
+  gutter across), slanted panels, and side-by-side panels with no full-height gutter (kept as
+  one box). Rarely, caption boxes on a splash or bright art are taken for panels.
+- **Report test** `PanelReportTest` (skipped unless `READER_TEST_COMICS` is set;
+  `READER_TEST_COMICS_LIMIT` = first N comics; `READER_TEST_PANELS` = other thresholds, e.g.
+  `gutterShare=0.97,gutterTolerance=48`): 10 pages spread through each CBZ / CBR under the
+  folder, overlays with numbered boxes (a fallback page gets red bands, a "0" and the cut's
+  pieces in thin gray) in `tool/build/panel-report/<folder>/` with `index.html` and
+  `summary.txt` (pages, panels, fallbacks and why). The Android test classpath has no
+  `javax.imageio`, so pages are decoded by the PC helper `scripts/panel-report/PagePictures.java`
+  (run with the JDK's `java`; outside `tool/src`, where `.java` files are banned); CBRs are
+  unpacked with 7-Zip. Run one Gradle command at a time (8 GB laptop). Last run (defaults
+  above): Earth-One, first 15 comics, panels on 102 of 150 pages; Rebirth, first 10, 44 of
+  100. Most fallbacks there are covers, splashes and slanted layouts.
 
 **`comic_position`** (database version 4): `slug` (PK, "comic:<path>"), `page` (1-based),
 `panel` (0 = whole page, else the panel; always 0 for now), `updatedAt`. Reads and writes go

@@ -4,8 +4,13 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.BitmapRegionDecoder
 import android.graphics.Rect
+import com.thelightphone.reader.comics.MAX_PAGE_BYTES
+import com.thelightphone.reader.comics.PANEL_GRID_LONG_SIDE
 import com.thelightphone.reader.comics.PixelRect
+import com.thelightphone.reader.comics.detectPanels
 import com.thelightphone.reader.comics.fittedSize
+import com.thelightphone.reader.comics.grayFromArgb
+import com.thelightphone.reader.comics.shrinkToLongSide
 import com.thelightphone.reader.comics.readComicEntry
 import java.io.File
 import java.io.IOException
@@ -19,9 +24,6 @@ class FittedPage(val bitmap: Bitmap, val imageWidth: Int, val imageHeight: Int)
  * off the main thread, one at a time.
  */
 object ComicPageImages {
-
-    /** A page picture bigger than this (compressed) isn't shown: a broken or odd file. */
-    private const val MAX_PAGE_BYTES = 60L * 1024 * 1024
 
     /** The page's compressed bytes, or null when it's missing or too big. */
     fun readPage(file: File, entryName: String): ByteArray? = readComicEntry(file, entryName, MAX_PAGE_BYTES)
@@ -58,5 +60,27 @@ object ComicPageImages {
     fun decodeRegion(decoder: BitmapRegionDecoder, region: PixelRect, sampleSize: Int): Bitmap? {
         val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
         return decoder.decodeRegion(Rect(region.left, region.top, region.right, region.bottom), options)
+    }
+
+    /**
+     * The page's panels (CLAUDE.md 12): decoded small (at least [PANEL_GRID_LONG_SIDE] px on its
+     * long side, shrunk by a power of 2), made gray, shrunk to that size, then looked for.
+     * Null when the bytes aren't a picture Android can read.
+     */
+    fun findPanels(bytes: ByteArray): PagePanels? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        val width = bounds.outWidth
+        val height = bounds.outHeight
+        if (width <= 0 || height <= 0) return null
+        val (gridWidth, gridHeight) = fittedSize(width, height, PANEL_GRID_LONG_SIDE, PANEL_GRID_LONG_SIDE)
+        val options = BitmapFactory.Options().apply { inSampleSize = sampleSize(width, height, gridWidth, gridHeight) }
+        val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return null
+        val argb = IntArray(decoded.width * decoded.height)
+        decoded.getPixels(argb, 0, decoded.width, 0, 0, decoded.width, decoded.height)
+        val gray = shrinkToLongSide(grayFromArgb(argb, decoded.width, decoded.height))
+        decoded.recycle()
+        val panels = detectPanels(gray, width, height)
+        return PagePanels(width, height, panels.map(PanelBox::of))
     }
 }

@@ -3,6 +3,7 @@ package com.thelightphone.reader
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -17,6 +18,7 @@ import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcons
+import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightTopBar
@@ -31,11 +33,14 @@ private const val SAMPLE_TEXT =
         "in the minds of the surrounding families, that he is considered as the rightful " +
         "property of some one or other of their daughters."
 
+/** The sample under the rows: tall enough for a few lines at the largest size. */
+private const val SAMPLE_HEIGHT_GRID_UNITS = 6f
+
 /**
  * Text size, typeface, line spacing, margins and alignment, each stepped with the buttons on
  * its row, and the progress line switched on or off.
- * The sample below is drawn with exactly the reader's page style and margins, so every
- * change shows at once. Back hands the settings to ReaderScreen, which saves them and
+ * The rows scroll; the sample fixed below them is drawn with exactly the reader's page style
+ * and margins, so every change shows at once. Back hands the settings to ReaderScreen, which saves them and
  * re-pages the book. The Theme row opens ThemeScreen.
  */
 class ReadingSettingsScreen(
@@ -52,21 +57,31 @@ class ReadingSettingsScreen(
                 leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack(settings) }),
                 center = LightTopBarCenter.Text("Reading Settings"),
             )
-            SettingRows()
-            ThemeRow(onClick = ::openTheme)
-            RowDivider()
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .clipToBounds()
-                    .padding(
-                        horizontal = settings.margins.gridUnits.gridUnitsAsDp(),
-                        vertical = 1f.gridUnitsAsDp(),
-                    ),
-            ) {
-                BasicText(text = SAMPLE_TEXT, style = readerBodyStyle(settings))
+            // The rows scroll; the sample stays put below them, so changes show while scrolling.
+            LightScrollView(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                SettingRows()
+                ThemeRow(onClick = ::openTheme)
             }
+            HairlineDivider()
+            SamplePreview()
+        }
+    }
+
+    /** A few lines of text in exactly the reader's page style and margins, cut off at the bottom. */
+    @Composable
+    private fun SamplePreview() {
+        Box(
+            modifier = Modifier
+                .height(SAMPLE_HEIGHT_GRID_UNITS.gridUnitsAsDp())
+                .fillMaxWidth()
+                .clipToBounds()
+                .padding(
+                    start = settings.margins.gridUnits.gridUnitsAsDp(),
+                    end = settings.margins.gridUnits.gridUnitsAsDp(),
+                    top = 0.75f.gridUnitsAsDp(),
+                ),
+        ) {
+            BasicText(text = SAMPLE_TEXT, style = readerBodyStyle(settings))
         }
     }
 

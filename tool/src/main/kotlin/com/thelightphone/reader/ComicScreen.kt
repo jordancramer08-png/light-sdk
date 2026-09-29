@@ -15,12 +15,15 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -31,6 +34,8 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import com.thelightphone.reader.comics.ComicReadingMode
@@ -55,6 +60,7 @@ import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightBottomBar
 import com.thelightphone.sdk.ui.LightIcons
+import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightThemeTokens
@@ -117,12 +123,41 @@ class ComicScreen(
         }
     }
 
+    /**
+     * The top panel and the bottom bar. The panel is only as tall as it needs to be, but never
+     * reaches the bottom bar: when it would, its settings scroll. The space between the two
+     * takes nothing itself, so a tap there reaches the page (which hides the overlay).
+     */
     @Composable
-    private fun BoxScope.Overlay(state: ComicViewState) {
+    private fun Overlay(state: ComicViewState) {
         val colors = LightThemeTokens.colors
         Column(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            TopPanel(state, Modifier.weight(1f, fill = false))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(colors.background)
+                    .pointerInput(Unit) { detectTapGestures { } },
+            ) {
+                LightBottomBar(
+                    items = listOf(
+                        LightBarButton.Text(text = "ADD TO LIST", onClick = ::openAddToList),
+                        LightBarButton.Text(text = "DETAILS", onClick = ::openDetails),
+                    ),
+                )
+            }
+        }
+    }
+
+    /** Back and title, page number, slider and FULL PAGE / PANELS stay put; the settings below scroll. */
+    @Composable
+    private fun TopPanel(state: ComicViewState, modifier: Modifier) {
+        val colors = LightThemeTokens.colors
+        Column(
+            modifier = modifier
                 .fillMaxWidth()
                 .background(colors.background)
                 // Taps on the overlay stay on it instead of reaching the page.
@@ -152,21 +187,24 @@ class ComicScreen(
             }
             ModeBar(current = state.mode, onSelect = viewModel::setMode)
             HairlineDivider()
-            ModeSettings(state)
+            SettingsScroll(state, Modifier.weight(1f, fill = false))
         }
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .background(colors.background)
-                .pointerInput(Unit) { detectTapGestures { } },
-        ) {
-            LightBottomBar(
-                items = listOf(
-                    LightBarButton.Text(text = "ADD TO LIST", onClick = ::openAddToList),
-                    LightBarButton.Text(text = "DETAILS", onClick = ::openDetails),
-                ),
-            )
+    }
+
+    /**
+     * The mode's settings in a scroll view. A scroll view fills all the height it is given, so
+     * it is held to its rows' own height (measured once they're laid out): when they all fit,
+     * the overlay ends right under them.
+     */
+    @Composable
+    private fun SettingsScroll(state: ComicViewState, modifier: Modifier) {
+        val density = LocalDensity.current
+        var rowsHeight by remember { mutableStateOf<Dp?>(null) }
+        val heightLimit = rowsHeight?.let { Modifier.heightIn(max = it) } ?: Modifier
+        LightScrollView(modifier = modifier.fillMaxWidth().then(heightLimit)) {
+            Column(modifier = Modifier.fillMaxWidth().onSizeChanged { rowsHeight = with(density) { it.height.toDp() } }) {
+                ModeSettings(state)
+            }
         }
     }
 

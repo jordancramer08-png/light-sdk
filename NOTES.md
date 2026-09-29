@@ -4,6 +4,48 @@ Session-by-session notes for the Listen tool. `CLAUDE.md` says what the app does
 `PLAN.md` says how it's built. The older SDK recon below the line is still accurate
 reference for the SDK's UI kit, screens and sandbox rules.
 
+## Session 4 (2026-09-29): playlists — works on the phone
+
+**Built**
+- `playlists/Playlist.kt`: `PlaylistEntry(kind, path, artist, album)` with kinds `song`
+  (path relative to `Music/`), `album` (album artist + album), `artist`. An unknown kind is
+  kept and matches nothing. `matchKey` compares entries like the library does (`groupKey`,
+  `albumKey`), so adding the same music twice does nothing. `Playlist(id, name, entries)`
+  with `adding` / `removing` / `removingAt` / `moving`.
+- `playlists/PlaylistExpander.kt`: `matchEntry` / `matchEntries` / `playlistSongs` expand
+  entries against the *current* `MusicLibraryState` (album = track order; artist = albums
+  whose album artist matches, plus songs they perform on other albums, in
+  `ARTIST_ALBUM_ORDER`). Duplicates play once, first place wins. Empty match = "Not on phone".
+- `playlists/Playlists.kt`: app-wide store for `/sdcard/Listen/.state/playlists.json`
+  (pretty JSON, atomic write, one IO thread). `load()` runs from `ListenScreen.willShow()`
+  and re-reads only if the file's mtime changed (a PC restore). Changes are ignored until
+  loaded, so an empty list is never written over real playlists. A broken file is renamed
+  to `playlists.broken-<time>.json`, never overwritten. `removeAt`/`move` take the expected
+  entry so a stale tap can't hit the wrong row.
+- Screens: `PlaylistsScreen` (+ new, pencil rename, bin delete), `PlaylistScreen` (count ·
+  length, Play/Shuffle, entries; pencil = edit mode with up/down/remove), `PlaylistEntryScreen`
+  (songs an album/artist entry covers; tapping plays the playlist from there),
+  `AddToPlaylistScreen` (toggle per playlist + "New playlist…"), `PlaylistNameScreen` and
+  `DeletePlaylistScreen` (from the Reader).
+- "Add to playlist…": long-press on song/album/artist rows (`songRows`/`albumRows`/
+  `artistRows` take `onHold`; `ui/Buttons.kt` `Modifier.tapOrHold` uses `combinedClickable`),
+  and "+" in the top bar of the album screen, artist screens and Now Playing
+  (`ListTopBar(onAddToPlaylist = …)`). Helpers `ListenScreen.addToPlaylist(song|album|artist)`.
+- `ui/Buttons.kt` now holds `ActionButton` (moved from AlbumScreen), `RowIconButton`
+  (from the Reader) and `DISABLED_ALPHA`. `MusicLibraryState.song(path)` added.
+  `QueueSource.KIND_PLAYLIST` (key = playlist id).
+- Version 0.4.0 (4). 9 new JVM tests in `tool/src/test/.../playlists/PlaylistTest.kt`.
+
+**For Session 5 (audiobook library)**
+- Long-press has no LP3 haptic tick (the SDK's haptic needs a Context the tool can't reach);
+  only Compose's own long-press haptic. Fine so far.
+- Playlist screens compute matches on `Dispatchers.Default` with `produceState`; do the same
+  for book grouping so the main thread never walks the library.
+- Book positions can follow the `Playlists` store pattern (load-once + mtime check,
+  single IO thread, move a broken file aside).
+- A playing playlist queue doesn't change when the playlist is edited; it's a snapshot of
+  the paths (same as album/artist queues).
+
 ## Session 3 (2026-09-29): artists, albums, sorting, artwork — works on the phone
 
 **Built**

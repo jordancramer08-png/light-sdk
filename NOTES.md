@@ -4,6 +4,52 @@ Session-by-session notes for the Listen tool. `CLAUDE.md` says what the app does
 `PLAN.md` says how it's built. The older SDK recon below the line is still accurate
 reference for the SDK's UI kit, screens and sandbox rules.
 
+## Session 2 (2026-09-29): playback and music resume — works on the phone
+
+**Built**
+- SDK audio changes (in the Session 2 commit, `sdk/client/.../audio/`):
+  - Service: `setHandleAudioBecomingNoisy(true)`, `WAKE_MODE_LOCAL` (only if the tool
+    declares `WAKE_LOCK`), and tapping the notification opens the tool.
+  - `LightAudioPlayer`: `setMediaQueue(items, startIndex, startPositionMs)`,
+    `seekTo(index, ms)`, `prepare()`, `setShuffleEnabled`/`shuffleEnabled`,
+    `setRepeatMode`/`repeatMode` (new `LightRepeatMode` Off/All/One).
+  - The detached controller now uses the application context, so one handle can live
+    for the whole process. If the service stops (Media3 stops it when the task is
+    swiped away while paused), the controller disconnects and the handle is
+    **released**; the tool must open a new one.
+- `lighttool.toml`: `capabilities = ["detached-audio"]`, `WAKE_LOCK` added, version 0.2.0 (2).
+- `ListenScreen` (base for every screen except Now Playing's own logic): `willShow()`
+  refreshes the library and calls `PlaybackHub.attach(...)`; `onAppPause()` saves.
+- `playback/PlaybackHub` (app-wide object): owns the one detached player
+  (`LightAudioUsage.Music`). `ensurePlayer()` reopens it after a release and restores the
+  saved queue **paused**, unless the service still has a live queue. Mirrors player
+  state into its own flows (`currentSong`, `isPlaying`, `positionMs`, `shuffle`,
+  `repeat`, `message`) so the UI doesn't flicker when the player is replaced.
+- `playback/MusicState` + `MusicStateStore`: `/sdcard/Listen/.state/music_state.json`
+  (paths relative to `Music/`, index, position, shuffle, repeat, source). Saved every
+  5 s while playing, and after pause/skip/seek/shuffle/repeat/background. Skips the
+  write when nothing changed. `restorable()` drops songs no longer on the phone.
+- `playback/MusicNowPlayingScreen`: art, title/artist/album, tap-or-drag seek bar,
+  shuffle / previous / play-pause / next / repeat. Previous restarts the song after 3 s.
+- `ui/NowPlayingBar` on Home, Music and Songs. Tapping a song plays the Songs list from
+  it and opens Now Playing.
+- `artwork/SongArtwork`: embedded picture, then cover/folder.jpg/png, decoded
+  downscaled (800 px) off the main thread, small memory LRU. No disk cache yet.
+- Unplayable file: "Can't play this file" on the album line, then skip to next
+  (stops after the whole queue has failed).
+- 9 new JVM tests in `tool/src/test/.../playback/MusicStateTest.kt`.
+
+**For Session 3**
+- Replace `SongArtwork` with the planned `ArtworkCache` (disk cache by album key,
+  160 px thumbnails for rows); Now Playing can switch to it.
+- Album/artist/playlist queues: call `PlaybackHub.playSongs(songs, index,
+  QueueSource(kind, key))`. `QueueSource` kinds besides "songs" aren't used yet.
+- Watch shuffle: with shuffle on, ExoPlayer's shuffle order may not start the rest of
+  the list right after the tapped song, so with repeat off some songs could be missed.
+  Jordan hasn't reported it; check before building album Shuffle buttons.
+- Speech usage for audiobooks (Session 6) still needs a way to switch attributes on the
+  live player; the hub currently always opens a Music player.
+
 ## Session 1 (2026-09-29): skeleton, file access, music scan — works on the phone
 
 **Built**

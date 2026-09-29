@@ -182,6 +182,9 @@ object LightToolPolicy {
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.READ_MEDIA_AUDIO",
+        // "All files access": lets a tool read files the user copies under /sdcard with
+        // plain java.io.File. Special app access, granted by the user (or `adb shell appops`).
+        "android.permission.MANAGE_EXTERNAL_STORAGE",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.NFC",

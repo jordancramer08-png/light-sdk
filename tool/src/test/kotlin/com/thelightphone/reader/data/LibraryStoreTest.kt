@@ -364,4 +364,23 @@ class LibraryStoreTest {
 
         assertEquals(emptyList<BookMeta>(), store().refresh())
     }
+
+    // --- removing --------------------------------------------------------------------------
+
+    @Test
+    fun removingABookDeletesItsEpubAndCacheFolder() {
+        addBook("a.epub", "Alpha")
+        addBook("b.epub", "Beta")
+        val alpha = store().refresh().first { it.title == "Alpha" }
+        val epubBytes = File(booksDir, "a.epub").length()
+        assertTrue(store().removalBytes(alpha) > epubBytes) // the cache counts too
+        assertTrue(store().isOnPhone(alpha))
+
+        assertTrue(store().remove(alpha))
+
+        assertFalse(File(booksDir, "a.epub").exists())
+        assertFalse(File(libraryDir, alpha.slug).exists())
+        assertFalse(store().isOnPhone(alpha))
+        assertEquals(listOf("Beta"), store().refresh().map { it.title })
+    }
 }

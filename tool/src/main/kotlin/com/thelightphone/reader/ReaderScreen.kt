@@ -497,7 +497,12 @@ class ReaderScreen(
     private fun openContents() {
         navigateTo(
             screenFactory = { ContentsScreen(it, bookMeta, viewModel.currentChapterIndex) },
-            resultCallback = { chapterIndex -> viewModel.jumpToChapter(chapterIndex) },
+            resultCallback = { choice ->
+                when (choice) {
+                    is ContentsChoice.Chapter -> viewModel.jumpToChapter(choice.index)
+                    ContentsChoice.BookRemoved -> goBack() // back to the Library, which drops the book
+                }
+            },
         )
     }
 

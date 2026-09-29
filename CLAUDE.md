@@ -90,6 +90,14 @@ comic's `comic-library/<id>/` on the next launch (§12), and saved places, readi
 reading status (keyed by slug) are kept, so anything sent again opens where Jordan stopped
 and is back in its lists.
 
+**Removing from inside the app.** Book Details, Comic Details and a comics folder's menu
+have "Remove from phone" (§9, §12). It opens `RemoveScreen`, which names what goes and the
+space freed ("Remove “Dune” (1.2 MB)?", "Remove 12 comics and 1 note (1.4 GB)?"; the bytes
+count the files and their cache folders) with a REMOVE button, then deletes the file(s) and
+their cache folders at once (`LibraryStore.remove`, `ComicStore.remove`). Saved places,
+status and list memberships are kept exactly as with the script. The Library, a series and
+the lists skip what's gone.
+
 ## 6. Architecture
 
 ```
@@ -108,7 +116,11 @@ reader/
     ComicFolderListing.kt  ComicFolderItem, folderItems (folders first, then comics + notes),
                         folderSummaryText, parentPath, itemsAfter (for Next in folder)
     ComicPages.kt       comicPages (pictures in natural order, no __MACOSX / hidden), readComicPages,
-                        readComicEntry, OpenComic (a CBZ kept open while it's read), decodeNoteText
+                        readComicEntry, readComicInfo, OpenComic (a CBZ kept open while it's read),
+                        decodeNoteText
+    ComicDetails.kt     ComicDetails (+ DetailsSource / ComicField: where each value came from),
+                        parseComicFileName, parseComicInfo, DetailsSidecar / parseDetailsSidecar,
+                        combineDetails / comicDetails (the priority order), comicInfoEntry
     ComicSettings.kt    the viewer's settings (§12 part 5): PanelMargin, PanelTransition, ComicViewSettings
     ComicView.kt        the viewer's arithmetic: pageTap (tap zones), fitScale, PageLayout / pageLayout
                         (spreads), PageZoom, PageGeometry (zoom at a spot, pan limits, double-tap,
@@ -127,9 +139,12 @@ reader/
                         filling the screen), between (the animated move between two zooms),
                         nextPanelSpot (where the next tap lands, to read it sharply ahead)
   data/
-    LibraryStore.kt     scans shared/books/*.epub, caches parsed books (and their covers)
+    LibraryStore.kt     scans shared/books/*.epub, caches parsed books (and their covers);
+                        removalBytes / remove (Remove from phone), isOnPhone
     ComicStore.kt       lists shared/comics/ folders, caches each comic's page list + small cover,
-                        and each page's panels once looked for (panels)
+                        and each page's panels once looked for (panels); details (Comic Details);
+                        removal / remove (a comic, note or whole folder)
+    FileSizes.kt        bytesUnder: a file's or a folder's bytes
     ComicMeta.kt        cached comic meta.json model (kotlinx-serialization)
     ComicPanels.kt      cached panels.json model: ComicPanels, PagePanels (panels, crop, levels),
                         PanelBox, LevelsBox
@@ -180,6 +195,9 @@ reader/
   LibraryScreen.kt, SortFilterScreen.kt, ContentsScreen.kt, ReaderScreen.kt, ReadingSettingsScreen.kt,
   ThemeScreen.kt, ListsScreen.kt, ListNameScreen.kt, DeleteListScreen.kt, ListBooksScreen.kt,
   AddToListScreen.kt, BookDetailsScreen.kt, SeriesScreen.kt, NoteScreen.kt, Divider.kt, RowIconButton.kt
+  Removal.kt            RemovalSummary, itemRemovalQuestion / folderRemovalQuestion (pure Kotlin, unit-tested)
+  RemoveScreen.kt       the "Remove from phone" confirm screen (measures, asks, removes)
+  ComicFolderMenuScreen.kt  a comics folder's menu (FolderAction: Remove from phone)
   SettingRows.kt        StepperRow and OnOffRow, shared by ReadingSettingsScreen and the comic overlay
   LibraryEntryList.kt   the book / series rows list (covers, Continue reading row), shared by
                         LibraryScreen and SeriesScreen
@@ -189,7 +207,8 @@ reader/
   UniformRow.kt         a fixed-height row (divider included) for LightLazyScrollView lists
   ComicRows.kt          LibrarySection, ComicEntry (folder / comic / note row), comicEntries,
                         comicPagesText, comicProgressText, lastOpenedComicPath, comicDetailRows,
-                        NextInFolder (pure Kotlin, unit-tested)
+                        NextInFolder, and Comic Details' top: comicHeading, comicStoryTitle,
+                        comicDateText, comicCreditRows, comicDetailsSourceText (pure Kotlin, unit-tested)
   ComicFolderLoader.kt  loads a comics folder (or a list's comics) and reads new comics one by one
   ComicEntryList.kt     the comics rows list (covers, Continue reading row)
   ComicViewModel.kt     the viewer: which page and panel, pictures kept, panels looked for, zoom,
@@ -423,7 +442,7 @@ list isn't remembered). Empty list: "No books in this list yet." centered, light
 **SeriesScreen** — top bar: back, the series name. The series' books (those in the Library's
 series row) in number order (1, 2, 2.5, 10; no number last; ties by file name), drawn with
 the Library's own book rows; tapping one opens it in ReaderScreen. Progress and status are
-re-read each time it comes to the front.
+re-read each time it comes to the front, and a book removed from the phone drops out.
 
 **ListsScreen** — top bar: back, "Lists", + (→ ListNameScreen, new list). "All books", then
 the lists A–Z; the one shown now is marked `SELECT_ON`. Tapping a row hands it back to the
@@ -516,7 +535,7 @@ the enum name; missing/unknown = Dark), and goes back. A theme change never re-p
 book. Every screen draws inside `ThemedScreen { }`.
 
 **ContentsScreen** — the book's chapters, with their headings (`contentsRows`, §6); tapping
-one returns its index to ReaderScreen via `goBack(index)`, which jumps to that chapter's
+one returns it to ReaderScreen via `goBack(ContentsChoice.Chapter(index))`, which jumps to that chapter's
 start in place. Tapping a heading jumps to the first readable chapter under it. Headings (and
 chapters with others nested under them) are drawn in the theme's accent; every row is
 indented 1.25 grid units per level (up to 4 levels), so the nesting shows by position too.
@@ -542,6 +561,9 @@ chapter, by characters; no saved place = the whole book), Progress (the library'
 File (name), File size, Added (the EPUB's modified time on the phone — the send script's `cp`
 sets it to the day it was sent), Last read (the saved place's `updatedAt`, or "Not yet").
 Dates use the phone's medium date format. Logic: `BookDetails.kt` (`bookDetailRows`).
+Bottom bar: REMOVE FROM PHONE (→ `RemoveScreen`, §5). Once removed, Book Details hands back
+true, Contents hands `ContentsChoice.BookRemoved` to the reader, and the reader closes, so
+Jordan lands on the Library (or the series) without the book.
 Series: calibre `calibre:series` / `calibre:series_index`, then EPUB 3
 `belongs-to-collection` + `group-position`, then the file name `Series NN. Title - Author.epub`.
 
@@ -575,7 +597,7 @@ and Jordan has confirmed it on the phone (phases 3–5).
 
 ## 12. Comics (CBZ)
 
-Built in parts: 1 = PC send script, phone storage, the Comics section that lists comics
+Built in parts (plus Comic details and Remove from phone, after part 6): 1 = PC send script, phone storage, the Comics section that lists comics
 (done); 2 = the full-page viewer (done); 3 = the panel detection engine (done, below);
 4 = panel-by-panel reading in the viewer (done); 5 = polish: spreads, reading ahead, huge
 comics, viewer settings, Next in folder (done); 6 = auto-crop, scan clean-up and the
@@ -622,7 +644,13 @@ subfolders first, then comics and note files mixed, all by file name in natural 
 numbered names keep reading order (`folderItems`; other files, hidden files and `__MACOSX`
 are left out). Rows are the Library's 7-unit `UniformRow`s in a `LightLazyScrollView`:
 - Folder: a tinted block with an arrow, the cleaned name, "3 folders · 12 comics" (lighter)
-  → ComicFolderScreen (back, the folder's name, the same list, no bottom bar).
+  → ComicFolderScreen (back, the folder's name, ⋯ (`ELLIPSES`) for the folder's menu, the
+  same list, no bottom bar). The menu (`ComicFolderMenuScreen`) has one row, "Remove from
+  phone": `RemoveScreen` asks "Remove 12 comics and 1 note (1.4 GB)?", then deletes every
+  comic and note in the folder and its subfolders, each comic's details file and cache
+  folder, then the folders left empty (deepest first, then its parents while empty; never
+  `shared/comics` itself). Other files stay, and so do the folders holding them. Then the
+  folder closes. The top of the Comics section has no menu.
 - Comic: its cover, the cleaned title, "30 pages" (lighter), then "Not started" (lighter),
   "Page 12 of 30" or "Finished" (accent). A comic not read yet shows a blank cover and
   "Preparing…" at once; comics are read one by one in the order shown and each row fills in
@@ -731,8 +759,7 @@ waits a moment to be sure it isn't a double-tap.
   picture is read, and the next page and the one before are looked at ahead, as panels were. While the slider is dragged the page
   number follows the finger; the page itself opens once the finger rests 200 ms
   (`SLIDER_REST_MS`), so pages dragged past are never read or saved. At the bottom, ADD TO
-  LIST (→ AddToListScreen) and DETAILS (→ ComicDetailsScreen: title, Status choices as Book
-  Details, then Pages, Progress, Folder, File, File size, Added, Last read).
+  LIST (→ AddToListScreen) and DETAILS (→ ComicDetailsScreen, "Comic details" below).
 - **End card** (a tap forward on the last page, fitted or after its last panel): the theme's
   colors; top bar back (leaves the comic) and "Finished"; the title, "Finished" (accent), then
   "Next in folder" (lighter) and its title — the next comic that can open, or note file
@@ -868,6 +895,67 @@ shrunk by averaging to 800 px on its long side (`shrinkToLongSide`, `PANEL_GRID_
   44 of 100 against 44. Fallbacks are mostly covers, splashes, slanted layouts and (Rebirth)
   borderless art bleeding into black gutters. Beyond the counts, the region detector fixed
   over- and under-splits the XY-cut made on Golden Age pages (12 → 8, 4 → 9 on real pages).
+
+**Comic details** (`comics/ComicDetails.kt`, plain Kotlin). `ComicDetails`: series, issue,
+volume, title (the story's), year + month, writer, artists, publisher, summary, page count,
+notes, and `source` (a `DetailsSource` per `ComicField`: SIDECAR, COMIC_INFO, FILE_NAME,
+PAGES; year and month are one field, DATE, so they always come from the same place). Each
+value comes from the first of these that has it (`comicDetails` / `combineDetails`):
+1. **The details file** beside the comic (`<comic name>.details.json`, below).
+2. **ComicInfo.xml** in the CBZ (at the top, else in any folder; ≤ 1 MB): `Series`, `Number`,
+   `Volume`, `Title`, `Year`, `Month`, `Writer`, `Penciller` + `Inker` + `Colorist` (the
+   artists, each name once, split at commas), `Publisher`, `Summary`, `PageCount`. -1, a 0
+   volume, blanks, a year outside 1800–2099 and a month with no year count as missing.
+3. **The file name** (`parseComicFileName`): the reading-order number and extension go
+   (`cleanComicTitle`); brackets at the end are peeled off (nested ones kept whole): the first
+   date — "(1938)", "(June 1938)", "(1938-06)", "(1940-41)" = 1940, "(Spring 1940)" = year
+   only — is the date; "(Vol. 2)" a volume; "(of 12)" the note "Issue 1 of 12"; "(digital)",
+   "(c2c)" and the like are dropped; square brackets (scanners' tags) are dropped; every other
+   bracket is a note, in order. What's left: "Series #12", "#1.5", "#0", "Series #1 - Story
+   title", or "Series 01" (1–3 digits, no #); "Series v2" / "Vol. 2" / "Volume 2" at its end is
+   the volume. Issue numbers lose leading zeros ("001" → "1"). "2000 AD" and "Spider-Man 2099"
+   keep their numbers.
+4. **The pages counted** in the CBZ: the page count only.
+
+Read when Comic Details opens (`ComicStore.details`, off the main thread; not cached, so a
+new details file shows at once). **Comic Details** (top bar back, "Details"): the heading
+(Subheading) "Action Comics #1" (series, " Vol. N", " #issue"; the story title if there's no
+series; else the cleaned file name), the story title, "June 1938" (lighter), then Writer,
+Artist / Artists and Publisher rows, the summary, "Notes" (lighter) with each note, and "From
+ComicInfo.xml and the file name." (Detail size, lighter; the page count's source isn't
+named). Anything unknown is left out. Then Status, then Pages (counted in the CBZ, so it
+matches "Page 12 of 30"), Progress, Folder, File, File size, Added, Last read. Bottom bar:
+REMOVE FROM PHONE (→ `RemoveScreen`, §5): deletes the comic, its details file and its cache
+folder (and its folder, if that leaves it empty); Comic Details hands back true and the
+viewer closes, back to the folder or list it was opened from.
+
+**The details file** (`<comic name>.details.json`, beside the CBZ in `shared/comics/`: for
+`00001. Action Comics #1 (1938).cbz`, `00001. Action Comics #1 (1938).details.json`). For a
+future PC-side lookup to write and the send script to copy; the app only reads it (and
+deletes it with its comic). UTF-8 JSON, one object; every key optional; unknown keys are
+ignored (the PC tool may add its own, e.g. where it looked); blank strings count as missing;
+a file that isn't valid JSON is ignored as a whole:
+```json
+{
+  "version": 1,
+  "series": "Action Comics",
+  "issue": "1",
+  "volume": "1938",
+  "title": "Superman, Champion of the Oppressed",
+  "year": 1938,
+  "month": 6,
+  "writer": "Jerry Siegel",
+  "artists": ["Joe Shuster"],
+  "publisher": "DC Comics",
+  "summary": "The first appearance of Superman.",
+  "pageCount": 68,
+  "notes": ["First appearance of Superman, Lois Lane"]
+}
+```
+`issue` and `volume` are strings ("1.5", "½" allowed); `year` (1800–2099), `month` (1–12,
+kept only with a year) and `pageCount` are numbers; `artists` and `notes` are lists of
+strings. `version` is 1 (for later changes; not checked yet). The folder list doesn't show
+it (only `.cbz` and `.txt` are shown).
 
 **`comic_position`** (database version 4): `slug` (PK, "comic:<path>"), `page` (1-based),
 `panel` (0 = whole page, else the panel, 1-based, in Panels mode), `updatedAt`. Reads and writes go

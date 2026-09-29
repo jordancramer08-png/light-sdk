@@ -54,6 +54,17 @@ fun readComicPages(file: File): List<String> =
         comicPages(zip.entries().asSequence().filterNot { it.isDirectory }.map { it.name }.toList())
     }
 
+/** A ComicInfo.xml bigger than this isn't read (it is only a few KB normally). */
+private const val MAX_COMIC_INFO_BYTES = 1L * 1024 * 1024
+
+/** The text of the CBZ's ComicInfo.xml, or null when it has none. Throws if it isn't a readable zip. */
+fun readComicInfo(file: File): String? =
+    openComicZip(file).use { zip ->
+        val names = zip.entries().asSequence().filterNot { it.isDirectory }.map { it.name }.toList()
+        val entry = comicInfoEntry(names) ?: return null
+        readEntry(zip, entry, MAX_COMIC_INFO_BYTES)?.let(::decodeNoteText)
+    }
+
 /** One page's bytes, or null when it's missing or bigger than [maxBytes]. */
 fun readComicEntry(file: File, entryName: String, maxBytes: Long = MAX_COVER_BYTES): ByteArray? =
     openComicZip(file).use { zip -> readEntry(zip, entryName, maxBytes) }

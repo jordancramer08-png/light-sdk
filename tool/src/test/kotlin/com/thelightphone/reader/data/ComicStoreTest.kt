@@ -205,4 +205,78 @@ class ComicStoreTest {
         store.panels(old, "1.jpg")
         assertEquals(4, store.cachedPanels(new, "1.jpg")?.panels?.size)
     }
+
+    // --- details and removing ------------------------------------------------------------
+
+    @Test
+    fun detailsComeFromTheDetailsFileThenComicInfoThenTheName() {
+        val path = "DC/00001. Action Comics #1 (1938) (First appearance of Superman).cbz"
+        val info = "<ComicInfo><Series>Action Comics</Series><Writer>Jerry Siegel</Writer><Publisher>DC</Publisher></ComicInfo>"
+        addComic(path, "1.jpg" to byteArrayOf(1), "ComicInfo.xml" to info.toByteArray())
+        File(comicsDir, "DC/00001. Action Comics #1 (1938) (First appearance of Superman).details.json")
+            .writeText("""{"publisher":"DC Comics"}""")
+        val meta = assertNotNull(store.prepared(path))
+
+        val details = store.details(meta)
+        assertEquals("DC Comics", details.publisher) // the details file
+        assertEquals("Jerry Siegel", details.writer) // ComicInfo.xml
+        assertEquals("1", details.issue) // the name
+        assertEquals(listOf("First appearance of Superman"), details.notes)
+        assertEquals(1, details.pageCount)
+    }
+
+    @Test
+    fun removingAComicDeletesItsFileDetailsFileAndCacheAndItsEmptyFolder() {
+        val path = "DC/Book I/a.cbz"
+        addComic(path, "1.jpg" to byteArrayOf(1))
+        File(comicsDir, "DC/Book I/a.details.json").writeText("{}")
+        File(comicsDir, "DC/other.cbz").writeBytes(byteArrayOf(9))
+        val meta = assertNotNull(store.prepared(path))
+        val cache = store.coverFile(meta).parentFile
+        assertTrue(cache.isDirectory)
+
+        val summary = store.removal(path)
+        assertEquals(1, summary.comics)
+        assertEquals(0, summary.notes)
+        assertTrue(summary.bytes > File(comicsDir, path).length()) // the cache and details file count too
+
+        assertTrue(store.remove(path))
+        assertFalse(File(comicsDir, path).exists())
+        assertFalse(File(comicsDir, "DC/Book I/a.details.json").exists())
+        assertFalse(cache.exists())
+        assertFalse(File(comicsDir, "DC/Book I").exists()) // left empty, so gone
+        assertTrue(File(comicsDir, "DC/other.cbz").exists()) // "DC" still holds a comic
+        assertNull(store.prepared(path))
+    }
+
+    @Test
+    fun removingAFolderTakesEveryComicAndNoteUnderIt() {
+        addComic("DC/Book I/a.cbz", "1.jpg" to byteArrayOf(1))
+        addComic("DC/Book I/Part 2/b.cbz", "1.jpg" to byteArrayOf(1))
+        File(comicsDir, "DC/Book I/a note.txt").writeText("note")
+        File(comicsDir, "DC/Book I/Part 2/cover.jpg").writeBytes(byteArrayOf(1)) // not a comic: stays
+        addComic("DC/Book II/c.cbz", "1.jpg" to byteArrayOf(1))
+        store.prepared("DC/Book I/a.cbz")
+
+        assertEquals(2, store.removal("DC/Book I").comics)
+        assertEquals(1, store.removal("DC/Book I").notes)
+
+        assertTrue(store.remove("DC/Book I"))
+        assertEquals(listOf("Part 2"), File(comicsDir, "DC/Book I").list()?.toList())
+        assertEquals(listOf("cover.jpg"), File(comicsDir, "DC/Book I/Part 2").list()?.toList())
+        assertTrue(File(comicsDir, "DC/Book II/c.cbz").exists())
+        store.removeOrphans()
+        assertEquals(0, cacheDir.listFiles().orEmpty().size)
+    }
+
+    @Test
+    fun removingAnEmptiedFolderRemovesTheFolderButNeverTheComicsFolder() {
+        addComic("Only/a.cbz", "1.jpg" to byteArrayOf(1))
+
+        assertTrue(store.remove("Only"))
+        assertFalse(File(comicsDir, "Only").exists())
+        assertTrue(comicsDir.isDirectory)
+        assertFalse(store.remove("")) // the whole comics folder is never removed
+        assertTrue(comicsDir.isDirectory)
+    }
 }

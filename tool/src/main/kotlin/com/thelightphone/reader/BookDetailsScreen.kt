@@ -3,6 +3,7 @@ package com.thelightphone.reader
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -25,6 +26,7 @@ import com.thelightphone.sdk.LightScreen
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.ui.LightBarButton
+import com.thelightphone.sdk.ui.LightBottomBar
 import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightScrollView
@@ -47,7 +49,7 @@ class BookDetailsViewModel(
     private val coverFile: File,
     private val readingPositionRepository: ReadingPositionRepository,
     private val readingStatusRepository: ReadingStatusRepository,
-) : LightViewModel<Unit>() {
+) : LightViewModel<Boolean>() {
 
     /** Null until the saved place has been read (a moment at most). */
     private val _rows = MutableStateFlow<List<DetailRow>?>(null)
@@ -82,19 +84,22 @@ class BookDetailsViewModel(
 /**
  * Facts about one book, reached from its Contents screen (CLAUDE.md 9): title and author
  * at the top, then its reading status (the one thing that can be changed here), then
- * series, length, reading time, progress and file details.
+ * series, length, reading time, progress and file details. REMOVE FROM PHONE at the bottom
+ * asks first; once the book is removed this hands back true, so the reader closes too.
  */
 class BookDetailsScreen(
     sealedActivity: SealedLightActivity,
     private val bookMeta: BookMeta,
-) : LightScreen<Unit, BookDetailsViewModel>(sealedActivity) {
+) : LightScreen<Boolean, BookDetailsViewModel>(sealedActivity) {
+
+    private val store = LibraryStore(lightContext.filesDir)
 
     override val viewModelClass: Class<BookDetailsViewModel>
         get() = BookDetailsViewModel::class.java
 
     override fun createViewModel() = BookDetailsViewModel(
         bookMeta,
-        LibraryStore(lightContext.filesDir).coverFile(bookMeta, CoverSize.LARGE),
+        store.coverFile(bookMeta, CoverSize.LARGE),
         ReadingPositionRepository.getInstance { lightContext.readerDatabase() },
         ReadingStatusRepository.getInstance { lightContext.readerDatabase() },
     )
@@ -112,7 +117,9 @@ class BookDetailsScreen(
             )
             val shownRows = rows
             val shownStatus = status
-            if (shownRows != null && shownStatus != null) {
+            if (shownRows == null || shownStatus == null) {
+                Spacer(modifier = Modifier.weight(1f))
+            } else {
                 DetailsList(
                     bookMeta = bookMeta,
                     cover = viewModel.cover,
@@ -122,7 +129,22 @@ class BookDetailsScreen(
                     modifier = Modifier.weight(1f),
                 )
             }
+            LightBottomBar(items = listOf(LightBarButton.Text(text = "REMOVE FROM PHONE", onClick = ::openRemove)))
         }
+    }
+
+    private fun openRemove() {
+        navigateTo(
+            screenFactory = {
+                RemoveScreen(
+                    it,
+                    name = bookMeta.title,
+                    measure = { itemRemovalQuestion(bookMeta.title, store.removalBytes(bookMeta)) },
+                    remove = { store.remove(bookMeta) },
+                )
+            },
+            resultCallback = { removed -> if (removed) goBack(true) },
+        )
     }
 }
 

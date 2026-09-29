@@ -274,7 +274,10 @@ class ComicScreen(
 
     private fun openDetails() {
         viewModel.hideOverlay()
-        navigateTo(screenFactory = { ComicDetailsScreen(it, meta, title) })
+        navigateTo(
+            screenFactory = { ComicDetailsScreen(it, meta, title) },
+            resultCallback = { removed -> if (removed) goBack() }, // the comic is gone: back to where it was opened
+        )
     }
 }
 

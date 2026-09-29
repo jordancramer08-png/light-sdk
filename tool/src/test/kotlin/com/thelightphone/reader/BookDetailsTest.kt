@@ -96,6 +96,7 @@ class BookDetailsTest {
         assertEquals("850 KB", fileSizeText(850 * 1024))
         assertEquals("1.2 MB", fileSizeText(1_258_291))
         assertEquals("24 MB", fileSizeText(24L * 1024 * 1024))
+        assertEquals("1.4 GB", fileSizeText(1024L * 1024 * 1024 * 14 / 10))
     }
 
     private companion object {

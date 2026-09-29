@@ -92,6 +92,28 @@ class LibraryStore(
      */
     fun coverFile(book: BookMeta, size: CoverSize): File = File(File(libraryDir, book.slug), size.fileName)
 
+    /** The bytes removing [book] frees: its EPUB and its cache folder. */
+    @Synchronized
+    fun removalBytes(book: BookMeta): Long = bytesUnder(epubFile(book)) + bytesUnder(File(libraryDir, book.slug))
+
+    /**
+     * Deletes the book's EPUB and its cache folder. Its saved place, status and lists are
+     * kept (they are keyed by slug), so sending it again opens where it was left.
+     * False when the EPUB couldn't be deleted (nothing else is then touched).
+     */
+    @Synchronized
+    fun remove(book: BookMeta): Boolean {
+        val epub = epubFile(book)
+        if (epub.exists() && !epub.delete()) return false
+        File(libraryDir, book.slug).deleteRecursively()
+        return true
+    }
+
+    /** False once the book's EPUB is gone from the phone. */
+    fun isOnPhone(book: BookMeta): Boolean = epubFile(book).isFile
+
+    private fun epubFile(book: BookMeta): File = File(booksDir, book.source.fileName)
+
     // --- cache rules ----------------------------------------------------------
 
     /**

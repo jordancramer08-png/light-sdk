@@ -80,11 +80,12 @@ fun readingTimeText(words: Long): String {
     }
 }
 
-/** "850 KB", "1.2 MB". */
+/** "850 KB", "1.2 MB", "1.4 GB". */
 fun fileSizeText(bytes: Long): String {
     val kb = bytes / 1024.0
     if (kb < 1024) return "${kb.roundToLong().coerceAtLeast(1)} KB"
     val mb = kb / 1024
+    if (mb >= 1024) return "%.1f GB".format(Locale.ROOT, mb / 1024)
     return if (mb < 10) "%.1f MB".format(Locale.ROOT, mb) else "${mb.roundToLong()} MB"
 }
 

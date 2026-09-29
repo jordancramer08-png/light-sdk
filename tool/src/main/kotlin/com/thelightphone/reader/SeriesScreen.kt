@@ -31,6 +31,8 @@ import kotlinx.coroutines.withContext
 
 class SeriesViewModel(
     private val books: List<BookMeta>,
+    /** False once a book has been removed from the phone (from Book Details): it drops out of the list. */
+    private val isOnPhone: (BookMeta) -> Boolean,
     private val readingPositionRepository: ReadingPositionRepository,
     private val readingStatusRepository: ReadingStatusRepository,
 ) : LightViewModel<Unit>() {
@@ -43,11 +45,12 @@ class SeriesViewModel(
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
         viewModelScope.launch {
+            val shown = withContext(Dispatchers.IO) { books.filter(isOnPhone) }
             val positions = withContext(Dispatchers.IO) {
                 readingPositionRepository.getAll().associateBy { it.bookSlug }
             }
             val statuses = DatabaseQueue.read { readingStatusRepository.getAll() }
-            _entries.value = books.map { LibraryEntry.Book(libraryRow(it, positions, statuses)) }
+            _entries.value = shown.map { LibraryEntry.Book(libraryRow(it, positions, statuses)) }
         }
     }
 }
@@ -69,6 +72,7 @@ class SeriesScreen(
 
     override fun createViewModel() = SeriesViewModel(
         books,
+        libraryStore::isOnPhone,
         ReadingPositionRepository.getInstance { lightContext.readerDatabase() },
         ReadingStatusRepository.getInstance { lightContext.readerDatabase() },
     )

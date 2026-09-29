@@ -1,13 +1,18 @@
 package com.thelightphone.reader.data
 
+import com.thelightphone.reader.RemovalSummary
+import com.thelightphone.reader.comics.ComicDetails
 import com.thelightphone.reader.comics.ComicFolderItem
 import com.thelightphone.reader.comics.ComicItemKind
 import com.thelightphone.reader.comics.MAX_PAGE_BYTES
 import com.thelightphone.reader.comics.PANEL_DETECTOR_VERSION
+import com.thelightphone.reader.comics.comicDetails
 import com.thelightphone.reader.comics.comicItemKind
 import com.thelightphone.reader.comics.decodeNoteText
+import com.thelightphone.reader.comics.detailsSidecarName
 import com.thelightphone.reader.comics.folderItems
 import com.thelightphone.reader.comics.readComicEntry
+import com.thelightphone.reader.comics.readComicInfo
 import com.thelightphone.reader.comics.readComicPages
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -106,6 +111,74 @@ class ComicStore(
     fun cachedPanels(meta: ComicMeta, page: String): PagePanels? =
         synchronized(LOCK) { readPanels(meta)?.pages?.get(page) }
 
+    /**
+     * What Comic Details shows: the comic's details file (`<name>.details.json` beside it),
+     * then its ComicInfo.xml, then its file name, each value from the first that has it.
+     * Reads the CBZ's list of files: call it off the main thread.
+     */
+    fun details(meta: ComicMeta): ComicDetails {
+        val file = fileOf(meta.path)
+        val sidecar = orNull { sidecarFile(meta.path).takeIf { it.isFile }?.let { decodeNoteText(it.readBytes()) } }
+        val comicInfo = orNull { readComicInfo(file) }
+        return comicDetails(sidecar, comicInfo, file.name, meta.pageCount)
+    }
+
+    // --- removing -----------------------------------------------------------------------
+
+    /**
+     * What removing [path] would take off: the comic or note there, or, for a folder, every
+     * comic and note in it and the folders under it. The bytes count the files, the comics'
+     * details files and their cache folders.
+     */
+    fun removal(path: String): RemovalSummary {
+        val paths = removablePaths(path)
+        val comics = paths.filter { comicItemKind(it.substringAfterLast('/'), false) == ComicItemKind.COMIC }
+        val bytes = paths.sumOf { bytesUnder(fileOf(it)) } +
+            comics.sumOf { bytesUnder(sidecarFile(it)) + bytesUnder(cacheFolder(it)) }
+        return RemovalSummary(comics = comics.size, notes = paths.size - comics.size, bytes = bytes)
+    }
+
+    /**
+     * Deletes the comic or note at [path], or every comic and note in the folder at [path]
+     * and the folders under it, with each comic's details file and cache folder; then the
+     * folders this left empty. Saved places, status and lists aren't touched (they are keyed
+     * by path), so a comic sent again carries on. Other files stay, and so do their folders.
+     * False when a comic or note couldn't be deleted.
+     */
+    fun remove(path: String): Boolean = synchronized(LOCK) {
+        if (path.isEmpty()) return false // never the whole comics folder
+        val items = removablePaths(path)
+        for (item in items) {
+            fileOf(item).delete()
+            sidecarFile(item).delete()
+            cacheFolder(item).deleteRecursively()
+        }
+        panelsInMemory = null
+        removeEmptyFolders(fileOf(path))
+        items.none { fileOf(it).exists() }
+    }
+
+    /** The comics and notes at or under [path], as paths. Hidden folders and `__MACOSX` are left alone. */
+    private fun removablePaths(path: String): List<String> {
+        if (path.isEmpty()) return emptyList() // never the whole comics folder
+        val start = fileOf(path)
+        if (start.isFile) return if (comicItemKind(start.name, false) != null) listOf(path) else emptyList()
+        return start.walkTopDown()
+            .onEnter { it == start || comicItemKind(it.name, true) != null }
+            .filter { it.isFile && comicItemKind(it.name, false) != null }
+            .map { it.relativeTo(comicsDir).invariantSeparatorsPath }
+            .toList()
+    }
+
+    /** Deletes empty folders at and under [start] (deepest first), then its parents while they're empty. Never the comics folder. */
+    private fun removeEmptyFolders(start: File) {
+        if (start.isDirectory) start.walkBottomUp().filter { it.isDirectory }.forEach { it.delete() }
+        var folder = start.parentFile
+        while (folder != null && folder != comicsDir && folder.startsWith(comicsDir) && folder.delete()) {
+            folder = folder.parentFile
+        }
+    }
+
     /** Deletes cache folders whose comic is no longer on the phone (or that were left half-written). */
     fun removeOrphans() = synchronized(LOCK) {
         for (folder in cacheDir.listFiles { f -> f.isDirectory }.orEmpty()) {
@@ -193,6 +266,16 @@ class ComicStore(
     private fun fileOf(path: String): File = if (path.isEmpty()) comicsDir else File(comicsDir, path)
 
     private fun cacheFolder(path: String): File = File(cacheDir, cacheId(path))
+
+    /** The details file beside a comic: "Name.cbz" -> "Name.details.json". */
+    private fun sidecarFile(path: String): File = File(fileOf(path).parentFile, detailsSidecarName(fileOf(path).name))
+
+    /** A file that can't be read gives null, not a crash. */
+    private fun <T> orNull(read: () -> T?): T? = try {
+        read()
+    } catch (e: Exception) {
+        null
+    }
 
     private fun stampOf(file: File) = ComicStamp(file.length(), file.lastModified(), COMIC_CACHE_VERSION)
 

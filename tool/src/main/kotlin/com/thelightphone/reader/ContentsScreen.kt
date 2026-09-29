@@ -22,6 +22,13 @@ import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import com.thelightphone.sdk.ui.lightClickable
 
+/** What Contents hands back to the reader: a chapter to jump to, or that the book was removed from the phone. */
+sealed interface ContentsChoice {
+    data class Chapter(val index: Int) : ContentsChoice
+
+    data object BookRemoved : ContentsChoice
+}
+
 /**
  * The book's chapters, reachable from the reading screen (CLAUDE.md 9). Tapping a chapter
  * hands its index back to the calling ReaderScreen via [goBack] rather than navigating
@@ -29,13 +36,14 @@ import com.thelightphone.sdk.ui.lightClickable
  * back stack. It opens scrolled to the chapter being read. Headings ("Book One: Pale") are in
  * the accent color, and each level of the contents is indented further; tapping a heading
  * opens the first readable chapter under it. "Add to list" at the bottom opens
- * AddToListScreen for this book; "Details" opens BookDetailsScreen.
+ * AddToListScreen for this book; "Details" opens BookDetailsScreen, and when the book is
+ * removed from there, Contents closes and tells the reader to close too.
  */
 class ContentsScreen(
     sealedActivity: SealedLightActivity,
     private val bookMeta: BookMeta,
     private val currentChapterIndex: Int,
-) : SimpleLightScreen<Int>(sealedActivity) {
+) : SimpleLightScreen<ContentsChoice>(sealedActivity) {
 
     @Composable
     override fun Content() {
@@ -52,7 +60,7 @@ class ContentsScreen(
             ChapterList(
                 bookMeta = bookMeta,
                 currentChapterIndex = currentChapterIndex,
-                onSelect = { row -> goBack(row.chapterIndex) },
+                onSelect = { row -> goBack(ContentsChoice.Chapter(row.chapterIndex)) },
                 modifier = Modifier.weight(1f),
             )
             LightBottomBar(
@@ -70,7 +78,10 @@ class ContentsScreen(
     }
 
     private fun openDetails() {
-        navigateTo(screenFactory = { BookDetailsScreen(it, bookMeta) })
+        navigateTo(
+            screenFactory = { BookDetailsScreen(it, bookMeta) },
+            resultCallback = { removed -> if (removed) goBack(ContentsChoice.BookRemoved) },
+        )
     }
 }
 

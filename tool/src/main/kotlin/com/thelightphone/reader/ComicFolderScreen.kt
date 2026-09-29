@@ -45,7 +45,8 @@ class ComicFolderViewModel(
 
 /**
  * One folder inside the comics folder, opened from a folder row (CLAUDE.md 12): its
- * subfolders, then its comics and notes, in file-name order.
+ * subfolders, then its comics and notes, in file-name order. The ⋯ at the top right opens
+ * the folder's menu (Remove from phone).
  */
 class ComicFolderScreen(
     sealedActivity: SealedLightActivity,
@@ -65,6 +66,32 @@ class ComicFolderScreen(
         ReadingStatusRepository.getInstance { lightContext.readerDatabase() },
     )
 
+    /** The folder's menu; its one action, Remove from phone, asks first and then closes this folder. */
+    private fun openMenu() {
+        navigateTo(
+            screenFactory = { ComicFolderMenuScreen(it, title) },
+            resultCallback = { action ->
+                when (action) {
+                    FolderAction.REMOVE_FROM_PHONE -> openRemove()
+                }
+            },
+        )
+    }
+
+    private fun openRemove() {
+        navigateTo(
+            screenFactory = {
+                RemoveScreen(
+                    it,
+                    name = title,
+                    measure = { folderRemovalQuestion(store.removal(folder)) },
+                    remove = { store.remove(folder) },
+                )
+            },
+            resultCallback = { removed -> if (removed) goBack() },
+        )
+    }
+
     @Composable
     override fun Content() {
         val state by viewModel.loader.state.collectAsState()
@@ -73,6 +100,7 @@ class ComicFolderScreen(
             LightTopBar(
                 leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
                 center = LightTopBarCenter.Text(title),
+                rightButton = LightBarButton.LightIcon(icon = LightIcons.ELLIPSES, onClick = ::openMenu),
                 modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
             )
             val loaded = state

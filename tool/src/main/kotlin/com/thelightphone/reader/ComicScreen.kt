@@ -1,5 +1,8 @@
 package com.thelightphone.reader
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -7,12 +10,16 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -23,12 +30,16 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import com.thelightphone.reader.comics.ComicReadingMode
+import com.thelightphone.reader.comics.PANEL_MOVE_MS
 import com.thelightphone.reader.comics.PageGeometry
 import com.thelightphone.reader.comics.PageZoom
+import com.thelightphone.reader.comics.between
 import com.thelightphone.reader.comics.comicSlug
 import com.thelightphone.reader.comics.sliderFraction
 import com.thelightphone.reader.data.ComicMeta
 import com.thelightphone.reader.data.ComicPositionRepository
+import com.thelightphone.reader.data.ComicReadingModePreference
 import com.thelightphone.reader.data.ComicStore
 import com.thelightphone.reader.data.ReadingStatusRepository
 import com.thelightphone.reader.data.readerDatabase
@@ -44,15 +55,18 @@ import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.LightTouchableProgressBar
 import com.thelightphone.sdk.ui.gridUnitsAsDp
+import com.thelightphone.sdk.ui.lightClickable
 import kotlin.math.roundToInt
 
 /** Messages on the black page area are this gray in every theme. */
 private val PAGE_MESSAGE_COLOR = Color(0xFF9E9E9E)
 
 /**
- * The comic viewer (CLAUDE.md 12): one page at a time, fitted to a black screen, no bars.
- * Tap right for the next page, left for the previous, the top for the overlay (back, title,
- * page number, slider, ADD TO LIST, DETAILS). Pinch or double-tap to zoom, drag to move.
+ * The comic viewer (CLAUDE.md 12): one page at a time on a black screen, no bars. Tap right
+ * to go on, left to go back, the top for the overlay (back, title, page number, slider,
+ * FULL PAGE / PANELS, ADD TO LIST, DETAILS); a long press switches Full page ↔ Panels.
+ * Full page: the page fitted, pinch or double-tap to zoom, drag to move. Panels: zoomed
+ * onto one panel at a time; double-tap shows the whole page until the next tap.
  */
 class ComicScreen(
     sealedActivity: SealedLightActivity,
@@ -67,9 +81,10 @@ class ComicScreen(
 
     override fun createViewModel() = ComicViewModel(
         meta,
-        ComicStore(lightContext.filesDir).comicFile(meta.path),
+        ComicStore(lightContext.filesDir),
         ComicPositionRepository.getInstance { lightContext.readerDatabase() },
         ReadingStatusRepository.getInstance { lightContext.readerDatabase() },
+        ComicReadingModePreference(lightContext.dataStore),
     )
 
     @Composable
@@ -123,6 +138,7 @@ class ComicScreen(
                         .padding(horizontal = 1.5f.gridUnitsAsDp()),
                 )
             }
+            ModeBar(current = state.mode, onSelect = viewModel::setMode)
             HairlineDivider()
         }
         Box(
@@ -153,11 +169,60 @@ class ComicScreen(
 }
 
 /**
+ * FULL PAGE and PANELS under the slider. The one in use is underlined (as the Library's
+ * BOOKS / COMICS bar), so it reads without color; tapping the other switches to it.
+ */
+@Composable
+private fun ModeBar(current: ComicReadingMode, onSelect: (ComicReadingMode) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(MODE_BAR_GRID_UNITS.gridUnitsAsDp()),
+    ) {
+        for (mode in ComicReadingMode.entries) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxSize()
+                    .lightClickable { onSelect(mode) },
+                contentAlignment = Alignment.Center,
+            ) {
+                LightText(text = modeLabel(mode), variant = LightTextVariant.Button, underline = mode == current)
+            }
+        }
+    }
+}
+
+private fun modeLabel(mode: ComicReadingMode): String = when (mode) {
+    ComicReadingMode.FULL_PAGE -> "FULL PAGE"
+    ComicReadingMode.PANELS -> "PANELS"
+}
+
+private const val MODE_BAR_GRID_UNITS = 4f
+
+/** The zoom last drawn, and on which page: where the next animated move starts from. */
+private class DrawnZoom {
+    var pageIndex = -1
+    var zoom = PageZoom()
+
+    /** The last drawn zoom, if it was of [page]; else the page fitted. */
+    fun on(page: Int): PageZoom = if (page == pageIndex) zoom else PageZoom()
+}
+
+/**
  * The page, drawn at its zoom: the fitted picture, and over it the sharp picture of the
- * zoomed-in part once it's read. Taps, double-taps, pinches and drags go to [viewModel].
+ * zoomed-in part once it's read. A move to a panel slides there over [PANEL_MOVE_MS] from
+ * where the page was last drawn. Taps, double-taps, long presses, pinches and drags go to
+ * [viewModel].
  */
 @Composable
 private fun ComicPage(state: ComicViewState, viewModel: ComicViewModel, modifier: Modifier) {
+    val drawn = remember { DrawnZoom() }
+    val start = remember(state.move) { drawn.on(state.pageIndex) }
+    val progress = remember(state.move) { Animatable(if (state.move.animated) 0f else 1f) }
+    LaunchedEffect(state.move) {
+        if (state.move.animated) progress.animateTo(1f, tween(PANEL_MOVE_MS, easing = FastOutSlowInEasing))
+    }
     Canvas(
         modifier = modifier
             .onSizeChanged { viewModel.setScreenSize(it.width, it.height) }
@@ -169,15 +234,19 @@ private fun ComicPage(state: ComicViewState, viewModel: ComicViewModel, modifier
             .pointerInput(Unit) {
                 detectTapGestures(
                     onDoubleTap = { viewModel.doubleTap(it.x, it.y) },
+                    onLongPress = { viewModel.switchMode() },
                     onTap = { viewModel.tap(it.x, it.y) },
                 )
             },
     ) {
         val picture = state.picture ?: return@Canvas
         val geometry = PageGeometry(picture.imageWidth, picture.imageHeight, size.width.toInt(), size.height.toInt())
-        drawPicture(picture, geometry, state.zoom)
+        val zoom = geometry.between(start, state.zoom, progress.value)
+        drawn.pageIndex = picture.pageIndex
+        drawn.zoom = zoom
+        drawPicture(picture, geometry, zoom)
         val sharp = state.sharp?.takeIf { it.pageIndex == picture.pageIndex } ?: return@Canvas
-        drawSharpArea(sharp, geometry, state.zoom)
+        drawSharpArea(sharp, geometry, zoom)
     }
 }
 

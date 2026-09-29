@@ -114,6 +114,9 @@ reader/
                         fittedSize, openingPageIndex, pagesToKeep, sliderPage / sliderFraction
     PanelDetector.kt    panel detection (§12 part 3): GrayImage, grayFromArgb, shrinkToLongSide,
                         gutterLevel, searchPanels / detectPanels (XY-cut), PanelTuning (thresholds)
+    PanelReading.kt     Panels mode (§12 part 4): ComicReadingMode, panelStep (where a tap goes),
+                        enteringPanel, openingPanelIndex / savedPanelNumber, panelZoom (a panel
+                        filling the screen), between (the animated move between two zooms)
   data/
     LibraryStore.kt     scans shared/books/*.epub, caches parsed books (and their covers)
     ComicStore.kt       lists shared/comics/ folders, caches each comic's page list + small cover,
@@ -131,6 +134,7 @@ reader/
                         and MigrationToVersion3 (the 2 -> 3 backfill)
     ComicPosition*.kt   Room entity / dao / repository for saved places in comics
     LibrarySectionPreference.kt  remembered Library section, Books or Comics (DataStore)
+    ComicReadingModePreference.kt  remembered comic reading mode, Full page or Panels (DataStore)
     ReadingPosition*.kt Room entity / dao / repository for saved places
     ReadingList*.kt     Room entities / dao / repository for reading lists
     BookStatus*.kt, ReadingStatusRepository.kt  Room entity / dao / repository for reading status
@@ -173,7 +177,8 @@ reader/
                         (pure Kotlin, unit-tested)
   ComicFolderLoader.kt  loads a comics folder (or a list's comics) and reads new comics one by one
   ComicEntryList.kt     the comics rows list (covers, Continue reading row)
-  ComicViewModel.kt     the viewer: which page, pictures kept, zoom, sharp piece, saving the place
+  ComicViewModel.kt     the viewer: which page and panel, pictures kept, panels looked for, zoom,
+                        sharp piece, saving the place
   ComicFolderScreen.kt, ComicScreen.kt (the page viewer), ComicNoteScreen.kt, ComicDetailsScreen.kt
 tool/schemas/           Room's saved schema for each database version (checked in)
 ```
@@ -554,8 +559,8 @@ and Jordan has confirmed it on the phone (phases 3–5).
 ## 12. Comics (CBZ)
 
 Built in parts: 1 = PC send script, phone storage, the Comics section that lists comics
-(done); 2 = the full-page viewer (done); 3 = the panel detection engine, no UI yet (done,
-below). Parts 4–5 come next.
+(done); 2 = the full-page viewer (done); 3 = the panel detection engine (done, below);
+4 = panel-by-panel reading in the viewer (done). Part 5 comes next.
 
 **PC side.** `scripts\Send Comics to Phone.cmd` (→ `send-comics.ps1`). Jordan's comics are in
 `D:\Comics` (~7,700 files, reading-order folders up to 5 deep, e.g. `DC Comics\01. Book I -
@@ -619,19 +624,43 @@ are left out). Rows are the Library's 7-unit `UniformRow`s in a `LightLazyScroll
 - Reloaded every time it comes to the front; reading comics in the background stops while
   it's hidden.
 
-**ComicScreen** — the full-page viewer. Black background, no bars: the page fitted whole to
-the screen (`fitScale`, centered). Taps (`pageTap`): the top 15% shows the overlay; below it
-the left 30% is the previous page and the rest the next (as in the book reader; nothing past
-either end). A single tap waits a moment to be sure it isn't a double-tap.
-- **Zoom**: pinch zooms around the fingers, 1× (fitted) to 4× (`MAX_ZOOM`); double-tap on a
+**ComicScreen** — the viewer. Black background, no bars. Two reading modes, **Panels
+(default)** and **Full page** (`ComicReadingMode`), switched by the FULL PAGE / PANELS bar in
+the overlay (the one in use underlined, as the Library's section bar) or by a long press
+anywhere on the page; remembered for every comic in `lightContext.dataStore` (key
+`comic_reading_mode`, the enum name; missing/unknown = Panels). Taps (`pageTap`): the top
+15% shows the overlay; below it the left 30% goes back and the rest goes on (as in the book
+reader; nothing past either end). A single tap waits a moment to be sure it isn't a double-tap.
+- **Full page mode**: the page fitted whole to the screen (`fitScale`, centered); taps turn pages.
+- **Panels mode**: the page zoomed so the current panel fills the screen less a margin of 3%
+  of its shorter side (`panelZoom`, `PANEL_MARGIN_FRACTION`), centered even at the page's edge
+  (the page may sit past its edge here, unlike pinching), at most 4×. A tap on the right moves
+  to the next panel in reading order, on the left to the previous one, sliding there over
+  250 ms (`PANEL_MOVE_MS`; `between` moves the part on screen evenly; drawn in ComicScreen with
+  an `Animatable`, from wherever the page was last drawn, so a tap mid-move carries on smoothly).
+  After the last panel the page zooms out whole, stays 0.7 s (`WHOLE_PAGE_PAUSE_MS`), then the
+  next page opens on its first panel (a tap during the pause goes on at once; a left tap
+  returns to the last panel). On the comic's last page it stays whole until the next tap.
+  Going back from a page's first panel opens the previous page on its last panel; the slider
+  opens a page on its first. A page with no panels (or one that can't be read) is shown
+  whole, and the next tap turns the page. Double-tap shows the whole page until the next tap,
+  which returns to the panel. Pinch and drag do nothing in Panels mode. Switching to Full
+  page zooms out to the whole page; switching to Panels goes to the page's first panel.
+- **Panels off the main thread**: `ComicStore.panels` (panels.json, else detected) runs on its
+  own one-at-a-time dispatcher, beside the picture decoding: the page shown first, then the
+  next page in the reading direction, then the one before, so turning either way doesn't wait.
+  Page changes cancel what's queued. Only in Panels mode. If the page shown is still waiting
+  for its panels, it shows whole, taps on it are ignored, and it slides into its panel as soon
+  as they're known.
+- **Zoom** (Full page mode): pinch zooms around the fingers, 1× (fitted) to 4× (`MAX_ZOOM`); double-tap on a
   fitted page zooms 2.5× (`DOUBLE_TAP_ZOOM`) at that spot, double-tap again fits it. A zoomed
   page is dragged to move it, only until its edge meets the screen's (`PageGeometry.clamp`;
   a side narrower than the screen stays centered). While zoomed, taps don't turn pages (the
   top 15% still shows the overlay); only double-tap, pinch and drag work. Turning a page
-  always shows the next one fitted.
+  always shows the next one fitted. The sharp piece (below) works in Panels mode too.
 - **Overlay** (top 15% tap; any tap on the page hides it): at the top, the theme's colors,
-  back, the title, "Page 12 of 30" and a slider (`LightTouchableProgressBar`, not drawn for a
-  one-page comic) that jumps to pages as it's dragged; at the bottom, ADD TO LIST
+  back, the title, "Page 12 of 30", a slider (`LightTouchableProgressBar`, not drawn for a
+  one-page comic) that jumps to pages as it's dragged, and the FULL PAGE / PANELS bar; at the bottom, ADD TO LIST
   (→ AddToListScreen) and DETAILS (→ ComicDetailsScreen: title, Status choices as Book
   Details, then Pages, Progress, Folder, File, File size, Added, Last read).
 - **Memory**: a page's bytes are read from the CBZ (`ComicPageImages`) and decoded with a
@@ -645,13 +674,15 @@ either end). A single tap waits a moment to be sure it isn't a double-tap.
   piece. A page slower than 300 ms shows "Preparing…"; one that can't be read shows
   "Can't show this page." (gray on black, any theme).
 - **Place and status**: it opens on the saved page (`openingPageIndex`, page 1 the first
-  time). Opening counts as opening the comic: Want to Read → Reading, and its
-  `comic_position` is stamped now. Every page turn or slider jump saves the page (through
+  time), and in Panels mode on the saved panel (`openingPanelIndex`; 0 or none = the first).
+  Opening counts as opening the comic: Want to Read → Reading, and its
+  `comic_position` is stamped now. Every page turn, panel move or slider jump saves the page
+  and panel (0 in Full page mode or for a page shown whole; through
   `DatabaseQueue`); leaving the screen or pausing the app saves it and waits
   (`DatabaseQueue.writeNow`). Reaching the last page by a turn or the slider makes it
   Finished; reopening it there does not (as books).
 
-**Panel detection** (part 3; engine only, nothing on screen uses it yet). `comics/PanelDetector.kt`,
+**Panel detection** (part 3; used by the viewer's Panels mode, above). `comics/PanelDetector.kt`,
 plain Kotlin. A page is decoded small (`ComicPageImages.findPanels`: `inSampleSize` keeping at
 least 800 px on the long side), made gray (`grayFromArgb`: 0.299 R + 0.587 G + 0.114 B) and
 shrunk by averaging to 800 px on its long side (`shrinkToLongSide`, `PANEL_GRID_LONG_SIDE`).
@@ -696,5 +727,5 @@ shrunk by averaging to 800 px on its long side (`shrinkToLongSide`, `PANEL_GRID_
   100. Most fallbacks there are covers, splashes and slanted layouts.
 
 **`comic_position`** (database version 4): `slug` (PK, "comic:<path>"), `page` (1-based),
-`panel` (0 = whole page, else the panel; always 0 for now), `updatedAt`. Reads and writes go
+`panel` (0 = whole page, else the panel, 1-based, in Panels mode), `updatedAt`. Reads and writes go
 through `DatabaseQueue`.

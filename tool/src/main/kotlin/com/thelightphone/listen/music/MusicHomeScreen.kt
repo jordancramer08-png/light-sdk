@@ -7,6 +7,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import com.thelightphone.listen.ListenScreen
+import com.thelightphone.listen.playlists.Playlists
+import com.thelightphone.listen.playlists.PlaylistsScreen
 import com.thelightphone.listen.ui.MenuRow
 import com.thelightphone.listen.ui.NowPlayingBar
 import com.thelightphone.listen.ui.ThemedScreen
@@ -24,6 +26,8 @@ class MusicHomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealed
     @Composable
     override fun Content() {
         val library by MusicLibrary.state.collectAsState()
+        val playlists by Playlists.playlists.collectAsState()
+        val playlistsLoaded by Playlists.loaded.collectAsState()
         ThemedScreen {
             LightTopBar(
                 leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
@@ -46,7 +50,11 @@ class MusicHomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealed
                     detail = if (library.loaded) albumCount(library.albums.size) else null,
                     onClick = ::openAlbums,
                 )
-                MenuRow(title = "Playlists", detail = LATER, onClick = null)
+                MenuRow(
+                    title = "Playlists",
+                    detail = if (playlistsLoaded) playlistCount(playlists.size) else null,
+                    onClick = ::openPlaylists,
+                )
             }
             UpdatingLine(visible = library.updating)
             NowPlayingBar(onOpen = ::openNowPlaying)
@@ -65,10 +73,13 @@ class MusicHomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealed
         navigateTo(screenFactory = { AlbumsScreen(it) })
     }
 
-    private companion object {
-        const val LATER = "Coming in a later update"
+    private fun openPlaylists() {
+        navigateTo(screenFactory = { PlaylistsScreen(it) })
     }
 }
+
+/** "1 playlist", "4 playlists". */
+fun playlistCount(count: Int): String = if (count == 1) "1 playlist" else "%,d playlists".format(count)
 
 /** "1 song", "1,412 songs". */
 fun songCount(count: Int): String =

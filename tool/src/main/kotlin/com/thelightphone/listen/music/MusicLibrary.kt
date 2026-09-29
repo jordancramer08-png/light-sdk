@@ -28,7 +28,10 @@ data class MusicLibraryState(
 ) {
     private val albumsByKey: Map<String, Album> by lazy { albums.associateBy { it.key } }
     private val artistsByKey: Map<String, Artist> by lazy { artists.associateBy { it.key } }
+    private val songsByPath: Map<String, Song> by lazy { songs.associateBy { it.path } }
 
+    /** The song at [path] (relative to Music/), or null if it isn't on the phone. */
+    fun song(path: String): Song? = songsByPath[path]
     fun album(key: String): Album? = albumsByKey[key]
     fun artist(key: String): Artist? = artistsByKey[key]
 

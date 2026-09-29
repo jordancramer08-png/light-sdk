@@ -55,7 +55,7 @@ import com.thelightphone.sdk.ui.lightClickable
 
 /**
  * Music Now Playing: album art, title, artist and album, a seek bar with times, and
- * shuffle / previous / play-pause / next / repeat.
+ * shuffle / previous / play-pause / next / repeat. "+" at the top adds the song to a playlist.
  */
 class MusicNowPlayingScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedActivity) {
 
@@ -66,6 +66,13 @@ class MusicNowPlayingScreen(sealedActivity: SealedLightActivity) : ListenScreen(
             LightTopBar(
                 leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
                 center = LightTopBarCenter.Text("Now Playing"),
+                rightButton = song?.let { playing ->
+                    LightBarButton.LightIcon(
+                        icon = LightIcons.ADD,
+                        onClick = { addToPlaylist(playing) },
+                        contentDescription = "Add to playlist",
+                    )
+                },
             )
             val current = song
             if (current == null) {

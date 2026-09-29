@@ -22,6 +22,7 @@ import com.thelightphone.listen.artwork.artSource
 import com.thelightphone.listen.artwork.songArtSource
 import com.thelightphone.listen.ui.OneLine
 import com.thelightphone.listen.ui.UniformRow
+import com.thelightphone.listen.ui.tapOrHold
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightLazyScrollView
@@ -29,7 +30,6 @@ import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
-import com.thelightphone.sdk.ui.lightClickable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -56,13 +56,26 @@ fun <I, T> rememberSorted(input: I, tag: Any, sort: (I) -> List<T>): Sorted<T>? 
         value = Sorted(tag, withContext(Dispatchers.Default) { sort(input) })
     }.value
 
-/** The top bar of a list: back, the title, and the sort button when [onSort] is given. */
+/**
+ * The top bar of a list: back, the title, and at the right the sort button when [onSort] is
+ * given, or else "+" (Add to playlist…) when [onAddToPlaylist] is, or else [rightButton].
+ */
 @Composable
-fun ListTopBar(title: String, onBack: () -> Unit, onSort: (() -> Unit)? = null) {
+fun ListTopBar(
+    title: String,
+    onBack: () -> Unit,
+    onSort: (() -> Unit)? = null,
+    onAddToPlaylist: (() -> Unit)? = null,
+    rightButton: LightBarButton? = null,
+) {
     LightTopBar(
         leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = onBack),
         center = LightTopBarCenter.Text(title),
-        rightButton = onSort?.let { LightBarButton.LightIcon(icon = LightIcons.REVERSE_ORDER, onClick = it) },
+        rightButton = onSort?.let { LightBarButton.LightIcon(icon = LightIcons.REVERSE_ORDER, onClick = it) }
+            ?: onAddToPlaylist?.let {
+                LightBarButton.LightIcon(icon = LightIcons.ADD, onClick = it, contentDescription = "Add to playlist")
+            }
+            ?: rightButton,
         modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
     )
 }
@@ -81,18 +94,22 @@ fun MusicLazyList(tag: Any, rowGridUnits: Float, content: LazyListScope.() -> Un
     }
 }
 
-/** Song rows: small cover, title, and [detail] (the artist, by default). Tapping plays from that song. */
+/**
+ * Song rows: small cover, title, and [detail] (the artist, by default). Tapping plays from
+ * that song; pressing and holding calls [onHold] (Add to playlist…).
+ */
 fun LazyListScope.songRows(
     songs: List<Song>,
     library: MusicLibraryState,
     onPlay: (List<Song>, Int) -> Unit,
+    onHold: ((Song) -> Unit)? = null,
     detail: (Song) -> String = { it.artist },
 ) {
     itemsIndexed(songs, key = { _, song -> song.path }) { index, song ->
         UniformRow(
             heightGridUnits = SONG_ROW_GRID_UNITS,
             showDivider = index != songs.lastIndex,
-            modifier = Modifier.lightClickable { onPlay(songs, index) },
+            modifier = Modifier.tapOrHold(onHold = onHold?.let { { it(song) } }) { onPlay(songs, index) },
         ) {
             ArtAndText(
                 art = { size ->
@@ -108,13 +125,18 @@ fun LazyListScope.songRows(
     }
 }
 
-/** Album rows: cover, title, artist, and year and song count. */
-fun LazyListScope.albumRows(albums: List<Album>, onOpen: (Album) -> Unit, lastHasDivider: Boolean = false) {
+/** Album rows: cover, title, artist, and year and song count. Press and hold for [onHold]. */
+fun LazyListScope.albumRows(
+    albums: List<Album>,
+    onOpen: (Album) -> Unit,
+    onHold: ((Album) -> Unit)? = null,
+    lastHasDivider: Boolean = false,
+) {
     itemsIndexed(albums, key = { _, album -> "album:" + album.key }) { index, album ->
         UniformRow(
             heightGridUnits = ALBUM_ROW_GRID_UNITS,
             showDivider = lastHasDivider || index != albums.lastIndex,
-            modifier = Modifier.lightClickable { onOpen(album) },
+            modifier = Modifier.tapOrHold(onHold = onHold?.let { { it(album) } }) { onOpen(album) },
         ) {
             ArtAndText(
                 art = { size -> ArtImage(album.artSource(), ArtSize.THUMB, artLetter(album.title), size) },
@@ -128,13 +150,13 @@ fun LazyListScope.albumRows(albums: List<Album>, onOpen: (Album) -> Unit, lastHa
     }
 }
 
-/** Artist rows: their first album's cover, name, and album and song counts. */
-fun LazyListScope.artistRows(artists: List<Artist>, onOpen: (Artist) -> Unit) {
+/** Artist rows: their first album's cover, name, and album and song counts. Press and hold for [onHold]. */
+fun LazyListScope.artistRows(artists: List<Artist>, onOpen: (Artist) -> Unit, onHold: ((Artist) -> Unit)? = null) {
     itemsIndexed(artists, key = { _, artist -> "artist:" + artist.key }) { index, artist ->
         UniformRow(
             heightGridUnits = ALBUM_ROW_GRID_UNITS,
             showDivider = index != artists.lastIndex,
-            modifier = Modifier.lightClickable { onOpen(artist) },
+            modifier = Modifier.tapOrHold(onHold = onHold?.let { { it(artist) } }) { onOpen(artist) },
         ) {
             ArtAndText(
                 art = { size -> ArtImage(artist.albums.first().artSource(), ArtSize.THUMB, artLetter(artist.name), size) },

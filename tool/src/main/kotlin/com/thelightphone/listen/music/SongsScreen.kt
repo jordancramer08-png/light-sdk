@@ -40,7 +40,7 @@ class SongsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedActi
                 !library.loaded || !settingsLoaded || sorted == null -> Box(modifier = listArea)
                 sorted.items.isNotEmpty() -> Box(modifier = listArea) {
                     MusicLazyList(tag = sorted.tag, rowGridUnits = SONG_ROW_GRID_UNITS) {
-                        songRows(sorted.items, library, onPlay = ::play)
+                        songRows(sorted.items, library, onPlay = ::play, onHold = { addToPlaylist(it) })
                     }
                 }
                 library.updating -> CenteredMessage("Reading your music…", modifier = listArea)

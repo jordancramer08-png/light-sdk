@@ -34,7 +34,7 @@ class AlbumsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedAct
                 !library.loaded || !settingsLoaded || sorted == null -> Box(modifier = listArea)
                 sorted.items.isNotEmpty() -> Box(modifier = listArea) {
                     MusicLazyList(tag = sorted.tag, rowGridUnits = ALBUM_ROW_GRID_UNITS) {
-                        albumRows(sorted.items, onOpen = { openAlbum(it) })
+                        albumRows(sorted.items, onOpen = { openAlbum(it) }, onHold = { addToPlaylist(it) })
                     }
                 }
                 library.updating -> CenteredMessage("Reading your music…", modifier = listArea)
@@ -74,7 +74,7 @@ class ArtistsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedAc
                 !library.loaded || !settingsLoaded || sorted == null -> Box(modifier = listArea)
                 sorted.items.isNotEmpty() -> Box(modifier = listArea) {
                     MusicLazyList(tag = sorted.tag, rowGridUnits = ALBUM_ROW_GRID_UNITS) {
-                        artistRows(sorted.items, onOpen = { openArtist(it) })
+                        artistRows(sorted.items, onOpen = { openArtist(it) }, onHold = { addToPlaylist(it) })
                     }
                 }
                 library.updating -> CenteredMessage("Reading your music…", modifier = listArea)

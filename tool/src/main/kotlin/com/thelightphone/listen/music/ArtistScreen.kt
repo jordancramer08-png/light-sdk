@@ -28,14 +28,18 @@ class ArtistScreen(sealedActivity: SealedLightActivity, private val artistKey: S
         val library by MusicLibrary.state.collectAsState()
         val artist = library.artist(artistKey)
         ThemedScreen {
-            ListTopBar(title = artist?.name ?: "Artist", onBack = { goBack() })
+            ListTopBar(
+                title = artist?.name ?: "Artist",
+                onBack = { goBack() },
+                onAddToPlaylist = artist?.let { { addToPlaylist(it) } },
+            )
             val listArea = Modifier.weight(1f)
             when {
                 !library.loaded -> Box(modifier = listArea)
                 artist == null -> CenteredMessage(NOT_ON_PHONE, modifier = listArea)
                 else -> Box(modifier = listArea) {
                     MusicLazyList(tag = artist.key, rowGridUnits = ALBUM_ROW_GRID_UNITS) {
-                        albumRows(artist.albums, onOpen = { openAlbum(it) }, lastHasDivider = true)
+                        albumRows(artist.albums, onOpen = { openAlbum(it) }, onHold = { addToPlaylist(it) }, lastHasDivider = true)
                         item(key = "all-songs") {
                             UniformRow(
                                 heightGridUnits = ALBUM_ROW_GRID_UNITS,
@@ -76,14 +80,23 @@ class ArtistSongsScreen(sealedActivity: SealedLightActivity, private val artistK
         val library by MusicLibrary.state.collectAsState()
         val artist = library.artist(artistKey)
         ThemedScreen {
-            ListTopBar(title = artist?.name ?: "Artist", onBack = { goBack() })
+            ListTopBar(
+                title = artist?.name ?: "Artist",
+                onBack = { goBack() },
+                onAddToPlaylist = artist?.let { { addToPlaylist(it) } },
+            )
             val listArea = Modifier.weight(1f)
             when {
                 !library.loaded -> Box(modifier = listArea)
                 artist == null -> CenteredMessage("This artist isn't on the phone any more.", modifier = listArea)
                 else -> Box(modifier = listArea) {
                     MusicLazyList(tag = artist.key, rowGridUnits = SONG_ROW_GRID_UNITS) {
-                        songRows(artist.songs, library, onPlay = { songs, index -> play(artist, songs, index) }) { it.album }
+                        songRows(
+                            artist.songs,
+                            library,
+                            onPlay = { songs, index -> play(artist, songs, index) },
+                            onHold = { addToPlaylist(it) },
+                        ) { it.album }
                     }
                 }
             }

@@ -1,6 +1,5 @@
 package com.thelightphone.listen.music
 
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,7 +16,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import com.thelightphone.listen.ListenScreen
 import com.thelightphone.listen.artwork.ArtImage
 import com.thelightphone.listen.artwork.ArtSize
@@ -26,6 +24,7 @@ import com.thelightphone.listen.artwork.artSource
 import com.thelightphone.listen.playback.PlaybackHub
 import com.thelightphone.listen.playback.QueueSource
 import com.thelightphone.listen.playback.formatTime
+import com.thelightphone.listen.ui.ActionButton
 import com.thelightphone.listen.ui.CenteredMessage
 import com.thelightphone.listen.ui.HairlineDivider
 import com.thelightphone.listen.ui.NowPlayingBar
@@ -33,13 +32,10 @@ import com.thelightphone.listen.ui.OneLine
 import com.thelightphone.listen.ui.ThemedScreen
 import com.thelightphone.listen.ui.UpdatingLine
 import com.thelightphone.sdk.SealedLightActivity
-import com.thelightphone.sdk.ui.LightIcon
-import com.thelightphone.sdk.ui.LightIconConfiguration
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
-import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import com.thelightphone.sdk.ui.lightClickable
 import kotlin.random.Random
@@ -59,7 +55,11 @@ class AlbumScreen(sealedActivity: SealedLightActivity, private val albumKey: Str
         val library by MusicLibrary.state.collectAsState()
         val album = library.album(albumKey)
         ThemedScreen {
-            ListTopBar(title = "Album", onBack = { goBack() })
+            ListTopBar(
+                title = "Album",
+                onBack = { goBack() },
+                onAddToPlaylist = album?.let { { addToPlaylist(it) } },
+            )
             val area = Modifier.weight(1f)
             when {
                 !library.loaded -> Box(modifier = area)
@@ -134,23 +134,6 @@ private fun Header(album: Album) {
             OneLine(text = albumDetail(album), variant = LightTextVariant.Detail, lighten = true)
             OneLine(text = lengthText(album.durationMs), variant = LightTextVariant.Detail, lighten = true)
         }
-    }
-}
-
-/** A framed button with an icon and a word, a big tap target. */
-@Composable
-private fun ActionButton(label: String, icon: LightIconConfiguration, modifier: Modifier, onClick: () -> Unit) {
-    Row(
-        modifier = modifier
-            .height(4f.gridUnitsAsDp())
-            .border(1.dp, LightThemeTokens.colors.contentSecondary)
-            .lightClickable(onClickLabel = label, onClick = onClick),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        LightIcon(icon = icon, size = 1.5f, contentDescription = null)
-        Spacer(modifier = Modifier.width(0.5f.gridUnitsAsDp()))
-        LightText(text = label, variant = LightTextVariant.Copy)
     }
 }
 

@@ -6,8 +6,9 @@ import kotlinx.serialization.json.Json
 import java.io.File
 
 /**
- * Where a music queue came from. [kind] is "songs" (all songs), "album", "artist", and later
- * "playlist"; [key] names which one ("" for all songs, else the album's or artist's key).
+ * Where a music queue came from. [kind] is "songs" (all songs), "album", "artist" or
+ * "playlist"; [key] names which one ("" for all songs, else the album's or artist's key, or
+ * the playlist's id).
  */
 @Serializable
 data class QueueSource(val kind: String = KIND_SONGS, val key: String = "") {
@@ -15,6 +16,7 @@ data class QueueSource(val kind: String = KIND_SONGS, val key: String = "") {
         const val KIND_SONGS = "songs"
         const val KIND_ALBUM = "album"
         const val KIND_ARTIST = "artist"
+        const val KIND_PLAYLIST = "playlist"
     }
 }
 

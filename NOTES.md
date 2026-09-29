@@ -18,7 +18,7 @@ reference for the SDK's UI kit, screens and sandbox rules.
     swiped away while paused), the controller disconnects and the handle is
     **released**; the tool must open a new one.
 - `lighttool.toml`: `capabilities = ["detached-audio"]`, `WAKE_LOCK` added, version 0.2.0 (2).
-- `ListenScreen` (base for every screen except Now Playing's own logic): `willShow()`
+- `ListenScreen` (base class for every Listen screen): `willShow()`
   refreshes the library and calls `PlaybackHub.attach(...)`; `onAppPause()` saves.
 - `playback/PlaybackHub` (app-wide object): owns the one detached player
   (`LightAudioUsage.Music`). `ensurePlayer()` reopens it after a release and restores the

@@ -7,6 +7,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
@@ -31,8 +32,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import com.thelightphone.reader.comics.ComicReadingMode
-import com.thelightphone.reader.comics.PANEL_MOVE_MS
 import com.thelightphone.reader.comics.PageGeometry
+import com.thelightphone.reader.comics.PageLayout
 import com.thelightphone.reader.comics.PageZoom
 import com.thelightphone.reader.comics.between
 import com.thelightphone.reader.comics.comicSlug
@@ -41,6 +42,7 @@ import com.thelightphone.reader.data.ComicMeta
 import com.thelightphone.reader.data.ComicPositionRepository
 import com.thelightphone.reader.data.ComicReadingModePreference
 import com.thelightphone.reader.data.ComicStore
+import com.thelightphone.reader.data.ComicViewSettingsPreference
 import com.thelightphone.reader.data.ReadingStatusRepository
 import com.thelightphone.reader.data.readerDatabase
 import com.thelightphone.sdk.LightScreen
@@ -64,15 +66,17 @@ private val PAGE_MESSAGE_COLOR = Color(0xFF9E9E9E)
 /**
  * The comic viewer (CLAUDE.md 12): one page at a time on a black screen, no bars. Tap right
  * to go on, left to go back, the top for the overlay (back, title, page number, slider,
- * FULL PAGE / PANELS, ADD TO LIST, DETAILS); a long press switches Full page ↔ Panels.
- * Full page: the page fitted, pinch or double-tap to zoom, drag to move. Panels: zoomed
- * onto one panel at a time; double-tap shows the whole page until the next tap.
+ * FULL PAGE / PANELS, the mode's settings, ADD TO LIST, DETAILS); a long press switches
+ * Full page ↔ Panels. Full page: the page fitted (a spread as tall as the screen, or turned),
+ * pinch or double-tap to zoom, drag to move. Panels: zoomed onto one panel at a time;
+ * double-tap shows the whole page until the next tap. Going on past the last page shows the
+ * end card; its NEXT IN FOLDER hands the next comic or note back to the opener to open.
  */
 class ComicScreen(
     sealedActivity: SealedLightActivity,
     private val meta: ComicMeta,
     private val title: String,
-) : LightScreen<Unit, ComicViewModel>(sealedActivity) {
+) : LightScreen<NextInFolder, ComicViewModel>(sealedActivity) {
 
     private val slug = comicSlug(meta.path)
 
@@ -85,6 +89,7 @@ class ComicScreen(
         ComicPositionRepository.getInstance { lightContext.readerDatabase() },
         ReadingStatusRepository.getInstance { lightContext.readerDatabase() },
         ComicReadingModePreference(lightContext.dataStore),
+        ComicViewSettingsPreference(lightContext.dataStore),
     )
 
     @Composable
@@ -101,6 +106,7 @@ class ComicScreen(
                 ComicPage(state, viewModel, Modifier.fillMaxSize())
                 PageMessage(state)
                 if (state.overlayShown) Overlay(state)
+                if (state.ended) EndCard(state)
             }
         }
     }
@@ -121,7 +127,7 @@ class ComicScreen(
                 center = LightTopBarCenter.Text(title),
             )
             LightText(
-                text = "Page ${state.pageIndex + 1} of ${viewModel.pageCount}",
+                text = "Page ${state.shownPageNumber + 1} of ${viewModel.pageCount}",
                 variant = LightTextVariant.Detail,
                 align = TextAlign.Center,
                 modifier = Modifier
@@ -131,7 +137,7 @@ class ComicScreen(
             if (viewModel.pageCount > 1) {
                 LightTouchableProgressBar(
                     colors = colors,
-                    progress = sliderFraction(state.pageIndex, viewModel.pageCount),
+                    progress = sliderFraction(state.shownPageNumber, viewModel.pageCount),
                     onValueChange = viewModel::jumpToFraction,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -140,6 +146,7 @@ class ComicScreen(
             }
             ModeBar(current = state.mode, onSelect = viewModel::setMode)
             HairlineDivider()
+            ModeSettings(state)
         }
         Box(
             modifier = Modifier
@@ -152,6 +159,85 @@ class ComicScreen(
                 items = listOf(
                     LightBarButton.Text(text = "ADD TO LIST", onClick = ::openAddToList),
                     LightBarButton.Text(text = "DETAILS", onClick = ::openDetails),
+                ),
+            )
+        }
+    }
+
+    /** The settings of the mode in use: panel margin and transition in Panels, Rotate spreads in Full page. */
+    @Composable
+    private fun ModeSettings(state: ComicViewState) {
+        val settings = state.settings
+        if (state.mode == ComicReadingMode.PANELS) {
+            StepperRow(
+                label = "Panel margin",
+                value = settings.margin.label,
+                onPrevious = settings.margin.previous?.let { { viewModel.setPanelMargin(it) } },
+                onNext = settings.margin.next?.let { { viewModel.setPanelMargin(it) } },
+                previousSymbol = "‹",
+                nextSymbol = "›",
+            )
+            HairlineDivider()
+            StepperRow(
+                label = "Panel transition",
+                value = settings.transition.label,
+                onPrevious = settings.transition.previous?.let { { viewModel.setPanelTransition(it) } },
+                onNext = settings.transition.next?.let { { viewModel.setPanelTransition(it) } },
+                previousSymbol = "‹",
+                nextSymbol = "›",
+            )
+        } else {
+            OnOffRow(
+                label = "Rotate spreads",
+                isOn = settings.rotateSpreads,
+                onClick = { viewModel.setRotateSpreads(!settings.rotateSpreads) },
+            )
+        }
+        HairlineDivider()
+    }
+
+    /**
+     * Past the last page, in the theme's colors: the comic's title, "Finished", and what comes
+     * next in its folder. LAST PAGE goes back to the page; NEXT IN FOLDER opens the next comic
+     * or note in place of this one; back leaves the comic.
+     */
+    @Composable
+    private fun EndCard(state: ComicViewState) {
+        val colors = LightThemeTokens.colors
+        val next = state.next
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(colors.background)
+                // Taps on the card stay on it instead of reaching the page.
+                .pointerInput(Unit) { detectTapGestures { } },
+        ) {
+            LightTopBar(
+                leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
+                center = LightTopBarCenter.Text("Finished"),
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 1.5f.gridUnitsAsDp()),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                LightText(text = title, variant = LightTextVariant.Subheading, align = TextAlign.Center)
+                LightText(
+                    text = "Finished",
+                    variant = LightTextVariant.Copy,
+                    align = TextAlign.Center,
+                    color = LocalReaderAccent.current,
+                    modifier = Modifier.padding(top = 0.5f.gridUnitsAsDp(), bottom = 2f.gridUnitsAsDp()),
+                )
+                NextInFolderText(state)
+            }
+            LightBottomBar(
+                items = listOfNotNull(
+                    LightBarButton.Text(text = "LAST PAGE", onClick = viewModel::leaveEnd),
+                    next?.let { LightBarButton.Text(text = "NEXT IN FOLDER", onClick = { goBack(it) }) },
                 ),
             )
         }
@@ -200,28 +286,49 @@ private fun modeLabel(mode: ComicReadingMode): String = when (mode) {
 
 private const val MODE_BAR_GRID_UNITS = 4f
 
-/** The zoom last drawn, and on which page: where the next animated move starts from. */
+/** "Next in folder" and its title, "Last in this folder.", or "Preparing…" while it's looked for. */
+@Composable
+private fun NextInFolderText(state: ComicViewState) {
+    val next = state.next
+    when {
+        !state.nextKnown -> LightText(text = "Preparing…", variant = LightTextVariant.Detail, lighten = true)
+        next == null -> LightText(text = "Last in this folder.", variant = LightTextVariant.Detail, lighten = true)
+        else -> {
+            LightText(text = "Next in folder", variant = LightTextVariant.Detail, lighten = true)
+            LightText(
+                text = if (next is NextInFolder.Note) next.title + " (note)" else next.title,
+                variant = LightTextVariant.Copy,
+                align = TextAlign.Center,
+            )
+        }
+    }
+}
+
+/** The zoom last drawn, and on which page laid out how: where the next animated move starts from. */
 private class DrawnZoom {
     var pageIndex = -1
+    var layout = PageLayout.WHOLE
     var zoom = PageZoom()
 
-    /** The last drawn zoom, if it was of [page]; else the page fitted. */
-    fun on(page: Int): PageZoom = if (page == pageIndex) zoom else PageZoom()
+    /** The last drawn zoom, if it was of [page] laid out as [pageLayout]; else the page fitted. */
+    fun on(page: Int, pageLayout: PageLayout?): PageZoom =
+        if (page == pageIndex && pageLayout == layout) zoom else PageZoom()
 }
 
 /**
  * The page, drawn at its zoom: the fitted picture, and over it the sharp picture of the
- * zoomed-in part once it's read. A move to a panel slides there over [PANEL_MOVE_MS] from
- * where the page was last drawn. Taps, double-taps, long presses, pinches and drags go to
+ * zoomed-in part once it's read. A move to a panel slides there (at the Panel transition
+ * speed) from where the page was last drawn. Taps, double-taps, long presses, pinches and drags go to
  * [viewModel].
  */
 @Composable
 private fun ComicPage(state: ComicViewState, viewModel: ComicViewModel, modifier: Modifier) {
     val drawn = remember { DrawnZoom() }
-    val start = remember(state.move) { drawn.on(state.pageIndex) }
-    val progress = remember(state.move) { Animatable(if (state.move.animated) 0f else 1f) }
+    val start = remember(state.move) { drawn.on(state.pageIndex, state.picture?.layout) }
+    val duration = state.move.durationMs
+    val progress = remember(state.move) { Animatable(if (duration > 0) 0f else 1f) }
     LaunchedEffect(state.move) {
-        if (state.move.animated) progress.animateTo(1f, tween(PANEL_MOVE_MS, easing = FastOutSlowInEasing))
+        if (duration > 0) progress.animateTo(1f, tween(duration, easing = FastOutSlowInEasing))
     }
     Canvas(
         modifier = modifier
@@ -240,12 +347,13 @@ private fun ComicPage(state: ComicViewState, viewModel: ComicViewModel, modifier
             },
     ) {
         val picture = state.picture ?: return@Canvas
-        val geometry = PageGeometry(picture.imageWidth, picture.imageHeight, size.width.toInt(), size.height.toInt())
+        val geometry = picture.geometry(size.width.toInt(), size.height.toInt())
         val zoom = geometry.between(start, state.zoom, progress.value)
         drawn.pageIndex = picture.pageIndex
+        drawn.layout = picture.layout
         drawn.zoom = zoom
         drawPicture(picture, geometry, zoom)
-        val sharp = state.sharp?.takeIf { it.pageIndex == picture.pageIndex } ?: return@Canvas
+        val sharp = state.sharp?.takeIf { it.pageIndex == picture.pageIndex && it.layout == picture.layout } ?: return@Canvas
         drawSharpArea(sharp, geometry, zoom)
     }
 }

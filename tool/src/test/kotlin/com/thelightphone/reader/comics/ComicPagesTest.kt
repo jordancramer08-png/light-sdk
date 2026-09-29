@@ -101,4 +101,16 @@ class ComicPagesTest {
         assertEquals("Café\nnext", decodeNoteText("﻿Café\r\nnext".toByteArray(Charsets.UTF_8)))
         assertEquals("Café", decodeNoteText("Café".toByteArray(charset("windows-1252"))))
     }
+
+    @Test
+    fun anOpenComicReadsPagesUntilClosed() {
+        val file = cbz("001.jpg" to byteArrayOf(1, 2), "002.jpg" to byteArrayOf(3))
+        val comic = OpenComic(file)
+        assertContentEquals(byteArrayOf(3), comic.read("002.jpg"))
+        assertContentEquals(byteArrayOf(1, 2), comic.read("001.jpg"))
+        assertNull(comic.read("missing.jpg"))
+        assertNull(comic.read("001.jpg", maxBytes = 1))
+        comic.close()
+        assertNull(comic.read("001.jpg"))
+    }
 }

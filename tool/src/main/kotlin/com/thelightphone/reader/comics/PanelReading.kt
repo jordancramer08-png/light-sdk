@@ -22,10 +22,10 @@ enum class ComicReadingMode {
     }
 }
 
-/** Around a panel, this share of the screen's shorter side is left free on every side. */
+/** Around a panel, this share of the screen's shorter side is left free on every side (the Normal margin). */
 const val PANEL_MARGIN_FRACTION = 0.03f
 
-/** How long the move from one panel to the next takes. */
+/** How long the move from one panel to the next takes (the Smooth transition). */
 const val PANEL_MOVE_MS = 250
 
 /** After a page's last panel, the whole page shows this long before the next page. */
@@ -69,15 +69,31 @@ fun openingPanelIndex(savedPanel: Int?, panelCount: Int): Int =
 /** What is saved for a panel: 1-based, 0 for the whole page. */
 fun savedPanelNumber(panel: Int): Int = if (panel < 0) 0 else panel + 1
 
+/** One panel of one page (both 0-based). */
+data class PanelSpot(val page: Int, val panel: Int)
+
 /**
- * The zoom that shows [panel] (in page pixels) as big as it fits on the screen with a small
- * margin, centred. Never below fitted or above [MAX_ZOOM]. Unlike pinching, the page may sit
- * off-centre past its edge here, so a panel at the page's edge is centred too.
+ * Where the next forward tap will land on a panel, so its sharp picture can be read ahead:
+ * the next panel of this page, else the first panel of the next page. [panel] -1 is the
+ * whole page; [nextPagePanels] is null when the next page's panels aren't known (or there is
+ * no next page). Null when the next tap won't land on a panel.
  */
-fun PageGeometry.panelZoom(panel: PixelRect): PageZoom {
+fun nextPanelSpot(page: Int, panel: Int, panelCount: Int, nextPagePanels: Int?): PanelSpot? = when {
+    panel >= 0 && panel < panelCount - 1 -> PanelSpot(page, panel + 1)
+    nextPagePanels != null && nextPagePanels > 0 -> PanelSpot(page + 1, 0)
+    else -> null
+}
+
+/**
+ * The zoom that shows [panel] (in page pixels) as big as it fits on the screen with a margin
+ * of [marginFraction] of the screen's shorter side, centred. Never below fitted or above
+ * [MAX_ZOOM]. Unlike pinching, the page may sit off-centre past its edge here, so a panel at
+ * the page's edge is centred too.
+ */
+fun PageGeometry.panelZoom(panel: PixelRect, marginFraction: Float = PANEL_MARGIN_FRACTION): PageZoom {
     if (panel.isEmpty) return PageZoom()
     val fit = scale(PageZoom())
-    val margin = min(screenWidth, screenHeight) * PANEL_MARGIN_FRACTION
+    val margin = min(screenWidth, screenHeight) * marginFraction
     val roomX = screenWidth - 2 * margin
     val roomY = screenHeight - 2 * margin
     val zoom = min(roomX / (panel.width * fit), roomY / (panel.height * fit)).coerceIn(1f, MAX_ZOOM)

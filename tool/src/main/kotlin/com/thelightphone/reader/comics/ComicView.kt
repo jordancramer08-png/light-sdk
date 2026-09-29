@@ -43,6 +43,30 @@ fun fitScale(imageWidth: Int, imageHeight: Int, screenWidth: Int, screenHeight: 
     min(screenWidth.toFloat() / imageWidth, screenHeight.toFloat() / imageHeight)
 
 /**
+ * How a page is laid on the screen before any zoom: [WHOLE] fitted whole; [FIT_HEIGHT] a
+ * spread as tall as the screen, wider than it, moved sideways by dragging; [ROTATED] a spread
+ * turned a quarter turn (its top to the screen's left) and fitted whole.
+ */
+enum class PageLayout { WHOLE, FIT_HEIGHT, ROTATED }
+
+/** A two-page spread: a page wider than it is tall. */
+fun isSpread(imageWidth: Int, imageHeight: Int): Boolean = imageWidth > imageHeight
+
+/** Spreads get their own layout in Full page mode only; in Panels mode every page is laid out whole. */
+fun pageLayout(imageWidth: Int, imageHeight: Int, mode: ComicReadingMode, rotateSpreads: Boolean): PageLayout = when {
+    mode == ComicReadingMode.PANELS || !isSpread(imageWidth, imageHeight) -> PageLayout.WHOLE
+    rotateSpreads -> PageLayout.ROTATED
+    else -> PageLayout.FIT_HEIGHT
+}
+
+/**
+ * Where a part of a [PageLayout.ROTATED] page (in the turned picture's pixels) is in the page
+ * itself. The page is [pageWidth] wide before turning; its top went to the left.
+ */
+fun rotatedRegionInPage(region: PixelRect, pageWidth: Int): PixelRect =
+    PixelRect(left = pageWidth - region.bottom, top = region.left, right = pageWidth - region.top, bottom = region.right)
+
+/**
  * How a page is zoomed: [zoom] 1 = fitted, up to [MAX_ZOOM]. [panX] / [panY] move the page's
  * centre away from the screen's centre, in screen pixels.
  */
@@ -57,14 +81,18 @@ data class PixelRect(val left: Int, val top: Int, val right: Int, val bottom: In
     val isEmpty: Boolean get() = width <= 0 || height <= 0
 }
 
-/** One page (its full size in pixels) on one screen: everything about placing and zooming it. */
+/**
+ * One page (its full size in pixels) on one screen: everything about placing and zooming it.
+ * [fitHeight]: the page's "fitted" size is as tall as the screen (a spread), not whole.
+ */
 class PageGeometry(
     val imageWidth: Int,
     val imageHeight: Int,
     val screenWidth: Int,
     val screenHeight: Int,
+    val fitHeight: Boolean = false,
 ) {
-    private val fit = fitScale(imageWidth, imageHeight, screenWidth, screenHeight)
+    private val fit = baseScale(imageWidth, imageHeight, screenWidth, screenHeight, fitHeight)
 
     /** Screen pixels per page pixel at this zoom. */
     fun scale(zoom: PageZoom): Float = fit * zoom.zoom
@@ -110,7 +138,14 @@ class PageGeometry(
 
     /** Double-tap: a fitted page zooms to [DOUBLE_TAP_ZOOM] at the spot; a zoomed one fits again. */
     fun doubleTap(zoom: PageZoom, x: Float, y: Float): PageZoom =
-        if (zoom.isZoomed) PageZoom() else zoomBy(PageZoom(), DOUBLE_TAP_ZOOM, x, y)
+        if (zoom.isZoomed) clamp(PageZoom()) else zoomBy(zoom, DOUBLE_TAP_ZOOM, x, y)
+
+    /**
+     * How a page opens: fitted, and a spread wider than the screen at its left edge reading
+     * [forward], at its right edge going back.
+     */
+    fun startZoom(forward: Boolean): PageZoom =
+        clamp(PageZoom(panX = if (forward) Float.MAX_VALUE else -Float.MAX_VALUE))
 
     /** The part of the page on screen, in page pixels (empty when none of it is). */
     fun visibleRegion(zoom: PageZoom): PixelRect {
@@ -141,10 +176,20 @@ class PageGeometry(
  * The size to decode a page at so it fits the screen, never bigger than the page itself
  * (a small page is drawn scaled up instead).
  */
-fun fittedSize(imageWidth: Int, imageHeight: Int, screenWidth: Int, screenHeight: Int): Pair<Int, Int> {
-    val scale = min(1f, fitScale(imageWidth, imageHeight, screenWidth, screenHeight))
+fun fittedSize(
+    imageWidth: Int,
+    imageHeight: Int,
+    screenWidth: Int,
+    screenHeight: Int,
+    fitHeight: Boolean = false,
+): Pair<Int, Int> {
+    val scale = min(1f, baseScale(imageWidth, imageHeight, screenWidth, screenHeight, fitHeight))
     return max(1, (imageWidth * scale).roundToInt()) to max(1, (imageHeight * scale).roundToInt())
 }
+
+/** The scale of a page before any zoom: whole on the screen, or as tall as it ([fitHeight]). */
+private fun baseScale(imageWidth: Int, imageHeight: Int, screenWidth: Int, screenHeight: Int, fitHeight: Boolean): Float =
+    if (fitHeight) screenHeight.toFloat() / imageHeight else fitScale(imageWidth, imageHeight, screenWidth, screenHeight)
 
 /** The page (0-based) a comic opens on: its saved page (1-based), or the first; never past the end. */
 fun openingPageIndex(savedPage: Int?, pageCount: Int): Int =

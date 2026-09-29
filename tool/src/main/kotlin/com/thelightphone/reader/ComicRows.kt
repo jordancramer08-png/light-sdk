@@ -59,6 +59,15 @@ sealed interface ComicEntry {
     data class Note(override val path: String, override val title: String) : ComicEntry
 }
 
+/** What "Next in folder" opens at the end of a comic: the next comic or note in its folder. */
+sealed interface NextInFolder {
+    val title: String
+
+    data class Comic(val meta: ComicMeta, override val title: String) : NextInFolder
+
+    data class Note(val path: String, override val title: String) : NextInFolder
+}
+
 /** A comic's row from what's known about it now. */
 fun comicEntry(
     path: String,

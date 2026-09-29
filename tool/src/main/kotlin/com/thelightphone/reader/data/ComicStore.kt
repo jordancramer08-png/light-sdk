@@ -41,6 +41,12 @@ class ComicStore(
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    /**
+     * The last comic's panels.json, kept in memory so a long comic's file isn't read again for
+     * every page. Only this ComicStore writes it while the comic is open. Guarded by [LOCK].
+     */
+    private var panelsInMemory: Pair<ComicMeta, ComicPanels>? = null
+
     /** One folder's subfolders, comics and notes, in the order shown. [folder] "" is the top. */
     fun list(folder: String): List<ComicFolderItem> {
         val children = fileOf(folder).listFiles().orEmpty().map { it.name to it.isDirectory }
@@ -76,13 +82,17 @@ class ComicStore(
 
     /**
      * One page's panels: from panels.json when the page was looked at before, else found now
-     * and saved. Null when the page can't be read. Looking takes a moment: call it off the
-     * main thread.
+     * and saved. Null when the page can't be read. [readPage] gives the page's bytes (the
+     * viewer passes its open CBZ). Looking takes a moment: call it off the main thread.
      */
-    fun panels(meta: ComicMeta, page: String): PagePanels? {
+    fun panels(
+        meta: ComicMeta,
+        page: String,
+        readPage: () -> ByteArray? = { readComicEntry(fileOf(meta.path), page, MAX_PAGE_BYTES) },
+    ): PagePanels? {
         cachedPanels(meta, page)?.let { return it }
         val found = try {
-            readComicEntry(fileOf(meta.path), page, MAX_PAGE_BYTES)?.let(findPanels)
+            readPage()?.let(findPanels)
         } catch (e: Exception) {
             null
         } catch (e: OutOfMemoryError) {
@@ -140,19 +150,23 @@ class ComicStore(
 
     /** Adds one page to panels.json, unless the comic changed (or its cache went) meanwhile. */
     private fun savePanels(meta: ComicMeta, page: String, found: PagePanels): Unit = synchronized(LOCK) {
-        if (cached(meta.path) != meta) return
+        if (!isCurrent(meta)) return
         val saved = readPanels(meta) ?: ComicPanels()
         val updated = ComicPanels(pages = saved.pages + (page to found))
         val folder = cacheFolder(meta.path)
         val temp = File(folder, "$PANELS_FILE.tmp")
         temp.writeText(json.encodeToString(ComicPanels.serializer(), updated))
         Files.move(temp.toPath(), File(folder, PANELS_FILE).toPath(), StandardCopyOption.REPLACE_EXISTING)
-        Unit
+        panelsInMemory = meta to updated
     }
 
-    /** Null when panels.json is missing, unreadable, from another version of the detector, or the comic changed. */
+    /**
+     * Null when panels.json is missing, unreadable, from another version of the detector, or
+     * the comic changed. Read from the file once, then from memory. Call it holding [LOCK].
+     */
     private fun readPanels(meta: ComicMeta): ComicPanels? {
-        if (cached(meta.path) != meta) return null
+        if (!isCurrent(meta)) return null
+        panelsInMemory?.let { (forMeta, panels) -> if (forMeta == meta) return panels }
         val file = File(cacheFolder(meta.path), PANELS_FILE)
         if (!file.isFile) return null
         val panels = try {
@@ -160,7 +174,18 @@ class ComicStore(
         } catch (e: IllegalArgumentException) { // includes SerializationException
             return null
         }
-        return panels.takeIf { it.version == PANEL_DETECTOR_VERSION }
+        if (panels.version != PANEL_DETECTOR_VERSION) return null
+        panelsInMemory = meta to panels
+        return panels
+    }
+
+    /**
+     * True while [meta] still describes the comic on disk and its cache folder is there:
+     * the file's size and time are checked, not meta.json re-read (it lists every page).
+     */
+    private fun isCurrent(meta: ComicMeta): Boolean {
+        val file = fileOf(meta.path)
+        return file.isFile && stampOf(file) == meta.source && File(cacheFolder(meta.path), META_FILE).isFile
     }
 
     // --- files -----------------------------------------------------------------------

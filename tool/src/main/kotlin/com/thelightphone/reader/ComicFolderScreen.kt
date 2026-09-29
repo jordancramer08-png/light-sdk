@@ -6,6 +6,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewModelScope
+import com.thelightphone.reader.data.ComicMeta
 import com.thelightphone.reader.data.ComicPositionRepository
 import com.thelightphone.reader.data.ComicStore
 import com.thelightphone.reader.data.ReadingStatusRepository
@@ -91,7 +92,26 @@ fun SimpleLightScreen<*>.openComicEntry(entry: ComicEntry, store: ComicStore) {
         is ComicEntry.Note -> navigateTo(screenFactory = { ComicNoteScreen(it, entry.path, entry.title, store) })
         is ComicEntry.Comic -> {
             val meta = entry.meta ?: return
-            navigateTo(screenFactory = { ComicScreen(it, meta, entry.title) })
+            openComic(meta, entry.title, store)
         }
+    }
+}
+
+/**
+ * Opens a comic in ComicScreen. When its end card's NEXT IN FOLDER is tapped, the comic
+ * closes and hands back what comes next, which opens here in its place, so reading a run of
+ * comics never piles screens up: back always returns to where the first one was opened.
+ */
+fun SimpleLightScreen<*>.openComic(meta: ComicMeta, title: String, store: ComicStore) {
+    navigateTo(
+        screenFactory = { ComicScreen(it, meta, title) },
+        resultCallback = { next -> openNextInFolder(next, store) },
+    )
+}
+
+private fun SimpleLightScreen<*>.openNextInFolder(next: NextInFolder, store: ComicStore) {
+    when (next) {
+        is NextInFolder.Comic -> openComic(next.meta, next.title, store)
+        is NextInFolder.Note -> navigateTo(screenFactory = { ComicNoteScreen(it, next.path, next.title, store) })
     }
 }

@@ -1,5 +1,6 @@
 package com.thelightphone.reader.comics
 
+import java.io.Closeable
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
@@ -55,11 +56,42 @@ fun readComicPages(file: File): List<String> =
 
 /** One page's bytes, or null when it's missing or bigger than [maxBytes]. */
 fun readComicEntry(file: File, entryName: String, maxBytes: Long = MAX_COVER_BYTES): ByteArray? =
-    openComicZip(file).use { zip ->
-        val entry = zip.getEntry(entryName) ?: return null
-        if (entry.size > maxBytes) return null
-        zip.getInputStream(entry).use { it.readBytes() }
+    openComicZip(file).use { zip -> readEntry(zip, entryName, maxBytes) }
+
+private fun readEntry(zip: ZipFile, entryName: String, maxBytes: Long): ByteArray? {
+    val entry = zip.getEntry(entryName) ?: return null
+    if (entry.size > maxBytes) return null
+    return zip.getInputStream(entry).use { it.readBytes() }
+}
+
+/**
+ * A CBZ kept open while its comic is being read: the zip's list of files is read once, not
+ * again for every page (a 600-page omnibus has a long list). Safe to use from several
+ * threads. After [close], every read gives null.
+ */
+class OpenComic(private val file: File) : Closeable {
+    private var zip: ZipFile? = null
+    private var closed = false
+
+    /** One page's bytes, or null when it's missing, bigger than [maxBytes], or the comic is closed. */
+    fun read(entryName: String, maxBytes: Long = MAX_PAGE_BYTES): ByteArray? {
+        val zip = open() ?: return null
+        return readEntry(zip, entryName, maxBytes)
     }
+
+    @Synchronized
+    private fun open(): ZipFile? {
+        if (closed) return null
+        return zip ?: openComicZip(file).also { zip = it }
+    }
+
+    @Synchronized
+    override fun close() {
+        closed = true
+        zip?.close()
+        zip = null
+    }
+}
 
 /** A note file's text: UTF-8 (a leading byte-order mark dropped), or Windows-1252 when it isn't UTF-8. */
 fun decodeNoteText(bytes: ByteArray): String {

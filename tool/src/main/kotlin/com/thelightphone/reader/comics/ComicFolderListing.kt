@@ -32,6 +32,16 @@ fun folderItems(folder: String, children: List<Pair<String, Boolean>>): List<Com
     return folders + files
 }
 
+/**
+ * The comics and notes after [path] in its folder's [items] (as [folderItems] orders them),
+ * for "Next in folder". Empty when [path] is last, or isn't among them.
+ */
+fun itemsAfter(items: List<ComicFolderItem>, path: String): List<ComicFolderItem> {
+    val index = items.indexOfFirst { it.path == path }
+    if (index < 0) return emptyList()
+    return items.drop(index + 1).filter { it.kind != ComicItemKind.FOLDER }
+}
+
 fun childPath(folder: String, name: String): String = if (folder.isEmpty()) name else "$folder/$name"
 
 /** "DC Comics/01. Book I" -> "DC Comics"; a top-level name -> "". */

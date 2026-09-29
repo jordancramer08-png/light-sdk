@@ -82,4 +82,24 @@ class ComicFolderListingTest {
         assertEquals("1 comic", folderSummaryText(0, 1))
         assertEquals("Empty", folderSummaryText(0, 0))
     }
+
+    @Test
+    fun nextInFolderIsTheNextComicOrNoteNeverAFolder() {
+        val items = folderItems(
+            "DC",
+            listOf(
+                "01. Extras" to true,
+                "00101. Action Comics #1.cbz" to false,
+                "00102. Detective Comics #27.cbz" to false,
+                "00102a. Event Notes.txt" to false,
+                "00103. Superman #1.cbz" to false,
+            ),
+        )
+        assertEquals(
+            listOf("00102a. Event Notes.txt", "00103. Superman #1.cbz"),
+            names(itemsAfter(items, "DC/00102. Detective Comics #27.cbz")),
+        )
+        assertEquals(emptyList(), itemsAfter(items, "DC/00103. Superman #1.cbz"))
+        assertEquals(emptyList(), itemsAfter(items, "DC/gone.cbz"))
+    }
 }

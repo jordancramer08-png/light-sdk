@@ -15,14 +15,26 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 /**
- * What the music screens show. [songs] are sorted A–Z by title. [loaded] turns true once
- * the saved index has been read; [updating] is true while changed files are being read.
+ * What the music screens show. [songs] are sorted A–Z by title; [albums] and [artists] are
+ * grouped from them (in no particular order: each screen sorts its own list). [loaded] turns
+ * true once the saved index has been read; [updating] is true while changed files are read.
  */
 data class MusicLibraryState(
     val songs: List<Song> = emptyList(),
+    val albums: List<Album> = emptyList(),
+    val artists: List<Artist> = emptyList(),
     val loaded: Boolean = false,
     val updating: Boolean = false,
-)
+) {
+    private val albumsByKey: Map<String, Album> by lazy { albums.associateBy { it.key } }
+    private val artistsByKey: Map<String, Artist> by lazy { artists.associateBy { it.key } }
+
+    fun album(key: String): Album? = albumsByKey[key]
+    fun artist(key: String): Artist? = artistsByKey[key]
+
+    /** The album [song] is on, or null if it isn't in the library (any more). */
+    fun albumOf(song: Song): Album? = albumsByKey[song.albumKey]
+}
 
 /**
  * The app-wide music library. Screens call [refresh] every time they come to the front
@@ -86,8 +98,11 @@ object MusicLibrary {
         }
     }
 
+    /** Sorts and groups in the background (this runs on the library's IO thread), then shows. */
     private fun publish(songs: List<Song>) {
         val sorted = sortedByTitle(songs)
-        _state.update { it.copy(songs = sorted, loaded = true) }
+        val albums = groupAlbums(sorted)
+        val artists = groupArtists(albums)
+        _state.update { it.copy(songs = sorted, albums = albums, artists = artists, loaded = true) }
     }
 }

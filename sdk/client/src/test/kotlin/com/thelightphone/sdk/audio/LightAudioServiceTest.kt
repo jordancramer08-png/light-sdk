@@ -14,6 +14,16 @@ class LightAudioServiceTest {
         assertFalse(shouldStartIdleStop(isPlaying = true, handleOpen = false))
         assertFalse(shouldStartIdleStop(isPlaying = true, handleOpen = true))
     }
+
+    @Test
+    fun shuffleOrderStartsAtTheCurrentItemAndKeepsEveryItem() {
+        repeat(20) { seed ->
+            val order = shuffledFrom(first = 3, count = 8, random = kotlin.random.Random(seed))
+            assertEquals(3, order.first())
+            assertEquals((0 until 8).toList(), order.sorted())
+        }
+        assertEquals(listOf(0), shuffledFrom(first = 0, count = 1).toList())
+    }
 }
 
 class DetachedSessionStateTest {

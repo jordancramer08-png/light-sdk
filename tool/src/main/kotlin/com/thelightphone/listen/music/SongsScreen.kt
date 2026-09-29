@@ -1,10 +1,6 @@
 package com.thelightphone.listen.music
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -12,44 +8,41 @@ import androidx.compose.ui.Modifier
 import com.thelightphone.listen.ListenScreen
 import com.thelightphone.listen.playback.PlaybackHub
 import com.thelightphone.listen.playback.QueueSource
+import com.thelightphone.listen.storage.Settings
 import com.thelightphone.listen.ui.CenteredMessage
 import com.thelightphone.listen.ui.NowPlayingBar
-import com.thelightphone.listen.ui.OneLine
+import com.thelightphone.listen.ui.SortField
+import com.thelightphone.listen.ui.SortScreen
 import com.thelightphone.listen.ui.ThemedScreen
-import com.thelightphone.listen.ui.UniformRow
 import com.thelightphone.listen.ui.UpdatingLine
 import com.thelightphone.sdk.SealedLightActivity
-import com.thelightphone.sdk.ui.LightBarButton
-import com.thelightphone.sdk.ui.LightIcons
-import com.thelightphone.sdk.ui.LightLazyScrollView
-import com.thelightphone.sdk.ui.LightTextVariant
-import com.thelightphone.sdk.ui.LightTopBar
-import com.thelightphone.sdk.ui.LightTopBarCenter
-import com.thelightphone.sdk.ui.gridUnitsAsDp
-import com.thelightphone.sdk.ui.lightClickable
-
-/** Each song row is this tall (grid units), divider included: title, then artist. */
-private const val SONG_ROW_GRID_UNITS = 5f
 
 /**
- * Every song, A–Z by title, with its artist underneath. Only the rows on screen are drawn,
- * so 1,400 songs scroll smoothly. Tapping a song plays the list from that song.
+ * Every song, sorted by title, artist or album (A–Z or Z–A, remembered), each with its
+ * album's small cover. Only the rows on screen are drawn, so 1,400 songs scroll smoothly.
+ * Tapping a song plays the list, in the order shown, from that song.
  */
 class SongsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedActivity) {
 
     @Composable
     override fun Content() {
         val library by MusicLibrary.state.collectAsState()
+        val settings by Settings.settings.collectAsState()
+        val settingsLoaded by Settings.loaded.collectAsState()
+        val sort = currentSort(settings.songSort)
+        val sorted = rememberSorted(library.songs, sort) {
+            sortSongs(it, sort.fieldOr(SongSortField.TITLE), sort.descending)
+        }
         ThemedScreen {
-            LightTopBar(
-                leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
-                center = LightTopBarCenter.Text("Songs"),
-                modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
-            )
+            ListTopBar(title = "Songs", onBack = { goBack() }, onSort = { openSort(sort) })
             val listArea = Modifier.weight(1f)
             when {
-                !library.loaded -> Box(modifier = listArea)
-                library.songs.isNotEmpty() -> Box(modifier = listArea) { SongList(library.songs, ::play) }
+                !library.loaded || !settingsLoaded || sorted == null -> Box(modifier = listArea)
+                sorted.items.isNotEmpty() -> Box(modifier = listArea) {
+                    MusicLazyList(tag = sorted.tag, rowGridUnits = SONG_ROW_GRID_UNITS) {
+                        songRows(sorted.items, library, onPlay = ::play)
+                    }
+                }
                 library.updating -> CenteredMessage("Reading your music…", modifier = listArea)
                 else -> CenteredMessage(NO_MUSIC_MESSAGE, modifier = listArea)
             }
@@ -63,31 +56,17 @@ class SongsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedActi
         openNowPlaying()
     }
 
-    private companion object {
-        const val NO_MUSIC_MESSAGE =
-            "No music on the phone yet.\n\nSend some with Listen-Phone-Sync.cmd on the PC."
+    private fun openSort(current: ListSort) {
+        navigateTo(
+            screenFactory = { SortScreen(it, "Sort songs", FIELDS, current) },
+            resultCallback = { chosen -> Settings.change { it.copy(songSort = chosen) } },
+        )
     }
-}
 
-@Composable
-private fun SongList(songs: List<Song>, onPlay: (List<Song>, Int) -> Unit) {
-    LightLazyScrollView(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 1f.gridUnitsAsDp()),
-        uniformItemHeightGridUnits = SONG_ROW_GRID_UNITS,
-    ) {
-        itemsIndexed(songs, key = { _, song -> song.path }) { index, song ->
-            UniformRow(
-                heightGridUnits = SONG_ROW_GRID_UNITS,
-                showDivider = index != songs.lastIndex,
-                modifier = Modifier.lightClickable { onPlay(songs, index) },
-            ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    OneLine(text = song.title, variant = LightTextVariant.Copy)
-                    OneLine(text = song.artist, variant = LightTextVariant.Detail, lighten = true)
-                }
-            }
-        }
+    private companion object {
+        val FIELDS = SongSortField.entries.map { SortField(it.name, it.label) }
+
+        /** The saved sort with its field spelled out (Title when none was saved). */
+        fun currentSort(saved: ListSort) = saved.copy(field = saved.fieldOr(SongSortField.TITLE).name)
     }
 }

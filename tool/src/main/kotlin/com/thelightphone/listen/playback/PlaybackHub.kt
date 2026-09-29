@@ -108,8 +108,12 @@ object PlaybackHub {
         ensurePlayer()
     }
 
-    /** Plays [songs] from [startIndex], replacing the queue. */
-    fun playSongs(songs: List<Song>, startIndex: Int, source: QueueSource) {
+    /**
+     * Plays [songs] from [startIndex], replacing the queue. [shuffle] turns shuffle on or off
+     * (album Play and Shuffle buttons); null keeps it as it is (tapping a song in a list).
+     * With shuffle on, the tapped song plays first and every other song still plays once.
+     */
+    fun playSongs(songs: List<Song>, startIndex: Int, source: QueueSource, shuffle: Boolean? = null) {
         if (songs.isEmpty() || startIndex !in songs.indices) return
         restoreJob?.cancel()
         val player = ensurePlayer() ?: return
@@ -119,6 +123,10 @@ object PlaybackHub {
         _durationMs.value = 0
         failuresInARow = 0
         wantsToPlay = true
+        if (shuffle != null) {
+            _shuffle.value = shuffle
+            player.setShuffleEnabled(shuffle)
+        }
         player.setMediaQueue(songs.map(::itemFor), startIndex)
         player.play()
         save()

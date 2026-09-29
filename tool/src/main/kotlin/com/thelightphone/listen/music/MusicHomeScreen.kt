@@ -36,8 +36,16 @@ class MusicHomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealed
                     detail = if (library.loaded) songCount(library.songs.size) else null,
                     onClick = ::openSongs,
                 )
-                MenuRow(title = "Artists", detail = LATER, onClick = null)
-                MenuRow(title = "Albums", detail = LATER, onClick = null)
+                MenuRow(
+                    title = "Artists",
+                    detail = if (library.loaded) artistCount(library.artists.size) else null,
+                    onClick = ::openArtists,
+                )
+                MenuRow(
+                    title = "Albums",
+                    detail = if (library.loaded) albumCount(library.albums.size) else null,
+                    onClick = ::openAlbums,
+                )
                 MenuRow(title = "Playlists", detail = LATER, onClick = null)
             }
             UpdatingLine(visible = library.updating)
@@ -47,6 +55,14 @@ class MusicHomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealed
 
     private fun openSongs() {
         navigateTo(screenFactory = { SongsScreen(it) })
+    }
+
+    private fun openArtists() {
+        navigateTo(screenFactory = { ArtistsScreen(it) })
+    }
+
+    private fun openAlbums() {
+        navigateTo(screenFactory = { AlbumsScreen(it) })
     }
 
     private companion object {

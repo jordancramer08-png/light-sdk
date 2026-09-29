@@ -8,7 +8,10 @@ import android.os.Handler
 import android.os.Looper
 import androidx.media3.common.C
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.ShuffleOrder
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 
@@ -47,6 +50,16 @@ internal class LightAudioService : MediaSessionService() {
             addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     refreshIdleStop()
+                }
+
+                override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                    if (shuffleModeEnabled) shuffleFromCurrentItem()
+                }
+
+                override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+                    if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED && shuffleModeEnabled) {
+                        shuffleFromCurrentItem()
+                    }
                 }
             })
         }
@@ -104,6 +117,22 @@ internal class LightAudioService : MediaSessionService() {
         override fun onDisconnected(session: MediaSession, controller: MediaSession.ControllerInfo) {
             refreshIdleStop()
         }
+    }
+
+    /**
+     * ExoPlayer's shuffle order is a random order of the whole queue, and playback
+     * continues from the current item's place in it, so with repeat off every item
+     * that happened to come before it would never play. Start the order at the
+     * current item instead, with the rest shuffled after it.
+     */
+    @androidx.annotation.OptIn(UnstableApi::class)
+    private fun shuffleFromCurrentItem() {
+        val count = player.mediaItemCount
+        val current = player.currentMediaItemIndex
+        if (count < 2 || current !in 0 until count) return
+        // setShuffleOrder changes the timeline too; stop once the order already fits.
+        if (player.currentTimeline.getFirstWindowIndex(true) == current) return
+        player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(shuffledFrom(current, count), System.nanoTime()))
     }
 
     /** A fresh session takes the connecting handle's usage; a live one keeps its own. */
@@ -164,3 +193,7 @@ internal fun shouldStartIdleStop(isPlaying: Boolean, handleOpen: Boolean): Boole
     !isPlaying && !handleOpen
 
 internal const val IDLE_STOP_MS = 60_000L
+
+/** A random order of `0 until count` that starts with [first]. */
+internal fun shuffledFrom(first: Int, count: Int, random: kotlin.random.Random = kotlin.random.Random): IntArray =
+    intArrayOf(first) + (0 until count).filter { it != first }.shuffled(random)

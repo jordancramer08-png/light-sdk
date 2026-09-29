@@ -30,9 +30,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.thelightphone.listen.ListenScreen
-import com.thelightphone.listen.artwork.rememberSongArtwork
+import com.thelightphone.listen.artwork.ArtImage
+import com.thelightphone.listen.artwork.ArtSize
+import com.thelightphone.listen.artwork.artLetter
+import com.thelightphone.listen.artwork.songArtSource
+import com.thelightphone.listen.music.MusicLibrary
 import com.thelightphone.listen.music.Song
-import com.thelightphone.listen.storage.ListenPaths
 import com.thelightphone.listen.ui.CenteredMessage
 import com.thelightphone.listen.ui.LocalListenAccent
 import com.thelightphone.listen.ui.ThemedScreen
@@ -49,10 +52,6 @@ import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import com.thelightphone.sdk.ui.lightClickable
-import java.io.File
-
-/** Art for Now Playing is decoded about this big (px), never at full size. */
-private const val ART_PX = 800
 
 /**
  * Music Now Playing: album art, title, artist and album, a seek bar with times, and
@@ -94,31 +93,27 @@ class MusicNowPlayingScreen(sealedActivity: SealedLightActivity) : ListenScreen(
     }
 }
 
+/** The album's art (decoded about 800 px, from the same cache as the album screen). */
 @Composable
 private fun Artwork(song: Song) {
-    val file = File(ListenPaths.music, song.path)
-    val art by rememberSongArtwork(file, ART_PX)
-    val square = Modifier.aspectRatio(1f, matchHeightConstraintsFirst = true)
-    val image = art
-    if (image != null) {
-        Image(
-            bitmap = image,
-            contentDescription = "Album art",
-            contentScale = ContentScale.Crop,
-            modifier = square,
-        )
-    } else {
-        // Placeholder: the album's first letter in a thin frame.
-        Box(
-            modifier = square.border(1.dp, LightThemeTokens.colors.contentSecondary),
-            contentAlignment = Alignment.Center,
-        ) {
-            LightText(
-                text = song.album.firstOrNull { it.isLetterOrDigit() }?.uppercase() ?: "♪",
-                variant = LightTextVariant.Title,
-                lighten = true,
-            )
-        }
+    val library by MusicLibrary.state.collectAsState()
+    ArtImage(
+        source = songArtSource(song, library.albumOf(song)),
+        size = ArtSize.LARGE,
+        letter = artLetter(song.album),
+        modifier = Modifier.aspectRatio(1f, matchHeightConstraintsFirst = true),
+        placeholder = { letter, modifier -> FramedPlaceholder(letter, modifier) },
+    )
+}
+
+/** No art: the album's first letter in a thin frame. */
+@Composable
+private fun FramedPlaceholder(letter: String, modifier: Modifier) {
+    Box(
+        modifier = modifier.border(1.dp, LightThemeTokens.colors.contentSecondary),
+        contentAlignment = Alignment.Center,
+    ) {
+        LightText(text = letter, variant = LightTextVariant.Title, lighten = true)
     }
 }
 

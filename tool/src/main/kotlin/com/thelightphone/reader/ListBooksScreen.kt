@@ -14,7 +14,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import com.thelightphone.reader.data.BookMeta
 import com.thelightphone.reader.data.DatabaseQueue
 import com.thelightphone.reader.data.ReadingListRepository
 import com.thelightphone.reader.data.readerDatabase
@@ -31,15 +30,15 @@ import com.thelightphone.sdk.ui.gridUnitsAsDp
 
 /**
  * Rearranges one list, reached from the pencil in the Library's top bar while a list is
- * showing. Each book has up and down arrows (none at the top or bottom) and an × that
- * takes it out of the list — the book itself stays on the phone. Every change is saved
+ * showing. Each book (or comic, in the Comics section) has up and down arrows (none at the
+ * top or bottom) and an × that takes it out of the list — it stays on the phone. Every change is saved
  * straight away; back returns to the list.
  */
 class ListBooksScreen(
     sealedActivity: SealedLightActivity,
     private val listId: Long,
     private val listName: String,
-    books: List<BookMeta>,
+    books: List<ListItem>,
 ) : SimpleLightScreen<Unit>(sealedActivity) {
 
     private val repository = ReadingListRepository.getInstance { lightContext.readerDatabase() }
@@ -64,7 +63,7 @@ class ListBooksScreen(
     }
 
     /** Trades places with the book above ([up]) or below, on screen and in the database. */
-    private fun move(book: BookMeta, up: Boolean) {
+    private fun move(book: ListItem, up: Boolean) {
         val slugs = books.map { it.slug }
         val neighbour = neighbourSlug(slugs, book.slug, up) ?: return
         val from = slugs.indexOf(book.slug)
@@ -76,7 +75,7 @@ class ListBooksScreen(
         DatabaseQueue.write { repository.swapBooks(listId, book.slug, neighbour) }
     }
 
-    private fun remove(book: BookMeta) {
+    private fun remove(book: ListItem) {
         books = books - book
         DatabaseQueue.write { repository.removeBook(listId, book.slug) }
     }
@@ -91,7 +90,7 @@ private fun EmptyListMessage() {
         contentAlignment = Alignment.Center,
     ) {
         LightText(
-            text = "No books in this list.",
+            text = "Nothing in this list.",
             variant = LightTextVariant.Copy,
             lighten = true,
             align = TextAlign.Center,
@@ -101,9 +100,9 @@ private fun EmptyListMessage() {
 
 @Composable
 private fun EditableBookList(
-    books: List<BookMeta>,
-    onMove: (BookMeta, up: Boolean) -> Unit,
-    onRemove: (BookMeta) -> Unit,
+    books: List<ListItem>,
+    onMove: (ListItem, up: Boolean) -> Unit,
+    onRemove: (ListItem) -> Unit,
 ) {
     LightScrollView(
         modifier = Modifier
@@ -125,7 +124,7 @@ private fun EditableBookList(
                         overflow = TextOverflow.Ellipsis,
                     )
                     LightText(
-                        text = book.author,
+                        text = book.subtitle,
                         variant = LightTextVariant.Detail,
                         lighten = true,
                         maxLines = 1,

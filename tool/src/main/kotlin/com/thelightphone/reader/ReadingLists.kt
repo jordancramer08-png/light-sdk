@@ -7,7 +7,7 @@ import com.thelightphone.reader.data.ReadingPosition
  * Reading-list logic in plain Kotlin, so it can be unit-tested on the PC. No Android here.
  */
 
-/** What the Library is showing: every book, or just one list's. */
+/** What the Library is showing: every book (or comic), or just one list's. */
 sealed interface LibraryView {
     data object AllBooks : LibraryView
     data class OneList(val listId: Long) : LibraryView
@@ -39,6 +39,9 @@ fun neighbourSlug(shownSlugs: List<String>, slug: String, up: Boolean): String? 
     if (index < 0) return null
     return shownSlugs.getOrNull(if (up) index - 1 else index + 1)
 }
+
+/** One book or comic in a list, as the rearrange screen shows it: [title], then [subtitle] (lighter). */
+data class ListItem(val slug: String, val title: String, val subtitle: String)
 
 /** A typed list name with spaces tidied; null when nothing usable was typed. */
 fun cleanListName(typed: String?): String? =

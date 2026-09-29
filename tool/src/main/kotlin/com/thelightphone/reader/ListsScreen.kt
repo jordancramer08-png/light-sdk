@@ -63,13 +63,14 @@ class ListsScreenViewModel(
 }
 
 /**
- * "All books" plus Jordan's lists, reached from the Library's lists button. Tapping one
+ * "All books" ([allLabel]; "All comics" in the Comics section) plus Jordan's lists, reached from the Library's lists button. Tapping one
  * hands it back to the Library, which then shows only that list's books. + makes a new
  * list; each list has a pencil (rename) and a bin (delete, after asking).
  */
 class ListsScreen(
     sealedActivity: SealedLightActivity,
     private val current: LibraryView,
+    private val allLabel: String = "All books",
 ) : LightScreen<LibraryView, ListsScreenViewModel>(sealedActivity) {
 
     override val viewModelClass: Class<ListsScreenViewModel>
@@ -96,7 +97,7 @@ class ListsScreen(
                     .padding(horizontal = 1f.gridUnitsAsDp()),
             ) {
                 ListRow(
-                    name = "All books",
+                    name = allLabel,
                     isCurrent = current == LibraryView.AllBooks,
                     onSelect = { goBack(LibraryView.AllBooks) },
                 )

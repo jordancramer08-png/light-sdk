@@ -26,7 +26,7 @@ import com.thelightphone.sdk.ui.lightClickable
  * Each row is this tall (grid units), divider included: three lines of one line each
  * (about 5.3 units together), so every row is the same height — the lazy list needs that.
  */
-private const val ENTRY_ROW_GRID_UNITS = 7f
+const val ENTRY_ROW_GRID_UNITS = 7f
 
 /** The cover at the left of a row: 2:3, a little taller than the row's three lines. */
 private const val COVER_WIDTH_GRID_UNITS = 3.6f
@@ -34,7 +34,7 @@ private const val COVER_HEIGHT_GRID_UNITS = 5.4f
 private const val COVER_GAP_GRID_UNITS = 0.75f
 
 /** How strongly the Continue reading row is tinted with the accent. The label says what it is. */
-private const val CONTINUE_TINT_ALPHA = 0.12f
+const val CONTINUE_TINT_ALPHA = 0.12f
 
 /**
  * The Library's list, also used by the Series screen. Only the rows on screen are drawn,
@@ -106,12 +106,22 @@ private fun WithCover(
         Column(modifier = modifier.fillMaxWidth()) { text() }
         return
     }
+    CoverAndText(
+        cover = { size -> BookCover(book = book, file = coverFile(book), modifier = size) },
+        modifier = modifier,
+        text = text,
+    )
+}
+
+/** A row's cover (drawn by [cover] into the box it's given) at the left, its text beside it. */
+@Composable
+fun CoverAndText(
+    cover: @Composable (Modifier) -> Unit,
+    modifier: Modifier = Modifier,
+    text: @Composable () -> Unit,
+) {
     Row(modifier = modifier.fillMaxWidth().fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
-        BookCover(
-            book = book,
-            file = coverFile(book),
-            modifier = Modifier.size(COVER_WIDTH_GRID_UNITS.gridUnitsAsDp(), COVER_HEIGHT_GRID_UNITS.gridUnitsAsDp()),
-        )
+        cover(Modifier.size(COVER_WIDTH_GRID_UNITS.gridUnitsAsDp(), COVER_HEIGHT_GRID_UNITS.gridUnitsAsDp()))
         Spacer(modifier = Modifier.width(COVER_GAP_GRID_UNITS.gridUnitsAsDp()))
         Column(modifier = Modifier.weight(1f)) { text() }
     }
@@ -120,6 +130,12 @@ private fun WithCover(
 /** "Continue reading" (in the accent), the book's title, then its progress. */
 @Composable
 private fun ContinueRowView(row: LibraryRow) {
+    ContinueRowText(title = row.meta.title, progress = row.statusText)
+}
+
+/** The Continue reading row's three lines, for books and comics alike. */
+@Composable
+fun ContinueRowText(title: String, progress: String) {
     Column(modifier = Modifier.fillMaxWidth()) {
         LightText(
             text = "Continue reading",
@@ -127,8 +143,8 @@ private fun ContinueRowView(row: LibraryRow) {
             color = LocalReaderAccent.current,
             maxLines = 1,
         )
-        OneLine(text = row.meta.title, variant = LightTextVariant.Copy)
-        OneLine(text = row.statusText, variant = LightTextVariant.Detail, lighten = true)
+        OneLine(text = title, variant = LightTextVariant.Copy)
+        OneLine(text = progress, variant = LightTextVariant.Detail, lighten = true)
     }
 }
 
@@ -160,7 +176,7 @@ private fun SeriesRowView(series: LibraryEntry.Series, modifier: Modifier = Modi
 }
 
 @Composable
-private fun OneLine(text: String, variant: LightTextVariant, lighten: Boolean = false) {
+fun OneLine(text: String, variant: LightTextVariant, lighten: Boolean = false) {
     LightText(
         text = text,
         variant = variant,

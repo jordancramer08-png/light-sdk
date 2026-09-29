@@ -26,11 +26,15 @@ enum class CoverSize(val fileName: String, val widthPx: Int, val heightPx: Int) 
  */
 object CoverImages {
 
-    /** Writes both PNGs into [folder]. False if the bytes aren't a picture Android can read. */
-    fun save(bytes: ByteArray, folder: File): Boolean {
-        val decoded = decodeAtLeast(bytes, CoverSize.LARGE) ?: return false
+    /**
+     * Writes the PNGs of [sizes] (both, for a book) into [folder]. False if the bytes aren't
+     * a picture Android can read.
+     */
+    fun save(bytes: ByteArray, folder: File, sizes: List<CoverSize> = CoverSize.entries): Boolean {
+        val largest = sizes.maxByOrNull { it.widthPx } ?: return false
+        val decoded = decodeAtLeast(bytes, largest) ?: return false
         try {
-            for (size in CoverSize.entries) {
+            for (size in sizes) {
                 val scaled = scaledFor(decoded, size)
                 try {
                     File(folder, size.fileName).outputStream().use { scaled.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -43,6 +47,9 @@ object CoverImages {
         }
         return true
     }
+
+    /** Only the small cover: a comic's first page, for its row in the comics list. */
+    fun saveSmall(bytes: ByteArray, folder: File): Boolean = save(bytes, folder, listOf(CoverSize.SMALL))
 
     /**
      * Decodes the picture at a fraction of its size (inSampleSize, a power of 2) that is still

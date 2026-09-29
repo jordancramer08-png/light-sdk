@@ -66,7 +66,7 @@ class ContentsScreen(
 
     /** Nothing comes back: the lists are saved as they're switched on and off. */
     private fun openAddToList() {
-        navigateTo(screenFactory = { AddToListScreen(it, bookMeta) })
+        navigateTo(screenFactory = { AddToListScreen(it, bookMeta.slug) })
     }
 
     private fun openDetails() {

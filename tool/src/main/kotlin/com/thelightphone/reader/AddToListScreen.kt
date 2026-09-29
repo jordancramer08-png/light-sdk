@@ -13,7 +13,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.viewModelScope
-import com.thelightphone.reader.data.BookMeta
 import com.thelightphone.reader.data.ReadingList
 import com.thelightphone.reader.data.DatabaseQueue
 import com.thelightphone.reader.data.ReadingListRepository
@@ -70,13 +69,13 @@ class AddToListViewModel(
 }
 
 /**
- * Reached from a book's Contents screen. Each list has an on/off switch; tapping a row
- * puts this book in that list (at the end) or takes it out. A book can be in any number
- * of lists.
+ * Reached from a book's Contents screen or a comic's screen. Each list has an on/off switch;
+ * tapping a row puts this book or comic ([bookSlug]) in that list (at the end) or takes it
+ * out. It can be in any number of lists.
  */
 class AddToListScreen(
     sealedActivity: SealedLightActivity,
-    private val bookMeta: BookMeta,
+    private val bookSlug: String,
 ) : LightScreen<Unit, AddToListViewModel>(sealedActivity) {
 
     override val viewModelClass: Class<AddToListViewModel>
@@ -84,7 +83,7 @@ class AddToListScreen(
 
     override fun createViewModel() = AddToListViewModel(
         ReadingListRepository.getInstance { lightContext.readerDatabase() },
-        bookMeta.slug,
+        bookSlug,
     )
 
     @Composable

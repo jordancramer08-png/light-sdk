@@ -1,7 +1,10 @@
 package com.thelightphone.reader
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -10,10 +13,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.lifecycle.viewModelScope
+import com.thelightphone.reader.comics.cleanComicTitle
+import com.thelightphone.reader.comics.parentPath
 import com.thelightphone.reader.data.BookMeta
+import com.thelightphone.reader.data.ComicPositionRepository
+import com.thelightphone.reader.data.ComicStore
 import com.thelightphone.reader.data.CoverSize
 import com.thelightphone.reader.data.LibraryFilterPreference
 import com.thelightphone.reader.data.LibraryGroupSeriesPreference
+import com.thelightphone.reader.data.LibrarySectionPreference
 import com.thelightphone.reader.data.LibraryShowCoversPreference
 import com.thelightphone.reader.data.LibrarySortPreference
 import com.thelightphone.reader.data.LibraryStore
@@ -37,6 +45,7 @@ import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
+import com.thelightphone.sdk.ui.lightClickable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -75,6 +84,9 @@ class LibraryScreenViewModel(
     private val groupSeriesPreference: LibraryGroupSeriesPreference,
     private val showCoversPreference: LibraryShowCoversPreference,
     themePreference: ReaderThemePreference,
+    private val sectionPreference: LibrarySectionPreference,
+    private val comicStore: ComicStore,
+    comicPositionRepository: ComicPositionRepository,
 ) : LightViewModel<Unit>() {
 
     private val _state = MutableStateFlow<LibraryScreenState>(LibraryScreenState.Loading)
@@ -92,19 +104,83 @@ class LibraryScreenViewModel(
     private var statuses = emptyMap<String, ReadingStatus>()
     private var booksLoaded = false
 
-    /** All books, or one reading list. Starts on all books each time the app opens. */
+    /**
+     * All books (or comics), or one reading list. Starts on all of them each time the app opens,
+     * and again when the section changes.
+     */
     var view: LibraryView = LibraryView.AllBooks
         private set
+
+    /** Books or Comics: the last one shown, remembered between launches. Null until read. */
+    private val _section = MutableStateFlow<LibrarySection?>(null)
+    val section: StateFlow<LibrarySection?> = _section.asStateFlow()
+
+    /** The Comics section's rows: the top of the comics folder, or one list's comics. */
+    val comics = ComicFolderLoader(comicStore, comicPositionRepository, readingStatusRepository, viewModelScope)
+
+    /** The reading list shown in the Comics section, or null for all comics. */
+    private val _comicsList = MutableStateFlow<ReadingList?>(null)
+    val comicsList: StateFlow<ReadingList?> = _comicsList.asStateFlow()
 
     init {
         // The Library opens first, so the saved theme is read here, once per launch.
         viewModelScope.launch { ReaderThemeController.loadOnce(themePreference) }
+        // Cached covers of comics taken off the phone since last time are cleared away.
+        viewModelScope.launch(Dispatchers.IO) { comicStore.removeOrphans() }
     }
 
     /** Runs every time the library comes to the front, so new books and new progress show up. */
     override fun onScreenShow(screen: SimpleLightScreen<Unit>) {
         super.onScreenShow(screen)
         refresh()
+        viewModelScope.launch {
+            if (_section.value == null) _section.value = sectionPreference.load()
+            if (_section.value == LibrarySection.COMICS) showComics()
+        }
+    }
+
+    /** Comics still being read wait until the Library is back in front. */
+    override fun onScreenHide(screen: SimpleLightScreen<Unit>) {
+        super.onScreenHide(screen)
+        comics.stop()
+    }
+
+    /** Switches between Books and Comics (the bar at the bottom), and remembers it. */
+    fun changeSection(newSection: LibrarySection) {
+        if (newSection == _section.value) return
+        _section.value = newSection
+        view = LibraryView.AllBooks
+        viewModelScope.launch { sectionPreference.save(newSection) }
+        if (newSection == LibrarySection.COMICS) {
+            showComics()
+        } else {
+            comics.stop()
+            showAgain()
+        }
+    }
+
+    /** All comics (the top of the comics folder), or the comics in the chosen list. */
+    private fun showComics() {
+        val shown = view
+        if (shown !is LibraryView.OneList) {
+            _comicsList.value = null
+            comics.loadFolder("")
+            return
+        }
+        viewModelScope.launch {
+            val (list, slugs) = DatabaseQueue.read {
+                readingListRepository.list(shown.listId) to readingListRepository.bookSlugs(shown.listId)
+            }
+            if (view != shown) return@launch // a different choice was made while this one loaded
+            if (list == null) {
+                // The list was deleted: fall back to all comics.
+                view = LibraryView.AllBooks
+                showComics()
+                return@launch
+            }
+            _comicsList.value = list
+            comics.loadList(slugs)
+        }
     }
 
     private fun refresh() {
@@ -146,10 +222,10 @@ class LibraryScreenViewModel(
         }
     }
 
-    /** Shows all books or one list (picked on the Lists screen). */
+    /** Shows all books (or comics) or one list (picked on the Lists screen). */
     fun changeView(newView: LibraryView) {
         view = newView
-        showAgain()
+        if (_section.value == LibrarySection.COMICS) showComics() else showAgain()
     }
 
     /** Redraws with the books already loaded. Before they are, the running refresh will draw. */
@@ -193,6 +269,8 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
 
     private val readingPositionRepository = ReadingPositionRepository.getInstance { lightContext.readerDatabase() }
 
+    private val comicStore = ComicStore(lightContext.filesDir)
+
     override val viewModelClass: Class<LibraryScreenViewModel>
         get() = LibraryScreenViewModel::class.java
 
@@ -206,26 +284,42 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
         LibraryGroupSeriesPreference(lightContext.dataStore),
         LibraryShowCoversPreference(lightContext.dataStore),
         ReaderThemePreference(lightContext.dataStore),
+        LibrarySectionPreference(lightContext.dataStore),
+        comicStore,
+        ComicPositionRepository.getInstance { lightContext.readerDatabase() },
     )
 
     @Composable
     override fun Content() {
-        val state by viewModel.state.collectAsState()
+        val section by viewModel.section.collectAsState()
 
         ThemedScreen {
-            val shownList = (state as? LibraryScreenState.Loaded)?.list
-            LightTopBar(
-                leftButton = LightBarButton.LightIcon(icon = LightIcons.LARGE_LIST, onClick = ::openLists),
-                center = LightTopBarCenter.Text(shownList?.name ?: "Library"),
-                rightButton = rightButton(state),
-                modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
-            )
+            when (section) {
+                null -> Unit // the remembered section is being read (a blink)
+                LibrarySection.BOOKS -> BooksSection(modifier = Modifier.weight(1f))
+                LibrarySection.COMICS -> ComicsSection(modifier = Modifier.weight(1f))
+            }
+            section?.let { SectionBar(current = it, onSelect = viewModel::changeSection) }
+        }
+    }
 
-            when (val current = state) {
-                is LibraryScreenState.Loading -> Unit
-                is LibraryScreenState.Preparing -> CenteredMessage(preparingText(current.remaining))
-                is LibraryScreenState.Loaded ->
-                    if (current.entries.isNotEmpty()) {
+    @Composable
+    private fun BooksSection(modifier: Modifier) {
+        val state by viewModel.state.collectAsState()
+        val shownList = (state as? LibraryScreenState.Loaded)?.list
+        LightTopBar(
+            leftButton = LightBarButton.LightIcon(icon = LightIcons.LARGE_LIST, onClick = ::openLists),
+            center = LightTopBarCenter.Text(shownList?.name ?: "Books"),
+            rightButton = rightButton(state),
+            modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
+        )
+
+        when (val current = state) {
+            is LibraryScreenState.Loading -> Box(modifier = modifier)
+            is LibraryScreenState.Preparing -> CenteredMessage(preparingText(current.remaining), modifier)
+            is LibraryScreenState.Loaded ->
+                if (current.entries.isNotEmpty()) {
+                    Box(modifier = modifier) {
                         LibraryEntryList(
                             entries = current.entries,
                             onSelectBook = ::openBook,
@@ -233,12 +327,39 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
                             continueReading = current.continueReading,
                             coverFile = if (current.showCovers) ::smallCoverFile else null,
                         )
-                    } else if (current.list != null) {
-                        CenteredMessage("No books in this list yet.\n\nAdd one from a book's Contents.")
-                    } else {
-                        CenteredMessage(emptyFilterText(current.filter))
                     }
-            }
+                } else if (current.list != null) {
+                    CenteredMessage("No books in this list yet.\n\nAdd one from a book's Contents.", modifier)
+                } else {
+                    CenteredMessage(emptyFilterText(current.filter), modifier)
+                }
+        }
+    }
+
+    /** The top of the comics folder (with Continue reading), or one list's comics. */
+    @Composable
+    private fun ComicsSection(modifier: Modifier) {
+        val state by viewModel.comics.state.collectAsState()
+        val list by viewModel.comicsList.collectAsState()
+        val shownList = list
+        LightTopBar(
+            leftButton = LightBarButton.LightIcon(icon = LightIcons.LARGE_LIST, onClick = ::openLists),
+            center = LightTopBarCenter.Text(shownList?.name ?: "Comics"),
+            rightButton = shownList?.let { LightBarButton.LightIcon(icon = LightIcons.PENCIL, onClick = { openListComics(it) }) },
+            modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
+        )
+        val loaded = state
+        when {
+            loaded == null -> Box(modifier = modifier)
+            loaded.entries.isNotEmpty() || loaded.continueReading != null ->
+                ComicEntryList(
+                    state = loaded,
+                    coverFile = comicStore::coverFile,
+                    onOpen = { openComicEntry(it, comicStore) },
+                    modifier = modifier,
+                )
+            shownList != null -> CenteredMessage("No comics in this list yet.\n\nAdd one from a comic's screen.", modifier)
+            else -> CenteredMessage("No comics on this device yet.", modifier)
         }
     }
 
@@ -257,16 +378,25 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
     }
 
     private fun openLists() {
+        val allLabel = if (viewModel.section.value == LibrarySection.COMICS) "All comics" else "All books"
         navigateTo(
-            screenFactory = { ListsScreen(it, viewModel.view) },
+            screenFactory = { ListsScreen(it, viewModel.view, allLabel) },
             resultCallback = { chosen -> viewModel.changeView(chosen) },
         )
     }
 
     /** The Library refreshes when it comes back, so changes made there show up. */
     private fun openListBooks(list: ReadingList, entries: List<LibraryEntry>) {
-        val books = entries.filterIsInstance<LibraryEntry.Book>().map { it.row.meta }
+        val books = entries.filterIsInstance<LibraryEntry.Book>().map { ListItem(it.row.meta.slug, it.row.meta.title, it.row.meta.author) }
         navigateTo(screenFactory = { ListBooksScreen(it, list.id, list.name, books) })
+    }
+
+    /** The list's comics, to rearrange; each shows its folder under its title. */
+    private fun openListComics(list: ReadingList) {
+        val comics = viewModel.comics.state.value?.entries.orEmpty().filterIsInstance<ComicEntry.Comic>().map {
+            ListItem(it.slug, it.title, cleanComicTitle(parentPath(it.path).substringAfterLast('/')))
+        }
+        navigateTo(screenFactory = { ListBooksScreen(it, list.id, list.name, comics) })
     }
 
     private fun openSortAndFilter() {
@@ -292,10 +422,40 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
 private fun preparingText(remaining: Int): String =
     if (remaining == 1) "Preparing 1 book…" else "Preparing $remaining books…"
 
+/**
+ * BOOKS and COMICS along the bottom of the Library. The one showing is underlined, so it
+ * reads without color; tapping the other switches to it.
+ */
 @Composable
-private fun CenteredMessage(message: String) {
-    Box(
+private fun SectionBar(current: LibrarySection, onSelect: (LibrarySection) -> Unit) {
+    Row(
         modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 1f.gridUnitsAsDp())
+            .height(SECTION_BAR_GRID_UNITS.gridUnitsAsDp()),
+    ) {
+        for (section in LibrarySection.entries) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxSize()
+                    .lightClickable { onSelect(section) },
+                contentAlignment = Alignment.Center,
+            ) {
+                LightText(text = section.name, variant = LightTextVariant.Button, underline = section == current)
+            }
+        }
+    }
+}
+
+/** The bar's height, the same as the SDK's own bottom bar. */
+private const val SECTION_BAR_GRID_UNITS = 4f
+
+/** A lighter, centered message filling the space it's given (an empty list, "Preparing…"). */
+@Composable
+fun CenteredMessage(message: String, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 1f.gridUnitsAsDp()),
         contentAlignment = Alignment.Center,

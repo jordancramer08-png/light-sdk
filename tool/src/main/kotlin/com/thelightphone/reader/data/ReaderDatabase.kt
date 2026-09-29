@@ -22,20 +22,30 @@ import com.thelightphone.sdk.buildDatabase
  * - Version 3: adds reading status. The 2 -> 3 step creates the new table, then
  *   [MigrationToVersion3] fills it in (see there). Saved places and reading lists are
  *   left exactly as they were.
+ * - Version 4: adds saved places in comics (`comic_position`). The 3 -> 4 step only creates
+ *   the new table; every other table is left exactly as it was.
  */
 @Database(
-    entities = [ReadingPosition::class, ReadingList::class, ReadingListBook::class, BookStatus::class],
-    version = 3,
+    entities = [
+        ReadingPosition::class,
+        ReadingList::class,
+        ReadingListBook::class,
+        BookStatus::class,
+        ComicPosition::class,
+    ],
+    version = 4,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3, spec = MigrationToVersion3::class),
+        AutoMigration(from = 3, to = 4),
     ],
 )
 abstract class ReaderDatabase : RoomDatabase() {
     abstract fun readingPositionDao(): ReadingPositionDao
     abstract fun readingListDao(): ReadingListDao
     abstract fun bookStatusDao(): BookStatusDao
+    abstract fun comicPositionDao(): ComicPositionDao
 
     companion object {
         /** The September app's file name — keep it, or old saved places are lost. */

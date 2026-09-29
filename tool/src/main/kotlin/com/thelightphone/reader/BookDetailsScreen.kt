@@ -170,7 +170,7 @@ private fun DetailsList(
  * others an empty one, so it reads without color. Tapping one sets it.
  */
 @Composable
-private fun StatusChoices(current: ReadingStatus, onSelect: (ReadingStatus) -> Unit) {
+fun StatusChoices(current: ReadingStatus, onSelect: (ReadingStatus) -> Unit) {
     Column(modifier = Modifier.padding(top = 0.75f.gridUnitsAsDp())) {
         LightText(text = "Status", variant = LightTextVariant.Copy, lighten = true)
         ReadingStatus.entries.forEach { status ->
@@ -190,7 +190,7 @@ private fun StatusChoices(current: ReadingStatus, onSelect: (ReadingStatus) -> U
 
 /** "Words          95,312": the label lighter on the left, the value on the right. Long values wrap. */
 @Composable
-private fun DetailRowView(row: DetailRow) {
+fun DetailRowView(row: DetailRow) {
     Row(
         modifier = Modifier
             .fillMaxWidth()

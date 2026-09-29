@@ -79,12 +79,16 @@ debug builds are debuggable.) The app reads that folder with
 The September app left converted-text folders in `shared/books/<slug>/`. **Ignore
 subdirectories there** — only `*.epub` files are books.
 
-**Removing books.** `scripts\Remove Books from Phone.cmd` (→ `remove-books.ps1`) lists the
-`*.epub` files in `shared/books/` in a searchable, multi-select picker, shows the chosen
-ones, asks "Remove these N books? (Y/N)", deletes them with `run-as … rm`, then lists the
-books left. It deletes only the `.epub` files: the app drops the book's `library/<slug>/`
-cache on its next scan (§6), and saved places, reading lists and reading status (keyed by
-slug) are kept, so a book sent again opens where Jordan stopped and is back in its lists.
+**Removing books (and comics).** `scripts\Remove Books from Phone.cmd` (→ `remove-books.ps1`)
+lists the `*.epub` files in `shared/books/` and every `*.cbz` and `*.txt` under
+`shared/comics/` (§12) in a searchable, multi-select picker with columns Type (Book, Comic,
+Note), Folder, Name; shows the chosen ones, asks "Remove these 3 books, 12 comics and 1
+note? (Y/N)", deletes them with `run-as … rm`, removes comics folders left empty
+(`rmdir`, deepest first), then lists the books left and counts the comics. It deletes only
+those files: the app drops the book's `library/<slug>/` cache on its next scan (§6) and a
+comic's `comic-library/<id>/` on the next launch (§12), and saved places, reading lists and
+reading status (keyed by slug) are kept, so anything sent again opens where Jordan stopped
+and is back in its lists.
 
 ## 6. Architecture
 
@@ -99,13 +103,24 @@ reader/
     Series.kt           series + number: OPF metadata (calibre, then EPUB 3), else file name
     Cover.kt            findCover: the cover image's bytes (no decoding here)
     WordCount.kt        countWords (runs of non-space holding a letter or digit)
+  comics/      pure Kotlin, NO Android imports — unit-testable on the PC (§12)
+    ComicNames.kt       cleanComicTitle, NaturalOrder / naturalCompare, comicSlug / comicPathOf
+    ComicFolderListing.kt  ComicFolderItem, folderItems (folders first, then comics + notes),
+                        folderSummaryText, parentPath
+    ComicPages.kt       comicPages (pictures in natural order, no __MACOSX / hidden), readComicPages,
+                        readComicEntry, decodeNoteText
   data/
     LibraryStore.kt     scans shared/books/*.epub, caches parsed books (and their covers)
+    ComicStore.kt       lists shared/comics/ folders, caches each comic's page list + small cover
+    ComicMeta.kt        cached comic meta.json model (kotlinx-serialization)
     CoverImages.kt      CoverSize, CoverImages.save: cover bytes → cover-small.png + cover-large.png
+                        (or only the sizes asked for: saveSmall for comics)
                         (BitmapFactory with inSampleSize; phone only), sampleSize (unit-tested)
     BookMeta.kt         cached meta.json model (kotlinx-serialization)
-    ReaderDatabase.kt   the one Room database (version 3) + readerDatabase() shared instance,
+    ReaderDatabase.kt   the one Room database (version 4) + readerDatabase() shared instance,
                         and MigrationToVersion3 (the 2 -> 3 backfill)
+    ComicPosition*.kt   Room entity / dao / repository for saved places in comics
+    LibrarySectionPreference.kt  remembered Library section, Books or Comics (DataStore)
     ReadingPosition*.kt Room entity / dao / repository for saved places
     ReadingList*.kt     Room entities / dao / repository for reading lists
     BookStatus*.kt, ReadingStatusRepository.kt  Room entity / dao / repository for reading status
@@ -140,8 +155,15 @@ reader/
   LibraryEntryList.kt   the book / series rows list (covers, Continue reading row), shared by
                         LibraryScreen and SeriesScreen
   BookCover.kt          CoverCache (covers read off the main thread, kept in memory) and BookCover
-                        (a row's cover, or the placeholder block with the title's first letter)
+                        (a row's cover, or the placeholder block with the title's first letter);
+                        CachedCover (any cached cover by key), IconPlaceholder (folder / note blocks)
   UniformRow.kt         a fixed-height row (divider included) for LightLazyScrollView lists
+  ComicRows.kt          LibrarySection, ComicEntry (folder / comic / note row), comicEntries,
+                        comicPagesText, comicProgressText, lastOpenedComicPath, comicDetailRows
+                        (pure Kotlin, unit-tested)
+  ComicFolderLoader.kt  loads a comics folder (or a list's comics) and reads new comics one by one
+  ComicEntryList.kt     the comics rows list (covers, Continue reading row)
+  ComicFolderScreen.kt, ComicScreen.kt (placeholder viewer), ComicNoteScreen.kt, ComicDetailsScreen.kt
 tool/schemas/           Room's saved schema for each database version (checked in)
 ```
 
@@ -244,7 +266,9 @@ git ls-tree -r --name-only f59672f -- tool      # the full list
   createdAt)` and `reading_list_book(listId, bookSlug, sortOrder, addedAt; PK listId+bookSlug)`.
   3 = adds `reading_status(bookSlug PK, status, updatedAt)` (`status` = the `ReadingStatus`
   enum name as text; no row = Want to Read), and fills it: every book with a saved place
-  starts as `READING`. Books are keyed by slug, like saved places. **Never use a destructive
+  starts as `READING`. Books are keyed by slug, like saved places. 4 = adds
+  `comic_position(slug PK, page, panel, updatedAt)` (§12); the 3 -> 4 step only creates it.
+  Comics use `reading_status` and `reading_list_book` too, keyed "comic:<path>". **Never use a destructive
   migration**: every version bump needs a migration that keeps saved places and reading
   lists, plus a test. The SDK's `buildDatabase` can't take hand-written `Migration`s (it is
   a bare `Room.databaseBuilder(...).build()`, and `Context` is blocked), so migrations are
@@ -351,8 +375,12 @@ than a blink the screen says "Preparing…" instead of freezing or showing a sta
 
 ## 9. Screens
 
-**LibraryScreen** (`@InitialScreen`) — top bar: the lists icon (`LightIcons.LARGE_LIST`) on
-the left (→ ListsScreen), "Library" or the shown list's name, and on the right the sort icon
+**LibraryScreen** (`@InitialScreen`) — two sections, BOOKS and COMICS, switched by a bar at
+the bottom (two text buttons; the one showing is underlined; the last one is remembered in
+`lightContext.dataStore`, key `library_section`, missing/unknown = Books). Switching goes back
+to all books / all comics. The Comics section is described in §12; the rest of this entry is
+the Books section. Top bar: the lists icon (`LightIcons.LARGE_LIST`) on
+the left (→ ListsScreen), "Books" or the shown list's name, and on the right the sort icon
 (→ Sort & Filter, §8) for all books, or a pencil (→ ListBooksScreen) when a list is shown. Tap a
 book → ReaderScreen. All books opens with the Continue reading row (§8) when there is one. A list shows only its books, in the list's own order (sorting doesn't
 apply); a book no longer on the phone is skipped but stays in the list. A list always shows
@@ -510,4 +538,81 @@ and Jordan has confirmed it on the phone (phases 3–5).
 - If an SDK component doesn't exist, say so and propose building it from primitives.
 - If a build rule blocks an approach, name what it blocked and give two alternatives.
 - Don't add features that aren't in this spec. Suggest, don't build.
-- Never commit `.epub` files, converted text, or `local.properties`.
+- Never commit `.epub`, `.cbz` or `.cbr` files, converted text, or `local.properties`.
+
+## 12. Comics (CBZ)
+
+Built in parts: 1 = PC send script, phone storage, the Comics section that lists comics
+(done); the viewer comes next. Until then, opening a comic shows a placeholder.
+
+**PC side.** `scripts\Send Comics to Phone.cmd` (→ `send-comics.ps1`). Jordan's comics are in
+`D:\Comics` (~7,700 files, reading-order folders up to 5 deep, e.g. `DC Comics\01. Book I -
+Earth-One (1938-1985)\00001. Action Comics #1 (1938).cbz`). Double-click: an Out-GridView
+picker of every `.cbz` / `.cbr` (columns Folder, Name, Size MB; filter on a folder name, then
+Ctrl+A picks it all). Drop files or folders (subfolders included) to send those; anything
+under `D:\Comics` keeps its path from there, a folder from elsewhere keeps its own name, a
+loose file from elsewhere goes at the top. Every `.txt` note in the same folders as the
+picked comics goes too. Then:
+- "Shrink pages to phone size? (Y/N)" (Enter = yes). Yes: each page whose longer side is over
+  2000 px is resized (System.Drawing, high-quality bicubic) and saved as JPEG quality 85;
+  smaller pages, and pictures System.Drawing can't read (WebP), stay as they are.
+- `.cbr` is repacked to `.cbz` with its pictures unchanged: 7-Zip (`C:\Program
+  Files\7-Zip\7z.exe` or `7z` on PATH), else Windows `tar.exe`; if neither opens it, that
+  comic is skipped and the reason printed. A `.cbz` that needs shrinking is unpacked with .NET
+  (7-Zip / tar if that fails). Repacked CBZs store entries uncompressed.
+- All work is on copies in `%TEMP%\reader-comics-*`, deleted at the end. **Nothing in
+  `D:\Comics` is ever changed.**
+- Before sending: "Picked N comic(s) and M note(s): X MB. After shrinking: Y MB." then
+  "Send these? (Y/N)". At the end, the before / after sizes again.
+- Phone path: `files/shared/comics/<relative folders>/<name>.cbz`, every folder and file name
+  flattened to plain ASCII as the book script does (same `adb push` + `run-as cp` approach).
+
+**Phone storage.** `ComicStore` reads `File(filesDir, "shared/comics")`. A comic's path is
+relative to it with "/" between parts, and its key everywhere (status, lists, saved place) is
+`"comic:" + path` (`comicSlug`), which can never clash with a book slug. Each comic is read
+once — its page list and its first page as a small cover (`CoverImages.saveSmall`, 150 × 225,
+cropped to fill) — into `<filesDir>/comic-library/<id>/` (`meta.json` = `ComicMeta`: path,
+size + modified time + `COMIC_CACHE_VERSION`, pages; `cover-small.png`). `<id>` = the first 16
+hex digits of the path's SHA-1. It's read again when the size or modified time changes or
+`COMIC_CACHE_VERSION` is bumped. A CBZ that isn't a readable zip, or has no pictures, is cached
+as a problem ("Can't open", not tappable). Cache folders whose comic is gone are deleted once
+per launch (`removeOrphans`). Preparing and the orphan sweep share one lock across every
+`ComicStore`. Pages (`comicPages`): entries ending .jpg .jpeg .png .gif .webp .bmp, not in
+`__MACOSX`, not hidden (`._x.jpg`, `.DS_Store`), in natural order ("2.jpg" before "10.jpg",
+folders included). Zips whose names aren't UTF-8 are opened as code page 437.
+
+**Comics section** (the Library's COMICS). A folder browser mirroring `shared/comics/`:
+subfolders first, then comics and note files mixed, all by file name in natural order, so
+numbered names keep reading order (`folderItems`; other files, hidden files and `__MACOSX`
+are left out). Rows are the Library's 7-unit `UniformRow`s in a `LightLazyScrollView`:
+- Folder: a tinted block with an arrow, the cleaned name, "3 folders · 12 comics" (lighter)
+  → ComicFolderScreen (back, the folder's name, the same list, no bottom bar).
+- Comic: its cover, the cleaned title, "30 pages" (lighter), then "Not started" (lighter),
+  "Page 12 of 30" or "Finished" (accent). A comic not read yet shows a blank cover and
+  "Preparing…" at once; comics are read one by one in the order shown and each row fills in
+  (nothing else waits). → ComicScreen.
+- Note: a tinted block with a pencil, the cleaned title, "Note" → ComicNoteScreen (back, the
+  title, the text in Paragraph size in a `LightScrollView`; UTF-8, else Windows-1252).
+- Title cleaning (`cleanComicTitle`): drop `.cbz` / `.cbr` / `.zip` / `.txt` and a leading
+  reading-order number with its separator ("00001. ", "00102a. ", "01 - ", "7) ", "12_");
+  a number with no separator ("2000 AD", "1984") stays; so does a name that is only a number.
+- The top of the section starts with the Continue reading row (accent tint, "Continue
+  reading", title, progress): the comic with the latest `comic_position.updatedAt` still on
+  the phone (`lastOpenedComicPath`). Empty: "No comics on this device yet."; an empty
+  subfolder: "This folder is empty."
+- Top bar: lists icon (ListsScreen, first row "All comics"), "Comics" or the list's name,
+  and a pencil when a list is shown (→ ListBooksScreen, each comic with its folder). A list
+  in the Comics section shows only its comics, in list order; in the Books section only its
+  books. No Sort & Filter for comics.
+- Reloaded every time it comes to the front; reading comics in the background stops while
+  it's hidden.
+
+**ComicScreen (placeholder)** — back, the title, "The comic viewer comes in the next update."
+and the page count; bottom bar ADD TO LIST (→ AddToListScreen, which takes any slug) and
+DETAILS (→ ComicDetailsScreen: title, Status choices as Book Details, then Pages, Progress,
+Folder, File, File size, Added, Last read). Opening it counts as opening the comic: Want to
+Read → Reading, and its `comic_position` is stamped now (page 1 the first time).
+
+**`comic_position`** (database version 4): `slug` (PK, "comic:<path>"), `page` (1-based),
+`panel` (0 = whole page, else the panel, for the viewer), `updatedAt`. Reads and writes go
+through `DatabaseQueue`.

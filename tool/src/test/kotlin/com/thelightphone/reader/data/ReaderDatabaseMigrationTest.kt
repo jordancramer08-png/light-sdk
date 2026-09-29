@@ -17,7 +17,8 @@ import kotlin.test.assertTrue
 
 /**
  * Checks each database upgrade keeps every saved reading position (and, from version 2 on,
- * every reading list): 1 -> 2 adds reading lists, 2 -> 3 adds reading status.
+ * every reading list): 1 -> 2 adds reading lists, 2 -> 3 adds reading status, 3 -> 4 adds
+ * saved places in comics.
  *
  * The build rules allow no SQLite engine in PC tests, so this runs Room's generated
  * Migrations against a stand-in connection that records each SQL statement, then checks
@@ -101,10 +102,14 @@ class ReaderDatabaseMigrationTest {
     }
 
     @Test
-    fun version3IsTheCurrentVersionAndEveryStepHasAMigration() {
+    fun version4IsTheCurrentVersionAndEveryStepHasAMigration() {
         val latest = schemaDir.listFiles().orEmpty().mapNotNull { it.nameWithoutExtension.toIntOrNull() }.max()
-        assertEquals(3, latest)
-        val steps = listOf(ReaderDatabase_AutoMigration_1_2_Impl(), ReaderDatabase_AutoMigration_2_3_Impl())
+        assertEquals(4, latest)
+        val steps = listOf(
+            ReaderDatabase_AutoMigration_1_2_Impl(),
+            ReaderDatabase_AutoMigration_2_3_Impl(),
+            ReaderDatabase_AutoMigration_3_4_Impl(),
+        )
         assertEquals((1 until latest).map { it to it + 1 }, steps.map { it.startVersion to it.endVersion })
     }
 
@@ -149,6 +154,54 @@ class ReaderDatabaseMigrationTest {
         val v3 = entities(3)
         for (table in listOf("reading_position", "reading_list", "reading_list_book")) {
             assertEquals(v2.getValue(table), v3.getValue(table), "table $table changed")
+        }
+    }
+
+    // --- 3 -> 4: saved places in comics ------------------------------------------
+
+    private fun runMigrationTo4(): List<String> = statementsOf(ReaderDatabase_AutoMigration_3_4_Impl())
+
+    @Test
+    fun migratesFromVersion3To4() {
+        val migration = ReaderDatabase_AutoMigration_3_4_Impl()
+        assertEquals(3, migration.startVersion)
+        assertEquals(4, migration.endVersion)
+    }
+
+    @Test
+    fun version4OnlyCreatesTheComicPositionTable() {
+        val newTables = entities(4).filterKeys { it !in entities(3) }
+        assertEquals(setOf("comic_position"), newTables.keys)
+        val createSql = newTables.getValue("comic_position").getValue("createSql").jsonPrimitive.content
+            .replace("\${TABLE_NAME}", "comic_position")
+
+        assertEquals(listOf(createSql), runMigrationTo4())
+        assertEquals(
+            "CREATE TABLE IF NOT EXISTS `comic_position` (`slug` TEXT NOT NULL, `page` INTEGER NOT NULL, " +
+                "`panel` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`slug`))",
+            createSql,
+        )
+    }
+
+    @Test
+    fun version4NeverTouchesExistingTables() {
+        for (sql in runMigrationTo4()) {
+            val upper = sql.uppercase()
+            for (word in listOf("DROP", "DELETE", "ALTER", "UPDATE", "INSERT", "RENAME", "REPLACE")) {
+                assertFalse(Regex("\\b$word\\b").containsMatchIn(upper), "migration contains $word: $sql")
+            }
+            for (table in listOf("reading_position", "reading_list", "reading_status")) {
+                assertFalse(sql.contains(table), "migration touches $table: $sql")
+            }
+        }
+    }
+
+    @Test
+    fun everyVersion3TableIsIdenticalInVersion4() {
+        val v3 = entities(3)
+        val v4 = entities(4)
+        for ((table, entity) in v3) {
+            assertEquals(entity, v4.getValue(table), "table $table changed")
         }
     }
 }

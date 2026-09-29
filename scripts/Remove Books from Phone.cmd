@@ -1,8 +1,8 @@
 @echo off
-rem Removes .epub books from the Reader app on the Light Phone.
-rem   Double-click:   opens a searchable list of the books on the phone;
-rem                   pick the ones to remove, click OK, then answer Y
-rem   Saved places and reading lists are kept, so a book sent again opens where you stopped.
+rem Removes books (.epub), comics (.cbz) and comic note files (.txt) from the Reader app on the Light Phone.
+rem   Double-click:   opens a searchable list of what's on the phone (Type, Folder, Name);
+rem                   pick what to remove, click OK, then answer Y
+rem   Saved places, reading lists and reading status are kept, so anything sent again opens where you stopped.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0remove-books.ps1" %*
 echo.
 pause

@@ -18,6 +18,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import com.thelightphone.reader.data.BookMeta
 import com.thelightphone.reader.data.CoverSize
+import com.thelightphone.sdk.ui.LightIcon
+import com.thelightphone.sdk.ui.LightIconConfiguration
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightThemeTokens
@@ -88,7 +90,15 @@ object CoverCache {
  */
 @Composable
 fun BookCover(book: BookMeta, file: File, modifier: Modifier = Modifier) {
-    val key = CoverCache.key(book, CoverSize.SMALL)
+    CachedCover(key = CoverCache.key(book, CoverSize.SMALL), file = file, letter = coverLetter(book.title), modifier = modifier)
+}
+
+/**
+ * A small cover picture read from [file], kept in [CoverCache] under [key]; [letter] is shown
+ * on the plain block when there is no picture. Used by book and comic rows alike.
+ */
+@Composable
+fun CachedCover(key: String, file: File, letter: String, modifier: Modifier = Modifier) {
     var picture by remember(key) { mutableStateOf(CoverCache.cached(key)) }
     if (picture == null) {
         LaunchedEffect(key) { picture = CoverCache.load(file, key) }
@@ -100,18 +110,30 @@ fun BookCover(book: BookMeta, file: File, modifier: Modifier = Modifier) {
             contentScale = ContentScale.Crop,
             modifier = modifier.clipToBounds(),
         )
-        CoverPicture.Missing -> CoverPlaceholder(letter = coverLetter(book.title), modifier = modifier)
+        CoverPicture.Missing -> CoverPlaceholder(letter = letter, modifier = modifier)
         null -> CoverPlaceholder(letter = "", modifier = modifier)
     }
 }
 
+/** The plain block drawn where a cover would be, with [letter] (lighter) in the middle. */
 @Composable
-private fun CoverPlaceholder(letter: String, modifier: Modifier = Modifier) {
+fun CoverPlaceholder(letter: String, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier.background(LightThemeTokens.colors.content.copy(alpha = PLACEHOLDER_ALPHA)),
         contentAlignment = Alignment.Center,
     ) {
         if (letter.isNotEmpty()) LightText(text = letter, variant = LightTextVariant.Subheading, lighten = true)
+    }
+}
+
+/** The plain block with an icon in it, for rows that aren't books or comics (a folder, a note). */
+@Composable
+fun IconPlaceholder(icon: LightIconConfiguration, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier.background(LightThemeTokens.colors.content.copy(alpha = PLACEHOLDER_ALPHA)),
+        contentAlignment = Alignment.Center,
+    ) {
+        LightIcon(icon = icon, contentDescription = null)
     }
 }
 

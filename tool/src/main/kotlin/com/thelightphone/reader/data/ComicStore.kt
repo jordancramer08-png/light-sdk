@@ -48,6 +48,9 @@ class ComicStore(
 
     fun exists(path: String): Boolean = fileOf(path).isFile
 
+    /** The CBZ itself, for the viewer to read pages from. */
+    fun comicFile(path: String): File = fileOf(path)
+
     /** The comic's cached details if they still match its file; null when it must be [prepared]. */
     fun cached(path: String): ComicMeta? {
         val file = fileOf(path)

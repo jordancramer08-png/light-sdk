@@ -109,10 +109,15 @@ reader/
                         folderSummaryText, parentPath
     ComicPages.kt       comicPages (pictures in natural order, no __MACOSX / hidden), readComicPages,
                         readComicEntry, decodeNoteText
+    ComicView.kt        the viewer's arithmetic: pageTap (tap zones), fitScale, PageZoom, PageGeometry
+                        (zoom at a spot, pan limits, double-tap, visibleRegion, regionSampleSize),
+                        fittedSize, openingPageIndex, pagesToKeep, sliderPage / sliderFraction
   data/
     LibraryStore.kt     scans shared/books/*.epub, caches parsed books (and their covers)
     ComicStore.kt       lists shared/comics/ folders, caches each comic's page list + small cover
     ComicMeta.kt        cached comic meta.json model (kotlinx-serialization)
+    ComicPageImages.kt  a page's bytes from the CBZ → a screen-fitted Bitmap (inSampleSize, then
+                        scaled), and BitmapRegionDecoder pieces for sharp zoom (phone only)
     CoverImages.kt      CoverSize, CoverImages.save: cover bytes → cover-small.png + cover-large.png
                         (or only the sizes asked for: saveSmall for comics)
                         (BitmapFactory with inSampleSize; phone only), sampleSize (unit-tested)
@@ -163,7 +168,8 @@ reader/
                         (pure Kotlin, unit-tested)
   ComicFolderLoader.kt  loads a comics folder (or a list's comics) and reads new comics one by one
   ComicEntryList.kt     the comics rows list (covers, Continue reading row)
-  ComicFolderScreen.kt, ComicScreen.kt (placeholder viewer), ComicNoteScreen.kt, ComicDetailsScreen.kt
+  ComicViewModel.kt     the viewer: which page, pictures kept, zoom, sharp piece, saving the place
+  ComicFolderScreen.kt, ComicScreen.kt (the page viewer), ComicNoteScreen.kt, ComicDetailsScreen.kt
 tool/schemas/           Room's saved schema for each database version (checked in)
 ```
 
@@ -543,7 +549,7 @@ and Jordan has confirmed it on the phone (phases 3–5).
 ## 12. Comics (CBZ)
 
 Built in parts: 1 = PC send script, phone storage, the Comics section that lists comics
-(done); the viewer comes next. Until then, opening a comic shows a placeholder.
+(done); 2 = the full-page viewer (done). Parts 3–5 come next.
 
 **PC side.** `scripts\Send Comics to Phone.cmd` (→ `send-comics.ps1`). Jordan's comics are in
 `D:\Comics` (~7,700 files, reading-order folders up to 5 deep, e.g. `DC Comics\01. Book I -
@@ -607,12 +613,38 @@ are left out). Rows are the Library's 7-unit `UniformRow`s in a `LightLazyScroll
 - Reloaded every time it comes to the front; reading comics in the background stops while
   it's hidden.
 
-**ComicScreen (placeholder)** — back, the title, "The comic viewer comes in the next update."
-and the page count; bottom bar ADD TO LIST (→ AddToListScreen, which takes any slug) and
-DETAILS (→ ComicDetailsScreen: title, Status choices as Book Details, then Pages, Progress,
-Folder, File, File size, Added, Last read). Opening it counts as opening the comic: Want to
-Read → Reading, and its `comic_position` is stamped now (page 1 the first time).
+**ComicScreen** — the full-page viewer. Black background, no bars: the page fitted whole to
+the screen (`fitScale`, centered). Taps (`pageTap`): the top 15% shows the overlay; below it
+the left 30% is the previous page and the rest the next (as in the book reader; nothing past
+either end). A single tap waits a moment to be sure it isn't a double-tap.
+- **Zoom**: pinch zooms around the fingers, 1× (fitted) to 4× (`MAX_ZOOM`); double-tap on a
+  fitted page zooms 2.5× (`DOUBLE_TAP_ZOOM`) at that spot, double-tap again fits it. A zoomed
+  page is dragged to move it, only until its edge meets the screen's (`PageGeometry.clamp`;
+  a side narrower than the screen stays centered). While zoomed, taps don't turn pages (the
+  top 15% still shows the overlay); only double-tap, pinch and drag work. Turning a page
+  always shows the next one fitted.
+- **Overlay** (top 15% tap; any tap on the page hides it): at the top, the theme's colors,
+  back, the title, "Page 12 of 30" and a slider (`LightTouchableProgressBar`, not drawn for a
+  one-page comic) that jumps to pages as it's dragged; at the bottom, ADD TO LIST
+  (→ AddToListScreen) and DETAILS (→ ComicDetailsScreen: title, Status choices as Book
+  Details, then Pages, Progress, Folder, File, File size, Added, Last read).
+- **Memory**: a page's bytes are read from the CBZ (`ComicPageImages`) and decoded with a
+  power-of-2 `inSampleSize` that keeps it at least the fitted size, then scaled to exactly
+  that. Kept: the page shown and the next one in the reading direction (`pagesToKeep`,
+  read ahead), nothing else. While zoomed, once the fingers rest 150 ms, the part on screen
+  is decoded by `BitmapRegionDecoder` at the detail the zoom needs (`visibleRegion`,
+  `regionSampleSize`) and drawn over the enlarged fitted picture; one piece at a time, one
+  page open for pieces at a time. Decoding runs one picture at a time off the main thread; a
+  picture no longer wanted is skipped or thrown away. GIF / BMP pages zoom without the sharp
+  piece. A page slower than 300 ms shows "Preparing…"; one that can't be read shows
+  "Can't show this page." (gray on black, any theme).
+- **Place and status**: it opens on the saved page (`openingPageIndex`, page 1 the first
+  time). Opening counts as opening the comic: Want to Read → Reading, and its
+  `comic_position` is stamped now. Every page turn or slider jump saves the page (through
+  `DatabaseQueue`); leaving the screen or pausing the app saves it and waits
+  (`DatabaseQueue.writeNow`). Reaching the last page by a turn or the slider makes it
+  Finished; reopening it there does not (as books).
 
 **`comic_position`** (database version 4): `slug` (PK, "comic:<path>"), `page` (1-based),
-`panel` (0 = whole page, else the panel, for the viewer), `updatedAt`. Reads and writes go
+`panel` (0 = whole page, else the panel; always 0 for now), `updatedAt`. Reads and writes go
 through `DatabaseQueue`.

@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
 /**
@@ -21,6 +22,14 @@ object DatabaseQueue {
     /** Saves in the background; the caller doesn't wait. */
     fun write(change: () -> Unit) {
         scope.launch { change() }
+    }
+
+    /**
+     * Saves and waits until it's done (after earlier writes). For leaving a screen or the
+     * app, so the change is never lost even if the app is closed right after.
+     */
+    fun writeNow(change: () -> Unit) {
+        runBlocking(dispatcher) { change() }
     }
 
     /** Waits for earlier writes, then reads. */

@@ -6,11 +6,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import com.thelightphone.listen.ListenScreen
 import com.thelightphone.listen.ui.MenuRow
+import com.thelightphone.listen.ui.NowPlayingBar
 import com.thelightphone.listen.ui.ThemedScreen
 import com.thelightphone.listen.ui.UpdatingLine
 import com.thelightphone.sdk.SealedLightActivity
-import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightTopBar
@@ -18,12 +19,7 @@ import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 
 /** Music: Songs, Artists, Albums and Playlists. */
-class MusicHomeScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Unit>(sealedActivity) {
-
-    override fun willShow() {
-        super.willShow()
-        MusicLibrary.refresh(lightContext.filesDir)
-    }
+class MusicHomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedActivity) {
 
     @Composable
     override fun Content() {
@@ -45,6 +41,7 @@ class MusicHomeScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<U
                 MenuRow(title = "Playlists", detail = LATER, onClick = null)
             }
             UpdatingLine(visible = library.updating)
+            NowPlayingBar(onOpen = ::openNowPlaying)
         }
     }
 

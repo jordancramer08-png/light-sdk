@@ -1,12 +1,13 @@
 [tool]
 id = "com.thelightphone.listen"
 label = "Listen"
-versionCode = 1
-versionName = "0.1.0"
+versionCode = 2
+versionName = "0.2.0"
 # MANAGE_EXTERNAL_STORAGE: All files access, to read /sdcard/Listen (granted by
-# Listen-Phone-Sync.cmd option 9). "detached-audio" is added in Session 2.
-permissions = ["android.permission.MANAGE_EXTERNAL_STORAGE"]
-capabilities = []
+# Listen-Phone-Sync.cmd option 9). WAKE_LOCK keeps music playing with the screen off.
+# "detached-audio" adds the SDK's media service, so playback survives leaving Listen.
+permissions = ["android.permission.MANAGE_EXTERNAL_STORAGE", "android.permission.WAKE_LOCK"]
+capabilities = ["detached-audio"]
 # com.lightos = LightOS system host on real LP3 hardware (verified via `pm query-services`)
 # com.thelightphone.sdk.emulator = the desktop emulator's host
 serverPackage = "com.lightos"

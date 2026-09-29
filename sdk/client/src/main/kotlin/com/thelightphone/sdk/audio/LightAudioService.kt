@@ -1,8 +1,12 @@
 package com.thelightphone.sdk.audio
 
+import android.Manifest
 import android.app.Application
+import android.app.PendingIntent
+import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
+import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
@@ -32,7 +36,13 @@ internal class LightAudioService : MediaSessionService() {
 
         assertSharedProcess()
 
-        player = ExoPlayer.Builder(this).build().apply {
+        player = ExoPlayer.Builder(this)
+            // Pause when headphones or a Bluetooth device disconnect.
+            .setHandleAudioBecomingNoisy(true)
+            // Keep the CPU awake while playing with the screen off. Only for tools
+            // that declare WAKE_LOCK, since acquiring it without would crash.
+            .setWakeMode(if (hasWakeLockPermission()) C.WAKE_MODE_LOCAL else C.WAKE_MODE_NONE)
+            .build().apply {
             setAudioAttributes(LightAudioUsage.Music.toMedia3AudioAttributes(), true)
             addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -43,6 +53,7 @@ internal class LightAudioService : MediaSessionService() {
         session = MediaSession.Builder(this, player)
             .setId(packageName)
             .setCallback(SessionCallback())
+            .apply { launchIntent()?.let { setSessionActivity(it) } }
             .build()
         detachedSessionState.setHandleChangedListener {
             idleHandler.post(::refreshIdleStop)
@@ -100,6 +111,15 @@ internal class LightAudioService : MediaSessionService() {
         player.setAudioAttributes(usage.toMedia3AudioAttributes(), true)
         detachedSessionState.adoptUsage(usage)
     }
+
+    private fun hasWakeLockPermission(): Boolean =
+        checkSelfPermission(Manifest.permission.WAKE_LOCK) == PackageManager.PERMISSION_GRANTED
+
+    /** Tapping the media notification opens the tool. */
+    private fun launchIntent(): PendingIntent? =
+        packageManager.getLaunchIntentForPackage(packageName)?.let { intent ->
+            PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+        }
 
     private fun refreshIdleStop() {
         idleHandler.removeCallbacks(idleStop)

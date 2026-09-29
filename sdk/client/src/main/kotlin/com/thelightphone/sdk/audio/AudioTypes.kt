@@ -224,3 +224,13 @@ data class LightAudioItem(
 
 internal const val DEFAULT_SAMPLE_RATE = 48_000
 internal const val DEFAULT_FRAMES_PER_BUFFER = 256
+
+/** Whether a [LightAudioPlayer] queue stops at its end, starts over, or repeats one item. */
+enum class LightRepeatMode {
+    /** Stop after the last item. */
+    Off,
+    /** Start the queue over after the last item. */
+    All,
+    /** Play the current item again and again. */
+    One,
+}

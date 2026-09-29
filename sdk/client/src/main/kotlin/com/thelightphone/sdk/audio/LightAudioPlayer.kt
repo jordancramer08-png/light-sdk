@@ -53,6 +53,8 @@ class LightAudioPlayer internal constructor(
     private val _isPlaying = MutableStateFlow(false)
     private val _currentMediaItemIndex = MutableStateFlow(NO_MEDIA_ITEM)
     private val _error = MutableStateFlow<LightAudioError?>(null)
+    private val _shuffleEnabled = MutableStateFlow(false)
+    private val _repeatMode = MutableStateFlow(LightRepeatMode.Off)
     private val commands = PendingPlayerCommands()
     private var positionJob: Job? = null
     private var player: Player? = null
@@ -69,6 +71,10 @@ class LightAudioPlayer internal constructor(
     val currentMediaItemIndex: StateFlow<Int> = _currentMediaItemIndex.asStateFlow()
     /** Current playback failure, or `null` after successful re-preparation. */
     val error: StateFlow<LightAudioError?> = _error.asStateFlow()
+    /** Whether the queue plays in a shuffled order. */
+    val shuffleEnabled: StateFlow<Boolean> = _shuffleEnabled.asStateFlow()
+    /** Whether the queue stops at its end, starts over, or repeats one item. */
+    val repeatMode: StateFlow<LightRepeatMode> = _repeatMode.asStateFlow()
     /** Connection and command-acceptance lifecycle of this player. */
     val availability: StateFlow<LightAudioPlayerAvailability> = commands.availability
 
@@ -119,12 +125,22 @@ class LightAudioPlayer internal constructor(
             override fun onPlayerErrorChanged(error: PlaybackException?) {
                 _error.value = error?.toLightAudioError(connectedPlayer.currentMediaItemIndex)
             }
+
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                _shuffleEnabled.value = shuffleModeEnabled
+            }
+
+            override fun onRepeatModeChanged(repeatMode: Int) {
+                _repeatMode.value = repeatMode.toLightRepeatMode()
+            }
         })
         val state = connectedPlayer.snapshotState()
         _currentMediaItemIndex.value = state.currentMediaItemIndex
         _positionMs.value = state.positionMs
         _durationMs.value = state.durationMs
         _isPlaying.value = state.isPlaying
+        _shuffleEnabled.value = connectedPlayer.shuffleModeEnabled
+        _repeatMode.value = connectedPlayer.repeatMode.toLightRepeatMode()
         _error.value = connectedPlayer.playerError
             ?.toLightAudioError(connectedPlayer.currentMediaItemIndex)
         if (state.isPlaying) {
@@ -136,9 +152,20 @@ class LightAudioPlayer internal constructor(
     }
 
     private fun connectDetachedPlayer(context: Context, usage: LightAudioUsage) {
-        val token = SessionToken(context, ComponentName(context, LightAudioService::class.java))
-        val future = MediaController.Builder(context, token)
+        // The application context, so a handle kept for the life of the process
+        // does not hold on to (or bind through) an activity that has since closed.
+        val appContext = context.applicationContext
+        val token = SessionToken(appContext, ComponentName(appContext, LightAudioService::class.java))
+        val future = MediaController.Builder(appContext, token)
             .setConnectionHints(detachedConnectionHints(usage))
+            // The service stops itself (e.g. the task was swiped away while
+            // paused). A disconnected controller ignores every command, so
+            // release this handle and let the tool open a fresh one.
+            .setListener(object : MediaController.Listener {
+                override fun onDisconnected(controller: MediaController) {
+                    release()
+                }
+            })
             .buildAsync()
         cancelPendingConnection = { future.cancel(false) }
         future.addListener(
@@ -148,7 +175,7 @@ class LightAudioPlayer internal constructor(
                     .onSuccess(::connectPlayer)
                     .onFailure { release() }
             },
-            context.mainExecutor,
+            appContext.mainExecutor,
         )
     }
 
@@ -175,13 +202,13 @@ class LightAudioPlayer internal constructor(
     }
 
     /**
-     * Replaces and prepares the queue, selecting [startIndex]. An empty list
-     * clears playback and ignores [startIndex].
+     * Replaces and prepares the queue, selecting [startIndex] at
+     * [startPositionMs]. An empty list clears playback and ignores both.
      *
      * @throws IllegalArgumentException when a non-empty queue has an invalid
      *   [startIndex]
      */
-    fun setMediaQueue(items: List<LightAudioItem>, startIndex: Int = 0) {
+    fun setMediaQueue(items: List<LightAudioItem>, startIndex: Int = 0, startPositionMs: Long = 0L) {
         if (items.isEmpty()) {
             commands.dispatch { player ->
                 player.clearMediaItems()
@@ -194,7 +221,8 @@ class LightAudioPlayer internal constructor(
         require(startIndex in items.indices) { "Start index must reference a queue item" }
         val mediaItems = items.mapIndexed { index, item -> item.toMediaItem(index) }
         commands.dispatch { player ->
-            player.setMediaItems(mediaItems, startIndex, C.TIME_UNSET)
+            val startMs = if (startPositionMs > 0L) startPositionMs else C.TIME_UNSET
+            player.setMediaItems(mediaItems, startIndex, startMs)
             _currentMediaItemIndex.value = startIndex
             player.prepare()
             updateDuration(player)
@@ -231,6 +259,35 @@ class LightAudioPlayer internal constructor(
             player.seekTo(ms.coerceIn(0L, player.duration.validDuration()))
             updatePosition(player)
         }
+    }
+
+    /**
+     * Selects queue item [index] at [ms]. Does nothing for an index outside
+     * the queue.
+     */
+    fun seekTo(index: Int, ms: Long) {
+        commands.dispatch { player ->
+            if (index !in 0 until player.mediaItemCount) return@dispatch
+            player.seekTo(index, ms.coerceAtLeast(0L))
+            _currentMediaItemIndex.value = index
+            updateDuration(player)
+            updatePosition(player)
+        }
+    }
+
+    /** Prepares the current queue again, e.g. after a playback [error]. */
+    fun prepare() {
+        commands.dispatch(Player::prepare)
+    }
+
+    /** Turns shuffled playback order on or off. */
+    fun setShuffleEnabled(enabled: Boolean) {
+        commands.dispatch { it.shuffleModeEnabled = enabled }
+    }
+
+    /** Sets what happens at the end of an item and of the queue. */
+    fun setRepeatMode(mode: LightRepeatMode) {
+        commands.dispatch { it.repeatMode = mode.toMedia3RepeatMode() }
     }
 
     /** Seeks backward 15 seconds, clamped to the item bounds. */
@@ -331,6 +388,18 @@ private fun LightMediaMetadata.toMedia3Metadata(queueIndex: Int): MediaMetadata 
         .setDurationMs(durationMs)
         .setTrackNumber(queueIndex + 1)
         .build()
+}
+
+internal fun LightRepeatMode.toMedia3RepeatMode(): Int = when (this) {
+    LightRepeatMode.Off -> Player.REPEAT_MODE_OFF
+    LightRepeatMode.All -> Player.REPEAT_MODE_ALL
+    LightRepeatMode.One -> Player.REPEAT_MODE_ONE
+}
+
+internal fun Int.toLightRepeatMode(): LightRepeatMode = when (this) {
+    Player.REPEAT_MODE_ALL -> LightRepeatMode.All
+    Player.REPEAT_MODE_ONE -> LightRepeatMode.One
+    else -> LightRepeatMode.Off
 }
 
 internal fun skipPosition(positionMs: Long, durationMs: Long, deltaMs: Long): Long {

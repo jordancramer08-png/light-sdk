@@ -1,4 +1,59 @@
-# NOTES.md — Light SDK recon for the Prayer List tool
+# NOTES.md — Listen
+
+Session-by-session notes for the Listen tool. `CLAUDE.md` says what the app does,
+`PLAN.md` says how it's built. The older SDK recon below the line is still accurate
+reference for the SDK's UI kit, screens and sandbox rules.
+
+## Session 1 (2026-09-29): skeleton, file access, music scan — works on the phone
+
+**Built**
+- `tool/` now holds Listen (`com.thelightphone.listen`, label "Listen"). The Bible code
+  was removed from this branch (it's still on `main`).
+- SDK change, own commit: `MANAGE_EXTERNAL_STORAGE` added to the plugin's permission
+  allowlist (`plugin/.../LightToolMetadata.kt`) with a test. The phone granted it through
+  `Listen-Phone-Sync.cmd` option 9, and plain `java.io.File` reads `/sdcard/Listen` fine.
+- `HomeScreen` (`@InitialScreen`): Music / Audiobooks / Now Playing. It checks
+  `Environment.isExternalStorageManager()` in `willShow()` (runs on launch and every
+  resume) and shows the "choose option 9" message when access is missing.
+- `music/MusicHomeScreen` (Songs live; Artists/Albums/Playlists greyed) and
+  `music/SongsScreen` (lazy list, title + artist, A–Z by title).
+- Scanner: `MusicLibrary` (app-wide object, background `Dispatchers.IO`, conflated
+  request channel) → `MusicScanner` → `TagReader` (MediaMetadataRetriever). Every list
+  screen calls `MusicLibrary.refresh(lightContext.filesDir)` in `willShow()`.
+- Index cache: `filesDir/cache/music_index.json` (`MusicIndex`, versioned; bump
+  `MusicIndex.VERSION` if `Song` changes meaning). Written with `AtomicFile` (.tmp + rename).
+- Install script: `scripts/Build and Install Listen.cmd` (copy of the Reader's).
+- 19 JVM tests in `tool/src/test/.../music/`.
+
+**How change detection works**
+- `MusicScanner.stamp()` = `last-sync.txt` text + CRC of every folder's path and mtime
+  under `Music/`. If it matches the stamp saved in the index, nothing is scanned.
+- Otherwise every audio file is listed, and tags are re-read only when path, size or
+  mtime differ (`planRescan`). The list updates every 50 files during a long scan.
+  "Updating library…" shows while that runs.
+
+**Decisions worth knowing**
+- Album-artist fallback order is: album-artist tag → Artist *folder* → track artist.
+  (PLAN.md said track artist before folder. The folder keeps multi-artist albums together.)
+- Missing title → file name without a leading track number ("01 - ", "1-03 ").
+- `sortKey()` in `music/SortKeys.kt` drops a leading The/A/An and ignores case and
+  accents. Reuse it for every sort in Session 3.
+- Theme: `ui/ListenTheme.kt` has the Reader's four themes, but only Dark is used. There
+  is no theme picker or `settings.json` yet.
+- Embedded pictures are **not** read yet (that's slow). Session 3 adds artwork.
+- Song rows aren't tappable yet.
+
+**For Session 2**
+- `lighttool.toml` still has `capabilities = []`. Add `"detached-audio"` (and
+  `WAKE_LOCK`) when the playback service goes in.
+- The SDK audio extensions (PLAN.md section 1, Gap 2) go in their own "SDK: ..." commit.
+- `Song.path` is relative to `Music/`. The file is `File(ListenPaths.music, song.path)`.
+- `Song.durationMs` is already in the index, so Now Playing can show it before the
+  player reports it.
+
+---
+
+# Appendix: Light SDK recon (written for the Prayer List tool)
 
 Phase 0 recon. No app code written. Every claim below points at a file and line
 in this repo so it can be re-checked. All paths are repo-relative.

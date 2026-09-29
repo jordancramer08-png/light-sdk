@@ -1,6 +1,8 @@
 package com.thelightphone.reader.data
 
 import com.thelightphone.reader.comics.ComicItemKind
+import com.thelightphone.reader.comics.PageLevels
+import com.thelightphone.reader.comics.PixelRect
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.file.Files
@@ -37,7 +39,8 @@ class ComicStoreTest {
         val n = bytes.first().toInt()
         pagesLookedAt.add(n)
         if (n == 0) return null
-        return PagePanels(100, 200, (0 until n).map { PanelBox(0, it * 10, 100, it * 10 + 10) })
+        val levels = LevelsBox(black = listOf(10, 12, 14), white = listOf(240, 230, 180))
+        return PagePanels(100, 200, (0 until n).map { PanelBox(0, it * 10, 100, it * 10 + 10) }, PanelBox(5, 6, 95, 194), levels)
     }
 
     private val store = ComicStore(comicsDir, cacheDir, ::fakeSaveCover, ::fakeFindPanels)
@@ -154,6 +157,16 @@ class ComicStoreTest {
         val again = ComicStore(comicsDir, cacheDir, ::fakeSaveCover, ::fakeFindPanels)
         assertEquals(PanelBox(0, 10, 100, 20), again.cachedPanels(meta, "1.jpg")?.panels?.get(1))
         assertEquals(listOf(2, 3), pagesLookedAt)
+    }
+
+    @Test
+    fun aPagesCropAndLevelsAreCachedWithItsPanels() {
+        addComic("a.cbz", "1.jpg" to byteArrayOf(2))
+        val meta = assertNotNull(store.prepared("a.cbz"))
+        store.panels(meta, "1.jpg")
+        val cached = ComicStore(comicsDir, cacheDir, ::fakeSaveCover, ::fakeFindPanels).cachedPanels(meta, "1.jpg")
+        assertEquals(PixelRect(5, 6, 95, 194), cached?.crop?.rect)
+        assertEquals(PageLevels(10, 12, 14, 240, 230, 180), cached?.levels?.levels)
     }
 
     @Test

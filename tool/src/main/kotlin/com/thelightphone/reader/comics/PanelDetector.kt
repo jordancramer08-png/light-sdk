@@ -21,8 +21,11 @@ import kotlin.math.roundToInt
 /** Pages are shrunk to about this many pixels on their long side before panels are looked for. */
 const val PANEL_GRID_LONG_SIDE = 800
 
-/** Bump when the detector changes, so cached panels are looked for again. */
-const val PANEL_DETECTOR_VERSION = 1
+/**
+ * Bump when the page analysis changes (crop, levels or either panel detector), so cached pages
+ * are looked at again. 2: auto-crop, scan levels and the connected-region detector.
+ */
+const val PANEL_DETECTOR_VERSION = 2
 
 /**
  * The detector's thresholds. The defaults were tuned on real pages (CLAUDE.md 12, part 3);
@@ -49,6 +52,19 @@ data class PanelTuning(
     val maxPanelArea: Double = 0.7,
     /** The gutter color must fill at least this share of the page's border, else the art runs off the page. */
     val minBorderShare: Double = 0.5,
+    // The connected-region detector (RegionPanelDetector.kt):
+    /** A gutter crossed by a balloon: lines of one region where at most this share is the region ... */
+    val bridgeShare: Double = 0.5,
+    /** ... with lines at least this share the region on both sides (the two panels' edges). */
+    val edgeShare: Double = 0.7,
+    /** A region of fewer pixels than this share of the page is a speck: dropped. */
+    val speckShare: Double = 0.0005,
+    /** A piece too small for a panel (balloon, caption) this close to one (share of the long side) joins it; else it's dropped. */
+    val joinGapShare: Double = 0.025,
+    /** Two panels whose boxes overlap by this share of the smaller are one panel. */
+    val overlapShare: Double = 0.3,
+    /** Every region big enough for a panel must fill this share of its box: else they're blobs of art, not panels. */
+    val minPanelFill: Double = 0.8,
 )
 
 /** A page's pixels as gray levels, 0 (black) to 255 (white), row by row. */
@@ -58,6 +74,14 @@ class GrayImage(val width: Int, val height: Int, val pixels: ByteArray) {
     }
 
     operator fun get(x: Int, y: Int): Int = pixels[y * width + x].toInt() and 0xFF
+
+    /** The part of the picture inside [area], as a picture of its own. */
+    fun crop(area: PixelRect): GrayImage {
+        if (area.left == 0 && area.top == 0 && area.right == width && area.bottom == height) return this
+        val out = ByteArray(area.width * area.height)
+        for (y in 0 until area.height) System.arraycopy(pixels, (area.top + y) * width + area.left, out, y * area.width, area.width)
+        return GrayImage(area.width, area.height, out)
+    }
 }
 
 /** Colored pixels (0xAARRGGBB, as Android and Java hand them out) as gray levels. */
@@ -119,13 +143,24 @@ class PanelSearch(val gutter: Int, val pieces: List<PixelRect>, val reliable: Bo
  * running off the page), tries white gutters, then black, and keeps the first reliable split.
  */
 fun searchPanels(image: GrayImage, tuning: PanelTuning = PanelTuning()): PanelSearch {
-    val gutters = gutterLevel(image, tuning)?.let { listOf(it) } ?: listOf(WHITE, BLACK)
-    val searches = gutters.map { gutter ->
-        val pieces = PanelCutter(image, gutter, tuning).panels()
+    val searches = gutterCandidates(image, tuning).map { gutter ->
+        val pieces = cutPanels(image, gutter, tuning)
         PanelSearch(gutter, pieces, isReliableSplit(pieces, image, tuning))
     }
     return searches.firstOrNull { it.reliable } ?: searches.first()
 }
+
+/** The gutter grays to try on [image]: the one its border shows, else white, then black. */
+fun gutterCandidates(image: GrayImage, tuning: PanelTuning = PanelTuning()): List<Int> =
+    gutterLevel(image, tuning)?.let { listOf(it) } ?: listOf(WHITE, BLACK)
+
+/** The XY-cut's pieces along gutters of the gray [gutter], in reading order (not yet checked for [isReliableSplit]). */
+fun cutPanels(image: GrayImage, gutter: Int, tuning: PanelTuning = PanelTuning()): List<PixelRect> =
+    PanelCutter(image, gutter, tuning).panels()
+
+/** True when [level] is the gutter's color: within the tolerance of [gutter], or past it away from the ink. */
+fun isGutterLevel(level: Int, gutter: Int, tuning: PanelTuning): Boolean =
+    if (gutter >= 128) level >= gutter - tuning.gutterTolerance else level <= gutter + tuning.gutterTolerance
 
 /**
  * 2 to [PanelTuning.maxPanels] panels, none tiny and none filling most of the page, together
@@ -183,9 +218,13 @@ private const val LIGHT_GUTTER_LEVEL = 160
 private const val DARK_GUTTER_LEVEL = 80
 
 /** A rectangle found on the small picture, in the page's own pixels (never smaller, so no ink is cut off). */
-private fun toPage(rect: PixelRect, image: GrayImage, pageWidth: Int, pageHeight: Int): PixelRect {
-    val sx = pageWidth.toDouble() / image.width
-    val sy = pageHeight.toDouble() / image.height
+private fun toPage(rect: PixelRect, image: GrayImage, pageWidth: Int, pageHeight: Int): PixelRect =
+    rectToPage(rect, image.width, image.height, pageWidth, pageHeight)
+
+/** A rectangle on a small picture ([imageWidth] × [imageHeight]) in the page's own pixels, rounded outward. */
+fun rectToPage(rect: PixelRect, imageWidth: Int, imageHeight: Int, pageWidth: Int, pageHeight: Int): PixelRect {
+    val sx = pageWidth.toDouble() / imageWidth
+    val sy = pageHeight.toDouble() / imageHeight
     return PixelRect(
         left = floor(rect.left * sx).toInt().coerceIn(0, pageWidth),
         top = floor(rect.top * sy).toInt().coerceIn(0, pageHeight),
@@ -206,13 +245,9 @@ private class PanelCutter(private val image: GrayImage, gutter: Int, private val
     private val columnSums = IntArray((height + 1) * width)
 
     init {
-        // A light gutter takes in anything lighter than the tolerance allows, a dark one anything darker.
-        val lightGutter = gutter >= 128
         for (y in 0 until height) {
             for (x in 0 until width) {
-                val level = image[x, y]
-                val close = if (lightGutter) level >= gutter - tuning.gutterTolerance else level <= gutter + tuning.gutterTolerance
-                val isGutter = if (close) 1 else 0
+                val isGutter = if (isGutterLevel(image[x, y], gutter, tuning)) 1 else 0
                 rowSums[y * (width + 1) + x + 1] = rowSums[y * (width + 1) + x] + isGutter
                 columnSums[x * (height + 1) + y + 1] = columnSums[x * (height + 1) + y] + isGutter
             }

@@ -5,11 +5,13 @@ import android.graphics.BitmapRegionDecoder
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.viewModelScope
+import com.thelightphone.reader.comics.CleanUp
 import com.thelightphone.reader.comics.ComicItemKind
 import com.thelightphone.reader.comics.ComicReadingMode
 import com.thelightphone.reader.comics.ComicViewSettings
 import com.thelightphone.reader.comics.OpenComic
 import com.thelightphone.reader.comics.PageGeometry
+import com.thelightphone.reader.comics.PageLevels
 import com.thelightphone.reader.comics.PageLayout
 import com.thelightphone.reader.comics.PageTap
 import com.thelightphone.reader.comics.PageZoom
@@ -19,8 +21,10 @@ import com.thelightphone.reader.comics.PanelTransition
 import com.thelightphone.reader.comics.PixelRect
 import com.thelightphone.reader.comics.WHOLE_PAGE_PAUSE_MS
 import com.thelightphone.reader.comics.comicSlug
+import com.thelightphone.reader.comics.cropWithinPage
 import com.thelightphone.reader.comics.enteringPanel
 import com.thelightphone.reader.comics.itemsAfter
+import com.thelightphone.reader.comics.movedBy
 import com.thelightphone.reader.comics.nextPanelSpot
 import com.thelightphone.reader.comics.openingPageIndex
 import com.thelightphone.reader.comics.openingPanelIndex
@@ -33,6 +37,8 @@ import com.thelightphone.reader.comics.parentPath
 import com.thelightphone.reader.comics.rotatedRegionInPage
 import com.thelightphone.reader.comics.savedPanelNumber
 import com.thelightphone.reader.comics.sliderPage
+import com.thelightphone.reader.comics.within
+import com.thelightphone.reader.data.ComicCleanUpPreference
 import com.thelightphone.reader.data.ComicMeta
 import com.thelightphone.reader.data.ComicPageImages
 import com.thelightphone.reader.data.ComicPositionRepository
@@ -46,10 +52,12 @@ import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SimpleLightScreen
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -62,27 +70,33 @@ import kotlinx.coroutines.withContext
 
 /**
  * A page's picture fitted to the screen, ready to draw, laid out as [layout] says (already
- * turned for [PageLayout.ROTATED]). [pageWidth] × [pageHeight] is the page's full size.
+ * turned for [PageLayout.ROTATED]). [pageWidth] × [pageHeight] is the page's full size; only
+ * its [crop] (page pixels; the whole page when nothing is cropped) is in the picture, and the
+ * viewer's zoom, panels and sharp pieces all work in the crop's own pixels.
  */
 class ComicPagePicture(
     val pageIndex: Int,
     val image: ImageBitmap,
     val pageWidth: Int,
     val pageHeight: Int,
+    val crop: PixelRect,
     val layout: PageLayout,
 ) {
     private val turned: Boolean get() = layout == PageLayout.ROTATED
 
-    /** The page's full size the way it's shown (a turned page is as tall as the page is wide). */
-    val shownWidth: Int get() = if (turned) pageHeight else pageWidth
-    val shownHeight: Int get() = if (turned) pageWidth else pageHeight
+    /** The cropped page's full size the way it's shown (a turned page is as tall as the crop is wide). */
+    val shownWidth: Int get() = if (turned) crop.height else crop.width
+    val shownHeight: Int get() = if (turned) crop.width else crop.height
 
     fun geometry(screenWidth: Int, screenHeight: Int): PageGeometry =
         PageGeometry(shownWidth, shownHeight, screenWidth, screenHeight, fitHeight = layout == PageLayout.FIT_HEIGHT)
 }
 
-/** A sharp picture of the zoomed-in part of a page: [region] in the page's pixels as shown (turned, for [PageLayout.ROTATED]). */
-class SharpArea(val pageIndex: Int, val layout: PageLayout, val region: PixelRect, val sampleSize: Int, val image: ImageBitmap)
+/**
+ * A sharp picture of the zoomed-in part of a page: [region] in the pixels of the page's [crop]
+ * as shown (turned, for [PageLayout.ROTATED]).
+ */
+class SharpArea(val pageIndex: Int, val layout: PageLayout, val crop: PixelRect, val region: PixelRect, val sampleSize: Int, val image: ImageBitmap)
 
 /**
  * One change of zoom, for the screen: it slides there over [durationMs] (0 = it jumps).
@@ -115,6 +129,10 @@ data class ComicViewState(
     val next: NextInFolder? = null,
     /** True once [next] has been looked for. */
     val nextKnown: Boolean = false,
+    /** The page shown's levels, for Clean up scans; null until it's been looked at (or if it couldn't be). */
+    val levels: PageLevels? = null,
+    /** Clean up scans for this comic's folder. */
+    val cleanUp: CleanUp = CleanUp.DEFAULT,
 ) {
     val isReady: Boolean get() = pageIndex >= 0
 
@@ -128,8 +146,8 @@ data class ComicViewState(
  */
 private class PanelEntry(val saved: Int, val pick: (Int) -> Int)
 
-/** Which sharp picture is being (or was) read ahead: this part of this page, at this detail. */
-private data class AheadKey(val pageIndex: Int, val region: PixelRect, val sampleSize: Int)
+/** Which sharp picture is being (or was) read ahead: this part of this page's crop, at this detail. */
+private data class AheadKey(val pageIndex: Int, val crop: PixelRect, val region: PixelRect, val sampleSize: Int)
 
 /**
  * The comic viewer (CLAUDE.md 12). Pages are read from the CBZ, kept open while the comic is,
@@ -137,7 +155,9 @@ private data class AheadKey(val pageIndex: Int, val region: PixelRect, val sampl
  * reading direction, each fitted to the screen, and while zoomed one sharp picture of the
  * part on screen. In Panels mode a page's panels are looked for off the main thread too, the
  * next page's ahead of time, and each tap moves the zoom to the next panel; the sharp picture
- * of where the next tap lands is read ahead as well. Work for a page the reader has left
+ * of where the next tap lands is read ahead as well. Each page is looked at once (its blank
+ * border to crop, its levels for clean-up, its panels) before its picture is read, whenever
+ * Crop margins, Clean up scans or Panels mode needs it. Work for a page the reader has left
  * (or skipped past with the slider) is dropped. The place (page and panel) is saved on every
  * move and saved before leaving (waiting for it). Going on past the last page shows the end
  * card, which offers the next comic or note in the folder; back hands that to the opener.
@@ -150,9 +170,11 @@ class ComicViewModel(
     private val statusRepository: ReadingStatusRepository,
     private val modePreference: ComicReadingModePreference,
     private val settingsPreference: ComicViewSettingsPreference,
+    private val cleanUpPreference: ComicCleanUpPreference,
 ) : LightViewModel<NextInFolder>() {
 
     private val slug = comicSlug(meta.path)
+    private val folder = parentPath(meta.path)
     private val comic = OpenComic(comicStore.comicFile(meta.path))
     private val pages = meta.pages
     val pageCount: Int = pages.size
@@ -163,14 +185,17 @@ class ComicViewModel(
     /** Pages are read one at a time, so two big pictures are never being decoded at once. */
     private val decodeDispatcher = Dispatchers.IO.limitedParallelism(1)
 
-    /** Panels are looked for one page at a time, beside the picture being read. */
+    /** Pages are looked at (crop, levels, panels) one at a time, beside the picture being read. */
     private val panelDispatcher = Dispatchers.IO.limitedParallelism(1)
 
     /** Fitted pictures kept: the page shown and its neighbour (main thread only). */
     private val pictures = mutableMapOf<Int, ComicPagePicture>()
 
-    /** Each page's panels once looked for; null when the page couldn't be read (main thread only). */
-    private val panelsFound = mutableMapOf<Int, PagePanels?>()
+    /** Each page once looked at (panels, crop, levels); null when the page couldn't be read (main thread only). */
+    private val analyses = mutableMapOf<Int, PagePanels?>()
+
+    /** Pages being looked at now or queued, so two waits for one page share the work (main thread only). */
+    private val analysisJobs = mutableMapOf<Int, Deferred<PagePanels?>>()
 
     /** Set while the page shown waits for its panels, to open on the right one. */
     private var pendingEntry: PanelEntry? = null
@@ -209,8 +234,9 @@ class ComicViewModel(
         viewModelScope.launch {
             val mode = modePreference.load()
             val settings = settingsPreference.load()
+            val cleanUp = cleanUpPreference.load(folder)
             val saved = DatabaseQueue.read { positionRepository.get(slug) }
-            _state.update { it.copy(mode = mode, settings = settings) }
+            _state.update { it.copy(mode = mode, settings = settings, cleanUp = cleanUp) }
             val entry = PanelEntry(saved?.panel ?: 0) { count -> openingPanelIndex(saved?.panel, count) }
             showPage(openingPageIndex(saved?.page, pageCount), movedByReader = false, entry)
         }
@@ -291,7 +317,7 @@ class ComicViewModel(
         relayoutPictures()
         if (mode == ComicReadingMode.FULL_PAGE) {
             pendingEntry = null
-            panelJob?.cancel()
+            if (!needsAnalysis()) panelJob?.cancel()
             forgetAhead()
             _state.update { it.copy(panel = -1) }
             moveZoom(startZoom() ?: PageZoom(), animated = true)
@@ -299,7 +325,7 @@ class ComicViewModel(
         } else {
             pendingEntry = PanelEntry(saved = 0) { count -> enteringPanel(count, forward = true) }
             savePosition()
-            if (current.pageIndex in panelsFound) enterPanels(animated = true) else lookForPanels(current.pageIndex)
+            if (current.pageIndex in analyses) enterPanels(animated = true) else lookForPanels(current.pageIndex)
         }
     }
 
@@ -325,6 +351,17 @@ class ComicViewModel(
 
     fun setRotateSpreads(rotate: Boolean) = changeSettings(_state.value.settings.copy(rotateSpreads = rotate))
 
+    fun setCropMargins(crop: Boolean) = changeSettings(_state.value.settings.copy(cropMargins = crop))
+
+    /** Clean up scans, remembered for this comic's folder. Drawn with a color filter, so nothing is read again. */
+    fun setCleanUp(cleanUp: CleanUp) {
+        if (cleanUp == _state.value.cleanUp) return
+        _state.update { it.copy(cleanUp = cleanUp) }
+        viewModelScope.launch { cleanUpPreference.save(folder, cleanUp) }
+        // A page shown before it was looked at gets its levels now.
+        if (_state.value.pageIndex !in analyses) lookForPanels(_state.value.pageIndex)
+    }
+
     /** From the end card: back to the last page. */
     fun leaveEnd() {
         _state.update { it.copy(ended = false) }
@@ -338,6 +375,15 @@ class ComicViewModel(
         if (settings == old) return
         _state.update { it.copy(settings = settings) }
         viewModelScope.launch { settingsPreference.save(settings) }
+        if (settings.cropMargins != old.cropMargins) {
+            lookForPanels(_state.value.pageIndex)
+            forgetAhead()
+            relayoutPictures()
+            // The panel shown is zoomed again in the new crop's pixels.
+            val current = _state.value
+            val onPanel = current.mode == ComicReadingMode.PANELS && current.panel >= 0
+            if (onPanel && !wholePageHeld && !endOfComicHeld && advanceJob?.isActive != true) showPanel(current.panel, animated = false)
+        }
         if (settings.rotateSpreads != old.rotateSpreads) relayoutPictures()
         if (settings.margin != old.margin) {
             forgetAhead()
@@ -348,10 +394,10 @@ class ComicViewModel(
         }
     }
 
-    /** Pictures laid out for the old mode or setting are read again (a spread's layout changed). */
+    /** Pictures laid out or cropped for the old mode or setting are read again. */
     private fun relayoutPictures() {
         val index = _state.value.pageIndex
-        val stale = pictures.values.filter { it.layout != layoutFor(it.pageWidth, it.pageHeight) }.map { it.pageIndex }
+        val stale = pictures.values.filter(::isStale).map { it.pageIndex }
         if (stale.isEmpty() && _state.value.picture != null) return
         pictures.keys.removeAll(stale.toSet())
         if (index in stale) {
@@ -360,8 +406,52 @@ class ComicViewModel(
         loadPictures(index)
     }
 
-    private fun layoutFor(pageWidth: Int, pageHeight: Int): PageLayout =
-        pageLayout(pageWidth, pageHeight, _state.value.mode, _state.value.settings.rotateSpreads)
+    /** A spread is laid out by its cropped size. */
+    private fun layoutFor(cropWidth: Int, cropHeight: Int): PageLayout =
+        pageLayout(cropWidth, cropHeight, _state.value.mode, _state.value.settings.rotateSpreads)
+
+    /** Read before the page was looked at (and now it must be), or for another crop or layout. */
+    private fun isStale(picture: ComicPagePicture): Boolean {
+        if (needsAnalysis() && picture.pageIndex !in analyses) return true
+        val crop = cropFor(picture.pageIndex, picture.pageWidth, picture.pageHeight)
+        return picture.crop != crop || picture.layout != layoutFor(crop.width, crop.height)
+    }
+
+    // --- looking at pages (crop, levels, panels) -----------------------------------------
+
+    /** Pages must be looked at before they're shown: to crop them, to clean them up, or for their panels. */
+    private fun needsAnalysis(): Boolean {
+        val current = _state.value
+        return current.mode == ComicReadingMode.PANELS || current.settings.cropMargins || current.cleanUp != CleanUp.OFF
+    }
+
+    /** The part of page [index] to show, in page pixels: its crop when Crop margins is on and it's known, else all of it. */
+    private fun cropFor(index: Int, pageWidth: Int, pageHeight: Int): PixelRect {
+        val crop = if (_state.value.settings.cropMargins) analyses[index]?.crop?.rect else null
+        return cropWithinPage(crop, pageWidth, pageHeight)
+    }
+
+    /** Page [page] looked at: from memory, else from the cache or found now (off the main thread). Shared by everyone waiting. */
+    private suspend fun analysisOf(page: Int): PagePanels? {
+        if (page in analyses) return analyses[page]
+        val job = analysisJobs.getOrPut(page) {
+            val name = pages[page]
+            viewModelScope.async { withContext(panelDispatcher) { comicStore.panels(meta, name) { comic.read(name) } } }
+        }
+        val found = job.await()
+        if (page !in analyses) {
+            analyses[page] = found
+            analysisJobs.remove(page)
+            if (page == _state.value.pageIndex) _state.update { it.copy(levels = found?.levels?.levels) }
+        }
+        return found
+    }
+
+    /** Stops looking at pages the reader has left behind (one already being looked at finishes). */
+    private fun dropAnalysesExcept(keep: Set<Int>) {
+        val dropped = analysisJobs.keys - keep
+        for (page in dropped) analysisJobs.remove(page)?.cancel()
+    }
 
     // --- panels ----------------------------------------------------------------------
 
@@ -390,8 +480,8 @@ class ComicViewModel(
             return
         }
         // The page's panels are still being looked for: wait for them rather than skip the page.
-        if (pendingEntry != null && current.pageIndex !in panelsFound) return
-        val count = panelsFound[current.pageIndex]?.panels?.size ?: 0
+        if (pendingEntry != null && current.pageIndex !in analyses) return
+        val count = analyses[current.pageIndex]?.panels?.size ?: 0
         when (val step = panelStep(forward, current.panel, count)) {
             is PanelStep.ToPanel -> showPanel(step.panel, animated = true)
             PanelStep.WholePageThenNext -> showWholePageThenNext()
@@ -430,12 +520,13 @@ class ComicViewModel(
     /** Zooms onto [panel] of the page shown, and saves the place. */
     private fun showPanel(panel: Int, animated: Boolean) {
         val current = _state.value
-        val found = panelsFound[current.pageIndex] ?: return
+        val found = analyses[current.pageIndex] ?: return
         val rect = found.rects.getOrNull(panel) ?: return
         _state.update { it.copy(panel = panel) }
         if (screenWidth > 0) {
-            val geometry = PageGeometry(found.pageWidth, found.pageHeight, screenWidth, screenHeight)
-            moveZoom(geometry.panelZoom(rect, current.settings.margin.fraction), animated)
+            val crop = cropFor(current.pageIndex, found.pageWidth, found.pageHeight)
+            val geometry = PageGeometry(crop.width, crop.height, screenWidth, screenHeight)
+            moveZoom(geometry.panelZoom(rect.within(crop), current.settings.margin.fraction), animated)
         }
         savePosition()
     }
@@ -444,25 +535,22 @@ class ComicViewModel(
     private fun enterPanels(animated: Boolean) {
         val entry = pendingEntry ?: return
         pendingEntry = null
-        val count = panelsFound[_state.value.pageIndex]?.panels?.size ?: 0
+        val count = analyses[_state.value.pageIndex]?.panels?.size ?: 0
         val panel = entry.pick(count)
         if (panel >= 0) showPanel(panel, animated) else savePosition()
     }
 
     /**
-     * Looks for the panels of page [index], then of the next page in the reading direction and
-     * the one before, so turning either way doesn't wait. Stops when the page changes.
+     * Looks at page [index] (panels, crop, levels), then at the next page in the reading
+     * direction and the one before, so turning either way doesn't wait. Stops when the page changes.
      */
     private fun lookForPanels(index: Int) {
         panelJob?.cancel()
-        if (_state.value.mode != ComicReadingMode.PANELS) return
+        if (!needsAnalysis() || index < 0) return
         val order = listOf(index, index + direction, index - direction).filter { it in 0 until pageCount }
         panelJob = viewModelScope.launch {
             for (page in order) {
-                if (page !in panelsFound) {
-                    val name = pages[page]
-                    panelsFound[page] = withContext(panelDispatcher) { comicStore.panels(meta, name) { comic.read(name) } }
-                }
+                analysisOf(page)
                 if (page == _state.value.pageIndex) enterPanels(animated = true)
                 prepareAhead()
             }
@@ -508,17 +596,22 @@ class ComicViewModel(
             it.copy(
                 pageIndex = index, picture = kept, preparing = false, failed = false,
                 zoom = start, move = nextMove(animated = false), sharp = null, panel = -1, ended = false,
+                levels = analyses[index]?.levels?.levels,
             )
         }
-        if (panels && index in panelsFound) enterPanels(animated = false) else savePosition()
+        if (panels && index in analyses) enterPanels(animated = false) else savePosition()
         if (movedByReader && index == pageCount - 1) DatabaseQueue.write { statusRepository.markFinished(slug) }
         if (index == pageCount - 1) findNextInFolder()
         viewModelScope.launch(decodeDispatcher) { closeRegionsExcept(setOf(index, index + 1)) }
+        dropAnalysesExcept(setOf(index - 1, index, index + 1))
         loadPictures(index)
         lookForPanels(index)
     }
 
-    /** Reads the page shown (if not kept already), then its neighbour; drops every other picture. */
+    /**
+     * Reads the page shown (if not kept already), then its neighbour; drops every other
+     * picture. Each page is looked at first when that's needed (for its crop and levels).
+     */
     private fun loadPictures(index: Int) {
         loadJob?.cancel()
         if (screenWidth == 0) return
@@ -530,6 +623,7 @@ class ComicViewModel(
                     delay(PREPARING_DELAY_MS)
                     _state.update { it.copy(preparing = true) }
                 }
+                if (needsAnalysis()) analysisOf(index)
                 val picture = decodePicture(index)
                 slow.cancel()
                 if (picture != null) pictures[index] = picture
@@ -537,7 +631,9 @@ class ComicViewModel(
                 requestSharp()
             }
             for (neighbour in keep - index) {
-                if (neighbour !in pictures) decodePicture(neighbour)?.let { pictures[neighbour] = it }
+                if (neighbour in pictures) continue
+                if (needsAnalysis()) analysisOf(neighbour)
+                decodePicture(neighbour)?.let { pictures[neighbour] = it }
             }
         }
     }
@@ -563,9 +659,9 @@ class ComicViewModel(
         _state.value.picture?.geometry(screenWidth, screenHeight)?.startZoom(forward = direction > 0)
 
     /**
-     * Reads one page fitted to the screen, laid out for the mode and settings. If the page
-     * changes meanwhile, a picture not yet started is skipped, and one already read is thrown
-     * away at once.
+     * Reads one page fitted to the screen, cropped and laid out for the mode and settings. If
+     * the page changes meanwhile, a picture not yet started is skipped, and one already read is
+     * thrown away at once.
      */
     private suspend fun decodePicture(index: Int): ComicPagePicture? {
         val job = currentCoroutineContext().job
@@ -573,11 +669,17 @@ class ComicViewModel(
         val height = screenHeight
         val mode = _state.value.mode
         val rotate = _state.value.settings.rotateSpreads
+        // Null: nothing to crop (Crop margins off, or the page wasn't looked at).
+        val crop = analyses[index]?.let { cropFor(index, it.pageWidth, it.pageHeight) }
         val fitted = withContext(decodeDispatcher + NonCancellable) {
             if (!job.isActive) return@withContext null
             decodeQuietly {
                 comic.read(pages[index])?.let { bytes ->
-                    ComicPageImages.decodeFitted(bytes, width, height) { w, h -> pageLayout(w, h, mode, rotate) }
+                    ComicPageImages.decodeFitted(
+                        bytes, width, height,
+                        cropFor = { w, h -> crop ?: PixelRect(0, 0, w, h) },
+                        layoutFor = { w, h -> pageLayout(w, h, mode, rotate) },
+                    )
                 }
             }
         }
@@ -585,7 +687,7 @@ class ComicViewModel(
             fitted?.bitmap?.recycle()
             throw CancellationException()
         }
-        return fitted?.let { ComicPagePicture(index, it.bitmap.asImageBitmap(), it.pageWidth, it.pageHeight, it.layout) }
+        return fitted?.let { ComicPagePicture(index, it.bitmap.asImageBitmap(), it.pageWidth, it.pageHeight, it.crop, it.layout) }
     }
 
     // --- the end ---------------------------------------------------------------------
@@ -680,7 +782,7 @@ class ComicViewModel(
         }
         sharpJob = viewModelScope.launch {
             delay(SHARP_DELAY_MS)
-            val piece = readSharp(picture.pageIndex, picture.layout, picture.pageWidth, region, sample)
+            val piece = readSharp(picture.pageIndex, picture.layout, picture.crop, region, sample)
             if (piece != null) _state.update { it.copy(sharp = piece) }
             // This spot is done, so the next one can be read ahead.
             sharpJob = null
@@ -697,22 +799,23 @@ class ComicViewModel(
         val current = _state.value
         if (current.mode != ComicReadingMode.PANELS || screenWidth == 0 || sharpJob?.isActive == true) return
         val index = current.pageIndex
-        val count = panelsFound[index]?.panels?.size ?: return
-        val nextCount = if (index + 1 < pageCount) panelsFound[index + 1]?.panels?.size else null
+        val count = analyses[index]?.panels?.size ?: return
+        val nextCount = if (index + 1 < pageCount) analyses[index + 1]?.panels?.size else null
         val spot = nextPanelSpot(index, current.panel, count, nextCount) ?: return
-        val found = panelsFound[spot.page] ?: return
+        val found = analyses[spot.page] ?: return
         val rect = found.rects.getOrNull(spot.panel) ?: return
-        val geometry = PageGeometry(found.pageWidth, found.pageHeight, screenWidth, screenHeight)
-        val zoom = geometry.panelZoom(rect, current.settings.margin.fraction)
+        val crop = cropFor(spot.page, found.pageWidth, found.pageHeight)
+        val geometry = PageGeometry(crop.width, crop.height, screenWidth, screenHeight)
+        val zoom = geometry.panelZoom(rect.within(crop), current.settings.margin.fraction)
         if (!zoom.isZoomed) return
         val region = geometry.visibleRegion(zoom)
         if (region.isEmpty) return
-        val key = AheadKey(spot.page, region, geometry.regionSampleSize(zoom))
+        val key = AheadKey(spot.page, crop, region, geometry.regionSampleSize(zoom))
         if (key == aheadKey) return
         forgetAhead()
         aheadKey = key
         aheadJob = viewModelScope.launch {
-            aheadSharp = readSharp(key.pageIndex, PageLayout.WHOLE, found.pageWidth, key.region, key.sampleSize)
+            aheadSharp = readSharp(key.pageIndex, PageLayout.WHOLE, key.crop, key.region, key.sampleSize)
         }
     }
 
@@ -724,25 +827,28 @@ class ComicViewModel(
     }
 
     /** Reads one sharp piece on decodeDispatcher; a piece no longer wanted when it's read is thrown away. */
-    private suspend fun readSharp(index: Int, layout: PageLayout, pageWidth: Int, region: PixelRect, sample: Int): SharpArea? {
+    private suspend fun readSharp(index: Int, layout: PageLayout, crop: PixelRect, region: PixelRect, sample: Int): SharpArea? {
         val job = currentCoroutineContext().job
         val bitmap = withContext(decodeDispatcher + NonCancellable) {
-            if (job.isActive) decodeQuietly { decodeRegion(index, layout, pageWidth, region, sample) } else null
+            if (job.isActive) decodeQuietly { decodeRegion(index, layout, crop, region, sample) } else null
         }
         if (!job.isActive) {
             bitmap?.recycle()
             throw CancellationException()
         }
-        return bitmap?.let { SharpArea(index, layout, region, sample, it.asImageBitmap()) }
+        return bitmap?.let { SharpArea(index, layout, crop, region, sample, it.asImageBitmap()) }
     }
 
-    /** On decodeDispatcher: each page is opened for pieces once, then reused while it's kept. A turned page's piece is turned too. */
-    private fun decodeRegion(index: Int, layout: PageLayout, pageWidth: Int, region: PixelRect, sample: Int): Bitmap? {
+    /**
+     * On decodeDispatcher: each page is opened for pieces once, then reused while it's kept.
+     * [region] is in the [crop]'s pixels as shown; a turned page's piece is turned too.
+     */
+    private fun decodeRegion(index: Int, layout: PageLayout, crop: PixelRect, region: PixelRect, sample: Int): Bitmap? {
         if (index !in regionDecoders) regionDecoders[index] = comic.read(pages[index])?.let(ComicPageImages::openRegions)
         val decoder = regionDecoders[index] ?: return null
         val turned = layout == PageLayout.ROTATED
-        val inPage = if (turned) rotatedRegionInPage(region, pageWidth) else region
-        val bitmap = ComicPageImages.decodeRegion(decoder, inPage, sample) ?: return null
+        val inCrop = if (turned) rotatedRegionInPage(region, crop.width) else region
+        val bitmap = ComicPageImages.decodeRegion(decoder, inCrop.movedBy(crop.left, crop.top), sample) ?: return null
         return if (turned) ComicPageImages.turnLeft(bitmap) else bitmap
     }
 
@@ -807,9 +913,10 @@ class ComicViewModel(
     }
 }
 
-/** True when this piece is of [picture]'s page as laid out now, holds all of [region], and is at least as sharp as [sample] needs. */
+/** True when this piece is of [picture]'s page as cropped and laid out now, holds all of [region], and is at least as sharp as [sample] needs. */
 private fun SharpArea.fits(picture: ComicPagePicture, region: PixelRect, sample: Int): Boolean =
-    pageIndex == picture.pageIndex && layout == picture.layout && sampleSize <= sample && this.region.covers(region)
+    pageIndex == picture.pageIndex && layout == picture.layout && crop == picture.crop &&
+        sampleSize <= sample && this.region.covers(region)
 
 /** True when this rectangle holds all of [other]. */
 private fun PixelRect.covers(other: PixelRect): Boolean =

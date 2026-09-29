@@ -24,6 +24,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.pointerInput
@@ -35,9 +37,12 @@ import com.thelightphone.reader.comics.ComicReadingMode
 import com.thelightphone.reader.comics.PageGeometry
 import com.thelightphone.reader.comics.PageLayout
 import com.thelightphone.reader.comics.PageZoom
+import com.thelightphone.reader.comics.PixelRect
 import com.thelightphone.reader.comics.between
+import com.thelightphone.reader.comics.cleanUpMatrix
 import com.thelightphone.reader.comics.comicSlug
 import com.thelightphone.reader.comics.sliderFraction
+import com.thelightphone.reader.data.ComicCleanUpPreference
 import com.thelightphone.reader.data.ComicMeta
 import com.thelightphone.reader.data.ComicPositionRepository
 import com.thelightphone.reader.data.ComicReadingModePreference
@@ -66,7 +71,7 @@ private val PAGE_MESSAGE_COLOR = Color(0xFF9E9E9E)
 /**
  * The comic viewer (CLAUDE.md 12): one page at a time on a black screen, no bars. Tap right
  * to go on, left to go back, the top for the overlay (back, title, page number, slider,
- * FULL PAGE / PANELS, the mode's settings, ADD TO LIST, DETAILS); a long press switches
+ * FULL PAGE / PANELS, the mode's settings, Crop margins, Clean up scans, ADD TO LIST, DETAILS); a long press switches
  * Full page ↔ Panels. Full page: the page fitted (a spread as tall as the screen, or turned),
  * pinch or double-tap to zoom, drag to move. Panels: zoomed onto one panel at a time;
  * double-tap shows the whole page until the next tap. Going on past the last page shows the
@@ -90,6 +95,7 @@ class ComicScreen(
         ReadingStatusRepository.getInstance { lightContext.readerDatabase() },
         ComicReadingModePreference(lightContext.dataStore),
         ComicViewSettingsPreference(lightContext.dataStore),
+        ComicCleanUpPreference(lightContext.dataStore),
     )
 
     @Composable
@@ -164,7 +170,10 @@ class ComicScreen(
         }
     }
 
-    /** The settings of the mode in use: panel margin and transition in Panels, Rotate spreads in Full page. */
+    /**
+     * The settings of the mode in use (panel margin and transition in Panels, Rotate spreads in
+     * Full page), then the two for both modes: Crop margins and Clean up scans.
+     */
     @Composable
     private fun ModeSettings(state: ComicViewState) {
         val settings = state.settings
@@ -193,6 +202,21 @@ class ComicScreen(
                 onClick = { viewModel.setRotateSpreads(!settings.rotateSpreads) },
             )
         }
+        HairlineDivider()
+        OnOffRow(
+            label = "Crop margins",
+            isOn = settings.cropMargins,
+            onClick = { viewModel.setCropMargins(!settings.cropMargins) },
+        )
+        HairlineDivider()
+        StepperRow(
+            label = "Clean up scans",
+            value = state.cleanUp.label,
+            onPrevious = state.cleanUp.previous?.let { { viewModel.setCleanUp(it) } },
+            onNext = state.cleanUp.next?.let { { viewModel.setCleanUp(it) } },
+            previousSymbol = "‹",
+            nextSymbol = "›",
+        )
         HairlineDivider()
     }
 
@@ -304,27 +328,31 @@ private fun NextInFolderText(state: ComicViewState) {
     }
 }
 
-/** The zoom last drawn, and on which page laid out how: where the next animated move starts from. */
+/** The zoom last drawn, and on which page cropped and laid out how: where the next animated move starts from. */
 private class DrawnZoom {
     var pageIndex = -1
     var layout = PageLayout.WHOLE
+    var crop: PixelRect? = null
     var zoom = PageZoom()
 
-    /** The last drawn zoom, if it was of [page] laid out as [pageLayout]; else the page fitted. */
-    fun on(page: Int, pageLayout: PageLayout?): PageZoom =
-        if (page == pageIndex && pageLayout == layout) zoom else PageZoom()
+    /** The last drawn zoom, if it was of [picture]'s page cropped and laid out the same; else the page fitted. */
+    fun on(page: Int, picture: ComicPagePicture?): PageZoom =
+        if (page == pageIndex && picture?.layout == layout && picture.crop == crop) zoom else PageZoom()
 }
 
 /**
  * The page, drawn at its zoom: the fitted picture, and over it the sharp picture of the
- * zoomed-in part once it's read. A move to a panel slides there (at the Panel transition
- * speed) from where the page was last drawn. Taps, double-taps, long presses, pinches and drags go to
+ * zoomed-in part once it's read, both through the Clean up scans color filter. A move to a
+ * panel slides there (at the Panel transition speed) from where the page was last drawn. Taps, double-taps, long presses, pinches and drags go to
  * [viewModel].
  */
 @Composable
 private fun ComicPage(state: ComicViewState, viewModel: ComicViewModel, modifier: Modifier) {
     val drawn = remember { DrawnZoom() }
-    val start = remember(state.move) { drawn.on(state.pageIndex, state.picture?.layout) }
+    val start = remember(state.move) { drawn.on(state.pageIndex, state.picture) }
+    val filter = remember(state.levels, state.cleanUp) {
+        cleanUpMatrix(state.levels, state.cleanUp)?.let { ColorFilter.colorMatrix(ColorMatrix(it)) }
+    }
     val duration = state.move.durationMs
     val progress = remember(state.move) { Animatable(if (duration > 0) 0f else 1f) }
     LaunchedEffect(state.move) {
@@ -351,23 +379,27 @@ private fun ComicPage(state: ComicViewState, viewModel: ComicViewModel, modifier
         val zoom = geometry.between(start, state.zoom, progress.value)
         drawn.pageIndex = picture.pageIndex
         drawn.layout = picture.layout
+        drawn.crop = picture.crop
         drawn.zoom = zoom
-        drawPicture(picture, geometry, zoom)
-        val sharp = state.sharp?.takeIf { it.pageIndex == picture.pageIndex && it.layout == picture.layout } ?: return@Canvas
-        drawSharpArea(sharp, geometry, zoom)
+        drawPicture(picture, geometry, zoom, filter)
+        val sharp = state.sharp?.takeIf {
+            it.pageIndex == picture.pageIndex && it.layout == picture.layout && it.crop == picture.crop
+        } ?: return@Canvas
+        drawSharpArea(sharp, geometry, zoom, filter)
     }
 }
 
-private fun DrawScope.drawPicture(picture: ComicPagePicture, geometry: PageGeometry, zoom: PageZoom) {
+private fun DrawScope.drawPicture(picture: ComicPagePicture, geometry: PageGeometry, zoom: PageZoom, filter: ColorFilter?) {
     drawImage(
         image = picture.image,
         dstOffset = IntOffset(geometry.pageLeft(zoom).roundToInt(), geometry.pageTop(zoom).roundToInt()),
         dstSize = IntSize(geometry.shownWidth(zoom).roundToInt(), geometry.shownHeight(zoom).roundToInt()),
+        colorFilter = filter,
         filterQuality = FilterQuality.Medium,
     )
 }
 
-private fun DrawScope.drawSharpArea(sharp: SharpArea, geometry: PageGeometry, zoom: PageZoom) {
+private fun DrawScope.drawSharpArea(sharp: SharpArea, geometry: PageGeometry, zoom: PageZoom, filter: ColorFilter?) {
     val scale = geometry.scale(zoom)
     val left = geometry.pageLeft(zoom) + sharp.region.left * scale
     val top = geometry.pageTop(zoom) + sharp.region.top * scale
@@ -375,6 +407,7 @@ private fun DrawScope.drawSharpArea(sharp: SharpArea, geometry: PageGeometry, zo
         image = sharp.image,
         dstOffset = IntOffset(left.roundToInt(), top.roundToInt()),
         dstSize = IntSize((sharp.region.width * scale).roundToInt(), (sharp.region.height * scale).roundToInt()),
+        colorFilter = filter,
         filterQuality = FilterQuality.Medium,
     )
 }

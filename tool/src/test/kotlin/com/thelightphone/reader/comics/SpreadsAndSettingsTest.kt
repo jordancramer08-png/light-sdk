@@ -76,6 +76,7 @@ class SpreadsAndSettingsTest {
         assertEquals(PanelTransition.SMOOTH, settings.transition)
         assertEquals(PANEL_MOVE_MS, settings.transition.moveMs)
         assertFalse(settings.rotateSpreads)
+        assertTrue(settings.cropMargins)
         assertEquals(PanelMargin.NORMAL, PanelMargin.fromSavedName("HUGE"))
         assertEquals(PanelTransition.SMOOTH, PanelTransition.fromSavedName(null))
         assertEquals(PanelTransition.OFF, PanelTransition.fromSavedName("OFF"))

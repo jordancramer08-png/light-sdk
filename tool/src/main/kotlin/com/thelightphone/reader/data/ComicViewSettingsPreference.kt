@@ -10,7 +10,7 @@ import com.thelightphone.reader.comics.PanelMargin
 import com.thelightphone.reader.comics.PanelTransition
 import kotlinx.coroutines.flow.first
 
-/** Remembers the comic viewer's settings (panel margin, panel transition, Rotate spreads), in the tool's DataStore. */
+/** Remembers the comic viewer's settings (panel margin, panel transition, Rotate spreads, Crop margins), in the tool's DataStore. */
 class ComicViewSettingsPreference(private val dataStore: DataStore<Preferences>) {
 
     /** The saved settings; anything missing or unknown is that setting's default. */
@@ -20,6 +20,7 @@ class ComicViewSettingsPreference(private val dataStore: DataStore<Preferences>)
             margin = PanelMargin.fromSavedName(prefs[MARGIN]),
             transition = PanelTransition.fromSavedName(prefs[TRANSITION]),
             rotateSpreads = prefs[ROTATE_SPREADS] ?: false,
+            cropMargins = prefs[CROP_MARGINS] ?: true,
         )
     }
 
@@ -28,6 +29,7 @@ class ComicViewSettingsPreference(private val dataStore: DataStore<Preferences>)
             prefs[MARGIN] = settings.margin.name
             prefs[TRANSITION] = settings.transition.name
             prefs[ROTATE_SPREADS] = settings.rotateSpreads
+            prefs[CROP_MARGINS] = settings.cropMargins
         }
     }
 
@@ -35,5 +37,6 @@ class ComicViewSettingsPreference(private val dataStore: DataStore<Preferences>)
         val MARGIN = stringPreferencesKey("comic_panel_margin")
         val TRANSITION = stringPreferencesKey("comic_panel_transition")
         val ROTATE_SPREADS = booleanPreferencesKey("comic_rotate_spreads")
+        val CROP_MARGINS = booleanPreferencesKey("comic_crop_margins")
     }
 }

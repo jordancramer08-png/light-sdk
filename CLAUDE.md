@@ -115,7 +115,13 @@ reader/
                         startZoom, visibleRegion, regionSampleSize), rotatedRegionInPage, fittedSize,
                         openingPageIndex, pagesToKeep, sliderPage / sliderFraction
     PanelDetector.kt    panel detection (§12 part 3): GrayImage, grayFromArgb, shrinkToLongSide,
-                        gutterLevel, searchPanels / detectPanels (XY-cut), PanelTuning (thresholds)
+                        gutterLevel, searchPanels / detectPanels / cutPanels (XY-cut), PanelTuning
+                        (thresholds for both detectors), PANEL_DETECTOR_VERSION
+    PageAnalysis.kt     analysePage (§12 part 6): crop, levels, then region detector, XY-cut, or none
+    PageCrop.kt         findCrop (auto-crop), cropWithinPage, PixelRect.within / movedBy
+    ScanCleanUp.kt      ColorImage, shrinkColorToLongSide, PageLevels / measureLevels, CleanUp
+                        (Off/Auto/Strong), channelStretches, cleanUpMatrix, leveledGray (detector's gray)
+    RegionPanelDetector.kt  findRegionPanels (flood the gutter, connected regions), readingOrder
     PanelReading.kt     Panels mode (§12 part 4): ComicReadingMode, panelStep (where a tap goes),
                         enteringPanel, openingPanelIndex / savedPanelNumber, panelZoom (a panel
                         filling the screen), between (the animated move between two zooms),
@@ -125,11 +131,12 @@ reader/
     ComicStore.kt       lists shared/comics/ folders, caches each comic's page list + small cover,
                         and each page's panels once looked for (panels)
     ComicMeta.kt        cached comic meta.json model (kotlinx-serialization)
-    ComicPanels.kt      cached panels.json model: ComicPanels, PagePanels, PanelBox
-    ComicPageImages.kt  a page's bytes → a screen-fitted Bitmap for its PageLayout (inSampleSize,
-                        then scaled, then turned for a rotated spread), BitmapRegionDecoder pieces
-                        for sharp zoom, turnLeft, and findPanels (a small gray copy → detectPanels)
-                        (phone only)
+    ComicPanels.kt      cached panels.json model: ComicPanels, PagePanels (panels, crop, levels),
+                        PanelBox, LevelsBox
+    ComicPageImages.kt  a page's bytes → a screen-fitted Bitmap of its crop for its PageLayout
+                        (inSampleSize, then cut and scaled, then turned for a rotated spread),
+                        BitmapRegionDecoder pieces for sharp zoom, turnLeft, and findPanels (a small
+                        color copy → analysePage) (phone only)
     CoverImages.kt      CoverSize, CoverImages.save: cover bytes → cover-small.png + cover-large.png
                         (or only the sizes asked for: saveSmall for comics)
                         (BitmapFactory with inSampleSize; phone only), sampleSize (unit-tested)
@@ -139,7 +146,9 @@ reader/
     ComicPosition*.kt   Room entity / dao / repository for saved places in comics
     LibrarySectionPreference.kt  remembered Library section, Books or Comics (DataStore)
     ComicReadingModePreference.kt  remembered comic reading mode, Full page or Panels (DataStore)
-    ComicViewSettingsPreference.kt remembered panel margin, panel transition, Rotate spreads (DataStore)
+    ComicViewSettingsPreference.kt remembered panel margin, panel transition, Rotate spreads,
+                        Crop margins (DataStore)
+    ComicCleanUpPreference.kt  remembered Clean up scans, per comics folder (DataStore)
     ReadingPosition*.kt Room entity / dao / repository for saved places
     ReadingList*.kt     Room entities / dao / repository for reading lists
     BookStatus*.kt, ReadingStatusRepository.kt  Room entity / dao / repository for reading status
@@ -569,7 +578,8 @@ and Jordan has confirmed it on the phone (phases 3–5).
 Built in parts: 1 = PC send script, phone storage, the Comics section that lists comics
 (done); 2 = the full-page viewer (done); 3 = the panel detection engine (done, below);
 4 = panel-by-panel reading in the viewer (done); 5 = polish: spreads, reading ahead, huge
-comics, viewer settings, Next in folder (done). All five parts are built.
+comics, viewer settings, Next in folder (done); 6 = auto-crop, scan clean-up and the
+connected-region panel detector (done; "Page analysis" below). All six parts are built.
 
 **PC side.** `scripts\Send Comics to Phone.cmd` (→ `send-comics.ps1`). Jordan's comics are in
 `D:\Comics` (~7,700 files, reading-order folders up to 5 deep, e.g. `DC Comics\01. Book I -
@@ -674,7 +684,8 @@ waits a moment to be sure it isn't a double-tap.
 - **Panels off the main thread**: `ComicStore.panels` (panels.json, else detected) runs on its
   own one-at-a-time dispatcher, beside the picture decoding: the page shown first, then the
   next page in the reading direction, then the one before, so turning either way doesn't wait.
-  Page changes cancel what's queued. Only in Panels mode. If the page shown is still waiting
+  Page changes cancel what's queued (pages beyond the one shown and its two neighbours). In
+  Panels mode, or whenever Crop margins or Clean up scans needs it. If the page shown is still waiting
   for its panels, it shows whole, taps on it are ignored, and it slides into its panel as soon
   as they're known. The pages are read through the viewer's open CBZ (`OpenComic`), and
   `ComicStore` keeps the comic's panels.json in memory once read (a 600-page comic's file isn't
@@ -696,10 +707,28 @@ waits a moment to be sure it isn't a double-tap.
   back, the title, "Page 12 of 30", a slider (`LightTouchableProgressBar`, not drawn for a
   one-page comic), the FULL PAGE / PANELS bar, then the settings of the mode in use: in
   Panels "Panel margin ‹ Normal ›" and "Panel transition ‹ Smooth ›" (`StepperRow`), in Full
-  page "Rotate spreads On/Off" (`OnOffRow`). They apply at once (a new margin re-zooms the
-  panel shown) and are remembered for every comic (`ComicViewSettingsPreference`: keys
-  `comic_panel_margin`, `comic_panel_transition`, each the enum name, and
-  `comic_rotate_spreads`; missing/unknown = the default). While the slider is dragged the page
+  page "Rotate spreads On/Off" (`OnOffRow`); then, in both modes, "Crop margins On/Off"
+  (`OnOffRow`) and "Clean up scans ‹ Auto ›" (`StepperRow`: Off, Auto, Strong). They apply at
+  once (a new margin re-zooms the panel shown; Crop margins reads the page again) and are
+  remembered for every comic (`ComicViewSettingsPreference`: keys `comic_panel_margin`,
+  `comic_panel_transition`, each the enum name, `comic_rotate_spreads` and
+  `comic_crop_margins`, booleans; missing/unknown = the default), except Clean up scans,
+  remembered per folder (`ComicCleanUpPreference`: key `comic_clean_up:<folder path>`, "" for
+  the top folder, the `CleanUp` name; missing/unknown = Auto).
+- **Crop margins** (default On): the page shown is its crop box (Page analysis, below), in
+  both modes. The picture decoded is only the crop (`decodeFitted` cuts it while scaling), and
+  zoom, pan, panels (`PixelRect.within(crop)`), sharp pieces (moved back by the crop's corner)
+  and the spread test all work in the crop's own pixels. Off: the whole page, as before.
+- **Clean up scans** (default Auto, per folder): drawn with a Compose `ColorFilter.colorMatrix`
+  from the page's cached levels (`cleanUpMatrix`), on the fitted picture and on the sharp
+  piece, so no second bitmap is kept. Each channel is stretched from its black point to its
+  white point, then a little contrast is added: Auto (black shared by the channels, at most
+  48; gain at most 1.8×; contrast 1.08), Strong (each channel its own black, at most 80; gain
+  at most 2.5×; contrast 1.2). The gain cap keeps a page with no white (a red sky) from
+  shifting color. Off, or a page not yet looked at: drawn as it is.
+- **Looking at pages first**: whenever Crop margins, Clean up scans or Panels mode needs it
+  (with the defaults, always), a page is looked at (`ComicStore.panels`, below) before its
+  picture is read, and the next page and the one before are looked at ahead, as panels were. While the slider is dragged the page
   number follows the finger; the page itself opens once the finger rests 200 ms
   (`SLIDER_REST_MS`), so pages dragged past are never read or saved. At the bottom, ADD TO
   LIST (→ AddToListScreen) and DETAILS (→ ComicDetailsScreen: title, Status choices as Book
@@ -740,9 +769,52 @@ waits a moment to be sure it isn't a double-tap.
   (`DatabaseQueue.writeNow`). Reaching the last page by a turn or the slider makes it
   Finished; reopening it there does not (as books), but going on to the end card does.
 
-**Panel detection** (part 3; used by the viewer's Panels mode, above). `comics/PanelDetector.kt`,
-plain Kotlin. A page is decoded small (`ComicPageImages.findPanels`: `inSampleSize` keeping at
-least 800 px on the long side), made gray (`grayFromArgb`: 0.299 R + 0.587 G + 0.114 B) and
+**Page analysis** (part 6; `comics/PageAnalysis.kt`, `analysePage`, plain Kotlin, run on the
+phone by `ComicPageImages.findPanels` and on the PC by the report). A page is decoded small
+(`inSampleSize` keeping at least 800 px on the long side), shrunk by averaging each channel to
+800 px (`shrinkColorToLongSide`), then:
+1. **Crop** (`findCrop`, `PageCrop.kt`): from each side, lines are cut while blank — at least
+   97% of the line within 24 of its middle gray, and that gray is paper (≥ 170) or scanner
+   bed / shadow (≤ 120), or within 24 of the last blank line's (a shadow fading into paper).
+   Flat mid-gray art at the edge is never cut. Three rounds, so a shadow down one side doesn't
+   stop the rows. Never more than 15% of a side (`MAX_CROP_SHARE`); 1% of the shorter side is
+   given back round the content. Found on the small picture, rounded outward to page pixels.
+2. **Levels** (`measureLevels`, `ScanCleanUp.kt`): each channel's darkest and brightest level
+   inside the crop, ignoring 0.5% of the pixels at each end.
+3. **The detector's gray** (`leveledGray`): the Strong stretch without contrast, then light,
+   strongly colored pixels (more than 40 between brightest and dullest channel) pulled down
+   toward middle gray, so yellow art is never paper. Dark colors are left (navy gutters). The
+   gutter gray is read off the whole leveled page's border (`gutterLevel`), else white then black.
+4. **Panels**, inside the crop: the region detector first, then the XY-cut, each with every
+   gutter gray; the first result passing `isReliableSplit` wins, else the page has no panels.
+   (`PageLook.method`: REGIONS, XY_CUT, NONE.)
+
+**Region detector** (`RegionPanelDetector.kt`, `findRegionPanels`): gutter-colored pixels
+(`isGutterLevel`, same tolerance as the XY-cut) are flooded from the crop's border; everything
+the flood doesn't reach is content, and each 4-connected piece of it a candidate. Needs no
+straight gutter across the page, so tilted scans and uneven rows split. Then:
+- a region that is two panels joined by a balloon is cut across the gutter: ≥ 2 lines where
+  the region fills ≤ 50% (`bridgeShare`), with lines ≥ 70% (`edgeShare`) within 3 lines on
+  both sides (the panels' edges); cut in the run's middle; rows first, then columns, 4 deep;
+- if any region big enough for a panel fills < 80% of its box (`minPanelFill`), nothing is
+  kept: figures on a dark cover the flood ran round;
+- specks (< 0.05% of the page, `speckShare`) are dropped; balloons, captions and strips (under
+  1% of the page, or thinner than 6% either way) join the nearest panel within 2.5% of the
+  long side (`joinGapShare`) unless that would stretch it over another panel (a page title);
+  the rest are dropped;
+- boxes overlapping by 30% of the smaller (`overlapShare`) merge;
+- a box that is really several panels the flood couldn't get between (gutters closed off from
+  the page's edge) is cut the same way as a balloon's bridge, but on lines ≥ 95% gutter color
+  with solid edges both sides (a row of white balloons has no solid edges), only if every
+  piece is panel-sized;
+- `readingOrder`: panels grouped into rows (heights overlapping by half the smaller, the band
+  growing as panels join), top to bottom; each row into columns the same way, left to right;
+  each column into rows again (6 deep). A tilted row still reads left to right; a tall panel
+  beside two stacked ones reads left, then down.
+
+**Panel detection** (part 3, the XY-cut; now the fallback). `comics/PanelDetector.kt`,
+plain Kotlin. Since part 6 it runs on the page analysis's leveled gray inside the crop
+(above); before, the page was made gray (`grayFromArgb`: 0.299 R + 0.587 G + 0.114 B) and
 shrunk by averaging to 800 px on its long side (`shrinkToLongSide`, `PANEL_GRID_LONG_SIDE`).
 - **Gutter color** (`gutterLevel`): the outer 2% of the page all round. Pixels ≥ 160 are
   light, ≤ 80 dark; whichever group is bigger, if it fills at least half the border
@@ -764,25 +836,38 @@ shrunk by averaging to 800 px on its long side (`shrinkToLongSide`, `PANEL_GRID_
   strip), together covering ≥ 60% (`minCoverage`).
 - Panels come back in the page's own pixels (`PixelRect`, rounded outward).
 - **Cache**: `ComicStore.panels(meta, page)` reads `comic-library/<id>/panels.json`
-  (`ComicPanels`: `version` = `PANEL_DETECTOR_VERSION`, `pages` keyed by the page's name in the
-  CBZ → `PagePanels(pageWidth, pageHeight, panels)`, an empty list = whole page), else looks
-  and adds the page (written to a temp file, then moved over). A page that can't be read isn't
-  cached. Bump `PANEL_DETECTOR_VERSION` when the detector changes; the file goes with the
+  (`ComicPanels`: `version` = `PANEL_DETECTOR_VERSION`, now 2, `pages` keyed by the page's name
+  in the CBZ → `PagePanels(pageWidth, pageHeight, panels, crop, levels)`: panels in page pixels,
+  an empty list = whole page; `crop` a `PanelBox`, null = nothing cropped; `levels` a
+  `LevelsBox(black [r, g, b], white [r, g, b])`), else looks and adds the page (written to a
+  temp file, then moved over). A page that can't be read isn't cached. Bump
+  `PANEL_DETECTOR_VERSION` when any step of the page analysis changes; the file goes with the
   comic's folder when the comic changes.
-- **Known misses**: panels whose rows overlap by a few pixels or aren't straight (no clean
-  gutter across), slanted panels, and side-by-side panels with no full-height gutter (kept as
-  one box). Rarely, caption boxes on a splash or bright art are taken for panels.
+- **Known misses** (XY-cut): panels whose rows overlap by a few pixels or aren't straight (no
+  clean gutter across), slanted panels, and side-by-side panels with no full-height gutter
+  (kept as one box). Rarely, caption boxes on a splash or bright art are taken for panels.
+  The region detector covers the first and last of these; still missed by both: slanted
+  panel borders (boxes overlap), pages where dark art runs into black gutters, and pages whose
+  balloons or round insets join every panel. Those show whole. The crop can take off up to
+  15% of a flat, nearly white sky running off the top of a borderless page.
 - **Report test** `PanelReportTest` (skipped unless `READER_TEST_COMICS` is set;
   `READER_TEST_COMICS_LIMIT` = first N comics; `READER_TEST_PANELS` = other thresholds, e.g.
-  `gutterShare=0.97,gutterTolerance=48`): 10 pages spread through each CBZ / CBR under the
-  folder, overlays with numbered boxes (a fallback page gets red bands, a "0" and the cut's
-  pieces in thin gray) in `tool/build/panel-report/<folder>/` with `index.html` and
-  `summary.txt` (pages, panels, fallbacks and why). The Android test classpath has no
-  `javax.imageio`, so pages are decoded by the PC helper `scripts/panel-report/PagePictures.java`
-  (run with the JDK's `java`; outside `tool/src`, where `.java` files are banned); CBRs are
-  unpacked with 7-Zip. Run one Gradle command at a time (8 GB laptop). Last run (defaults
-  above): Earth-One, first 15 comics, panels on 102 of 150 pages; Rebirth, first 10, 44 of
-  100. Most fallbacks there are covers, splashes and slanted layouts.
+  `gutterShare=0.97,gutterTolerance=48,minPanelFill=0.75`): 10 pages spread through each CBZ /
+  CBR under the folder, run through `analysePage` exactly as on the phone, and through the old
+  XY-cut alone (no crop or levels) for comparison. Overlays in
+  `tool/build/panel-report/<folder>/` (the page drawn with Clean up scans Auto, the crop as a
+  dashed yellow line, numbered panel boxes; a fallback page gets red bands, a "0" and the region
+  detector's pieces in thin gray) with `index.html` and `summary.txt` (new and old hit rates,
+  regions / XY-cut counts, crop, fallbacks and why; per page the method and the old count). The
+  Android test classpath has no `javax.imageio`, so pages are decoded by the PC helper
+  `scripts/panel-report/PagePictures.java` (run with the JDK's `java`; outside `tool/src`,
+  where `.java` files are banned), which shrinks each page by a power of 2 as the phone does and
+  hands over its colors; CBRs are unpacked with 7-Zip. Run one Gradle command at a time (8 GB
+  laptop). Last run (part 6 defaults): Earth-One, first 15 comics, panels on 114 of 150 pages
+  (76%; 105 by regions, 9 by XY-cut) against 101 (67%) for the old detector; Rebirth, first 10,
+  44 of 100 against 44. Fallbacks are mostly covers, splashes, slanted layouts and (Rebirth)
+  borderless art bleeding into black gutters. Beyond the counts, the region detector fixed
+  over- and under-splits the XY-cut made on Golden Age pages (12 → 8, 4 → 9 on real pages).
 
 **`comic_position`** (database version 4): `slug` (PK, "comic:<path>"), `page` (1-based),
 `panel` (0 = whole page, else the panel, 1-based, in Panels mode), `updatedAt`. Reads and writes go

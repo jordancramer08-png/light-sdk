@@ -26,6 +26,10 @@ data class ListenSettings(
     val albumSort: ListSort = ListSort(),
     val artistSort: ListSort = ListSort(),
     val bookSort: ListSort = ListSort(),
+    /** Seconds an audiobook goes back when played again after a pause under 10 minutes. */
+    val rewindShortSeconds: Int = 3,
+    /** Seconds an audiobook goes back after a pause of 10 minutes or more. */
+    val rewindLongSeconds: Int = 10,
 )
 
 /** Reads and writes [ListenSettings] as JSON. A missing or broken file reads as the defaults. */

@@ -2,11 +2,23 @@ package com.thelightphone.listen.playback
 
 import android.util.Log
 import com.thelightphone.listen.books.Book
+import com.thelightphone.listen.books.BookChapter
 import com.thelightphone.listen.books.BookFile
+import com.thelightphone.listen.books.BookLibrary
+import com.thelightphone.listen.books.BookPosition
+import com.thelightphone.listen.books.BookPositions
+import com.thelightphone.listen.books.FINISHED_WITHIN_MS
+import com.thelightphone.listen.books.bookPositionMs
+import com.thelightphone.listen.books.chapterIndexAt
+import com.thelightphone.listen.books.chaptersOf
+import com.thelightphone.listen.books.isNearEnd
+import com.thelightphone.listen.books.locate
+import com.thelightphone.listen.books.rewindMs
 import com.thelightphone.listen.music.MusicLibrary
 import com.thelightphone.listen.music.Song
 import com.thelightphone.listen.music.songFrom
 import com.thelightphone.listen.storage.ListenPaths
+import com.thelightphone.listen.storage.Settings
 import com.thelightphone.listen.storage.StorageAccess
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.audio.DefaultLightAudio
@@ -42,26 +54,43 @@ import java.io.File
 /** The loaded music queue, in its own (unshuffled) order. */
 data class MusicQueue(val songs: List<Song>, val source: QueueSource)
 
+/** A running sleep timer: pause at [endsAt] (wall clock), or at the end of the chapter. */
+sealed interface SleepTimer {
+    data class At(val endsAt: Long) : SleepTimer
+    data object EndOfChapter : SleepTimer
+}
+
 /**
  * The one owner of Listen's player, for the whole app. The SDK allows one detached player
  * handle per process, and playback lives in the SDK's media service, so it keeps going with
  * the screen off, in other tools, and from the notification and Bluetooth buttons.
  *
- * Every screen calls [attach] when it shows. The first time (or after the service stopped,
- * e.g. Listen was swiped away while paused) that opens a player and puts the saved music
- * queue back, **paused** at the saved spot, from /sdcard/Listen/.state/music_state.json.
+ * Music and audiobooks share the one player and keep **separate** resume points: the music
+ * spot in /sdcard/Listen/.state/music_state.json, each book's place in book_positions.json.
+ * Starting a book saves the music spot first; [resumeMusic] puts it back (and saves the
+ * book's place). music_state.json also says whether a book was loaded, so Listen reopens
+ * whichever was playing last, **paused**.
  *
- * The music spot is saved every 5 seconds while playing, and at once on pause, skip, seek,
- * shuffle/repeat changes and when Listen goes to the background.
+ * Every screen calls [attach] when it shows. The first time (or after the service stopped,
+ * e.g. Listen was swiped away while paused) that opens a player and restores that spot.
+ *
+ * Saving: music every 5 seconds while playing, a book every 10 seconds, and both at once on
+ * pause, skip, seek, chapter change, when Listen goes to the background and when the service
+ * stops.
  */
 object PlaybackHub {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    /** One writer thread, so music_state.json writes land in the order they were asked for. */
+    private val io = Dispatchers.IO.limitedParallelism(1)
     private val store by lazy { MusicStateStore(File(ListenPaths.state, "music_state.json")) }
 
     private var audio: LightAudio? = null
     private var player: LightAudioPlayer? = null
     private var followJob: Job? = null
     private var restoreJob: Job? = null
+    private var sleepJob: Job? = null
+    /** Music attributes for songs, speech attributes for books (asked of the service on change). */
+    private var usage = LightAudioUsage.Music
 
     private val _queue = MutableStateFlow<MusicQueue?>(null)
     private val _index = MutableStateFlow(NO_MEDIA_ITEM)
@@ -74,19 +103,31 @@ object PlaybackHub {
 
     val queue: StateFlow<MusicQueue?> = _queue.asStateFlow()
 
-    /**
-     * The audiobook loaded instead of music, or null. While a book is loaded the music queue
-     * is null, and music_state.json is left alone (it keeps the music spot saved just before).
-     * Book positions are saved from Session 6.
-     */
+    /** The audiobook loaded instead of music, or null. While a book is loaded the music queue is null. */
     private val _book = MutableStateFlow<Book?>(null)
     val book: StateFlow<Book?> = _book.asStateFlow()
+
+    /** The loaded book's chapters (empty while music is loaded). */
+    private val _chapters = MutableStateFlow<List<BookChapter>>(emptyList())
+    val chapters: StateFlow<List<BookChapter>> = _chapters.asStateFlow()
+
+    /** The loaded book's speed (music always plays at 1.0). */
+    private val _speed = MutableStateFlow(1f)
+    val speed: StateFlow<Float> = _speed.asStateFlow()
+
+    private val _sleep = MutableStateFlow<SleepTimer?>(null)
+    val sleep: StateFlow<SleepTimer?> = _sleep.asStateFlow()
+
+    /** The music spot kept while a book plays (and the last one saved), or null. */
+    private val _musicSpot = MutableStateFlow<MusicState?>(null)
+    val musicSpot: StateFlow<MusicState?> = _musicSpot.asStateFlow()
 
     /** The index of the playing item: a song in the queue, or a file of the book. */
     val index: StateFlow<Int> = _index.asStateFlow()
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
+    /** Position in the current song or book file. */
     val positionMs: StateFlow<Long> = _positionMs.asStateFlow()
-    /** The player's duration for the current song, or 0 while it isn't known yet. */
+    /** The player's duration for the current song or book file, or 0 while it isn't known yet. */
     val durationMs: StateFlow<Long> = _durationMs.asStateFlow()
     val shuffle: StateFlow<Boolean> = _shuffle.asStateFlow()
     val repeat: StateFlow<LightRepeatMode> = _repeat.asStateFlow()
@@ -98,28 +139,46 @@ object PlaybackHub {
         queue?.songs?.getOrNull(index)
     }.stateIn(scope, SharingStarted.Eagerly, null)
 
+    /** The index into [chapters] of the chapter playing, or -1 while no book is loaded. */
+    private val _chapter = MutableStateFlow(-1)
+    val chapter: StateFlow<Int> = _chapter.asStateFlow()
+
     /** Whether the user last asked to play (so an unplayable file is skipped and play continues). */
     private var wantsToPlay = false
     /** Unplayable files in a row; stops skipping once the whole queue has failed. */
     private var failuresInARow = 0
-    /** The last spot written to music_state.json (also used to restore without re-reading it). */
-    private var lastSaved: MusicState? = null
     private var lastSavedText: String? = null
+    /** When the book was paused (wall clock), for the rewind when it plays again; null while playing. */
+    private var pausedAt: Long? = null
 
     init {
         scope.launch {
             while (true) {
-                delay(SAVE_EVERY_MS)
-                if (_isPlaying.value) save()
+                delay(MUSIC_SAVE_EVERY_MS)
+                if (_isPlaying.value && _book.value == null) saveMusic()
             }
+        }
+        scope.launch {
+            while (true) {
+                delay(BOOK_SAVE_EVERY_MS)
+                if (_isPlaying.value && _book.value != null) saveBook()
+            }
+        }
+        scope.launch {
+            combine(_chapters, _index, _positionMs) { chapters, index, position ->
+                if (chapters.isEmpty() || index < 0) -1
+                else chapterIndexAt(chapters, BookPosition(fileIndex = index, positionMs = position))
+            }.collect(::onChapter)
         }
     }
 
-    /** Called by every screen when it shows: makes sure a player is open and the music spot restored. */
+    /** Called by every screen when it shows: makes sure a player is open and the last spot restored. */
     fun attach(sealedActivity: SealedLightActivity) {
         audio = DefaultLightAudio(sealedActivity)
         ensurePlayer()
     }
+
+    // ---- Music ----
 
     /**
      * Plays [songs] from [startIndex], replacing the queue. [shuffle] turns shuffle on or off
@@ -130,11 +189,7 @@ object PlaybackHub {
         if (songs.isEmpty() || startIndex !in songs.indices) return
         restoreJob?.cancel()
         val player = ensurePlayer() ?: return
-        if (_book.value != null) {
-            _book.value = null
-            player.setShuffleEnabled(_shuffle.value)
-            player.setRepeatMode(_repeat.value)
-        }
+        leaveBook(player)
         _queue.value = MusicQueue(songs, source)
         _index.value = startIndex
         _positionMs.value = 0
@@ -147,31 +202,137 @@ object PlaybackHub {
         }
         player.setMediaQueue(songs.map(::itemFor), startIndex)
         player.play()
-        save()
+        saveMusic()
     }
 
-    /**
-     * Plays [book] from the start of its first file. The music spot is saved first and then
-     * kept as it is; music's shuffle and repeat are turned off on the player (and put back
-     * when music plays again).
-     */
-    fun playBook(book: Book) {
-        if (book.files.isEmpty()) return
+    /** Back from a book to the music spot saved when the book started, and plays it. */
+    fun resumeMusic() {
+        val saved = _musicSpot.value ?: return
+        if (_book.value == null) return
         restoreJob?.cancel()
         val player = ensurePlayer() ?: return
-        save()
-        _queue.value = null
-        _book.value = book
-        _index.value = 0
-        _positionMs.value = 0
-        _durationMs.value = 0
-        failuresInARow = 0
-        wantsToPlay = true
-        player.setShuffleEnabled(false)
-        player.setRepeatMode(LightRepeatMode.Off)
-        player.setMediaQueue(book.files.map { itemFor(book, it) }, 0)
-        player.play()
+        restoreJob = scope.launch {
+            val state = withContext(Dispatchers.IO) {
+                saved.restorable { File(ListenPaths.music, it).isFile }
+            } ?: run {
+                showMessage("That music isn't on the phone any more")
+                return@launch
+            }
+            loadMusic(player, state, songsFor(state.paths), playNow = true)
+            saveMusic()
+        }
     }
+
+    // ---- Audiobooks ----
+
+    /**
+     * Plays [book]: from [chapter] when given, else from its saved place (a little earlier,
+     * see [rewindMs]), or from the start when it's new or finished. The music spot is saved
+     * first and kept for [resumeMusic]. When the book is already loaded, it just plays (or
+     * jumps to [chapter]).
+     */
+    fun playBook(book: Book, chapter: BookChapter? = null) {
+        if (book.files.isEmpty()) return
+        if (_book.value?.id == book.id) {
+            chapter?.let(::seekToChapter)
+            play()
+            return
+        }
+        restoreJob?.cancel()
+        val player = ensurePlayer() ?: return
+        if (_book.value == null) saveMusic() else saveBook()
+
+        val saved = BookPositions.positions.value[book.id]
+        val speed = saved?.speed?.takeIf { it in SPEEDS } ?: 1f
+        val start = when {
+            chapter != null -> BookPosition(fileIndex = chapter.fileIndex, positionMs = chapter.startMs)
+            saved == null -> BookPosition()
+            isNearEnd(book, saved) -> BookPosition().also { startOverSaved(book, saved) }
+            else -> {
+                val back = rewindFor(System.currentTimeMillis() - saved.lastPlayedAt)
+                clamp(book, saved).let { it.copy(positionMs = (it.positionMs - back).coerceAtLeast(0)) }
+            }
+        }
+        loadBook(player, book, start, speed, playNow = true)
+        saveBook()
+    }
+
+    /** Back to the start of the loaded [book]: not finished, speed kept. */
+    fun startBookOver(book: Book) {
+        val saved = BookPositions.positions.value[book.id] ?: BookPosition()
+        startOverSaved(book, saved)
+        if (_book.value?.id != book.id) return
+        val player = ensurePlayer() ?: return
+        pausedAt = null
+        seekBookTo(player, BookPosition())
+    }
+
+    /** Back 15 s / forward 30 s through the whole book (across files). */
+    fun skipBook(deltaMs: Long) {
+        val book = _book.value ?: return
+        val player = ensurePlayer() ?: return
+        val here = BookPosition(fileIndex = _index.value.coerceAtLeast(0), positionMs = _positionMs.value)
+        val target = if (book.files.all { it.durationMs > 0 }) {
+            locate(book, bookPositionMs(book, here) + deltaMs)
+        } else {
+            // Lengths not known yet: stay inside this file.
+            val end = _durationMs.value.takeIf { it > 0 } ?: Long.MAX_VALUE
+            here.copy(positionMs = (here.positionMs + deltaMs).coerceIn(0, end))
+        }
+        seekBookTo(player, target)
+    }
+
+    /** The start of this chapter, or of the previous one when already near the start. */
+    fun previousChapter() {
+        val chapters = _chapters.value
+        val i = _chapter.value
+        val current = chapters.getOrNull(i) ?: return
+        val intoChapter = _positionMs.value - current.startMs
+        val target = if (intoChapter > RESTART_THRESHOLD_MS || i == 0) current else chapters[i - 1]
+        seekToChapter(target)
+    }
+
+    fun nextChapter() {
+        val next = _chapters.value.getOrNull(_chapter.value + 1) ?: return
+        seekToChapter(next)
+    }
+
+    fun seekToChapter(chapter: BookChapter) {
+        val player = ensurePlayer() ?: return
+        seekBookTo(player, BookPosition(fileIndex = chapter.fileIndex, positionMs = chapter.startMs))
+    }
+
+    /** Pitch-corrected speed for the loaded book, remembered in its place. */
+    fun setSpeed(speed: Float) {
+        if (_book.value == null) return
+        val player = ensurePlayer() ?: return
+        _speed.value = speed
+        player.speed = speed
+        saveBook()
+    }
+
+    /** Pauses after [minutes], or at the end of the chapter when null. */
+    fun startSleepTimer(minutes: Int?) {
+        sleepJob?.cancel()
+        if (minutes == null) {
+            _sleep.value = SleepTimer.EndOfChapter
+            return
+        }
+        val endsAt = System.currentTimeMillis() + minutes * 60_000L
+        _sleep.value = SleepTimer.At(endsAt)
+        sleepJob = scope.launch {
+            delay(endsAt - System.currentTimeMillis())
+            _sleep.value = null
+            pause()
+        }
+    }
+
+    fun cancelSleepTimer() {
+        sleepJob?.cancel()
+        _sleep.value = null
+    }
+
+    // ---- Both ----
 
     fun togglePlayPause() {
         if (_isPlaying.value) pause() else play()
@@ -180,6 +341,15 @@ object PlaybackHub {
     fun play() {
         if (_queue.value == null && _book.value == null) return
         val player = ensurePlayer() ?: return
+        val book = _book.value
+        if (book != null) {
+            // Played to the end: starts again from the beginning.
+            if (isAtBookEnd(book, currentBookPosition(saved = null))) {
+                startBookOver(book)
+            } else {
+                rewindAfterPause(player)
+            }
+        }
         wantsToPlay = true
         failuresInARow = 0
         // After an error or the end of the queue, the service prepares or rewinds first.
@@ -208,14 +378,20 @@ object PlaybackHub {
         saveSoon()
     }
 
+    /** Seeks in the current song or book file. */
     fun seekTo(ms: Long) {
         val player = ensurePlayer() ?: return
+        if (_book.value != null) {
+            seekBookTo(player, BookPosition(fileIndex = _index.value.coerceAtLeast(0), positionMs = ms))
+            return
+        }
         _positionMs.value = ms
         player.seekTo(ms)
         saveSoon()
     }
 
     fun toggleShuffle() {
+        if (_book.value != null) return
         val player = ensurePlayer() ?: return
         val on = !_shuffle.value
         _shuffle.value = on
@@ -225,6 +401,7 @@ object PlaybackHub {
 
     /** Off → All → One → Off. */
     fun cycleRepeat() {
+        if (_book.value != null) return
         val player = ensurePlayer() ?: return
         val mode = when (_repeat.value) {
             LightRepeatMode.Off -> LightRepeatMode.All
@@ -236,9 +413,136 @@ object PlaybackHub {
         saveSoon()
     }
 
-    /** Saves the music spot now (Listen is going to the background). */
+    /** Saves the music spot or the book's place now (Listen is going to the background). */
     fun saveNow() {
-        save()
+        saveCurrent()
+    }
+
+    // ---- Loading ----
+
+    private fun loadMusic(player: LightAudioPlayer, state: MusicState, songs: List<Song>, playNow: Boolean) {
+        leaveBook(player)
+        val repeat = repeatFrom(state.repeat)
+        _queue.value = MusicQueue(songs, state.source)
+        _index.value = state.index
+        _positionMs.value = state.positionMs
+        _durationMs.value = 0
+        _shuffle.value = state.shuffle
+        _repeat.value = repeat
+        failuresInARow = 0
+        wantsToPlay = playNow
+        _musicSpot.value = state.copy(book = null)
+        player.setShuffleEnabled(state.shuffle)
+        player.setRepeatMode(repeat)
+        player.setMediaQueue(songs.map(::itemFor), state.index, state.positionMs)
+        if (playNow) player.play()
+    }
+
+    /** Before music loads: saves the book's place and puts music's settings back on the player. */
+    private fun leaveBook(player: LightAudioPlayer) {
+        if (_book.value != null) saveBook()
+        cancelSleepTimer()
+        _book.value = null
+        _chapters.value = emptyList()
+        pausedAt = null
+        setUsage(player, LightAudioUsage.Music)
+        player.speed = 1f
+        player.setShuffleEnabled(_shuffle.value)
+        player.setRepeatMode(_repeat.value)
+    }
+
+    private fun loadBook(player: LightAudioPlayer, book: Book, start: BookPosition, speed: Float, playNow: Boolean) {
+        if (_book.value?.id != book.id) cancelSleepTimer()
+        _queue.value = null
+        _book.value = book
+        _chapters.value = chaptersOf(book)
+        _index.value = start.fileIndex
+        _positionMs.value = start.positionMs
+        _durationMs.value = 0
+        _speed.value = speed
+        failuresInARow = 0
+        wantsToPlay = playNow
+        pausedAt = null
+        setUsage(player, LightAudioUsage.Speech)
+        player.setShuffleEnabled(false)
+        player.setRepeatMode(LightRepeatMode.Off)
+        player.speed = speed
+        player.setMediaQueue(book.files.map { itemFor(book, it) }, start.fileIndex, start.positionMs)
+        markBookLoaded(book.id)
+        if (playNow) player.play()
+    }
+
+    private fun setUsage(player: LightAudioPlayer, wanted: LightAudioUsage) {
+        if (usage == wanted) return
+        usage = wanted
+        player.setUsage(wanted)
+    }
+
+    /** A user seek in the book: moves the player, and saves the new place. */
+    private fun seekBookTo(player: LightAudioPlayer, target: BookPosition) {
+        val book = _book.value ?: return
+        val clamped = clamp(book, target)
+        // A chosen spot plays as it is, without the rewind.
+        pausedAt = null
+        _index.value = clamped.fileIndex
+        _positionMs.value = clamped.positionMs
+        // A seek moves the end-of-chapter timer on to the chapter it lands in.
+        sleepChapter = chapterIndexAt(_chapters.value, clamped)
+        player.seekTo(clamped.fileIndex, clamped.positionMs)
+        saveSoon()
+    }
+
+    /** [position] made to fit [book]: a file that exists and a place inside it. */
+    private fun clamp(book: Book, position: BookPosition): BookPosition {
+        val index = position.fileIndex.coerceIn(0, book.files.lastIndex)
+        val length = book.files[index].durationMs
+        val ms = position.positionMs.coerceAtLeast(0).let { if (length > 0) it.coerceAtMost(length) else it }
+        return position.copy(fileIndex = index, positionMs = ms)
+    }
+
+    private fun startOverSaved(book: Book, saved: BookPosition) {
+        BookPositions.record(
+            book.id,
+            saved.copy(fileIndex = 0, positionMs = 0, finished = false, lastPlayedAt = System.currentTimeMillis()),
+        )
+    }
+
+    // ---- Rewind and sleep ----
+
+    private fun rewindFor(pausedForMs: Long): Long {
+        val settings = Settings.settings.value
+        return rewindMs(pausedForMs, settings.rewindShortSeconds, settings.rewindLongSeconds)
+    }
+
+    /** Before a paused book plays again: goes back a little, more after a long pause. */
+    private fun rewindAfterPause(player: LightAudioPlayer) {
+        val at = pausedAt ?: return
+        pausedAt = null
+        val back = rewindFor(System.currentTimeMillis() - at)
+        if (back <= 0) return
+        val target = BookPosition(fileIndex = _index.value.coerceAtLeast(0), positionMs = (_positionMs.value - back).coerceAtLeast(0))
+        _positionMs.value = target.positionMs
+        player.seekTo(target.fileIndex, target.positionMs)
+    }
+
+    /** The chapter an end-of-chapter timer waits to finish. */
+    private var sleepChapter = -1
+
+    private fun onChapter(index: Int) {
+        val previous = _chapter.value
+        _chapter.value = index
+        if (index < 0 || previous < 0 || index == previous) {
+            sleepChapter = index
+            return
+        }
+        // Played on into another chapter.
+        if (_sleep.value == SleepTimer.EndOfChapter && index != sleepChapter && _isPlaying.value) {
+            _sleep.value = null
+            pause()
+            _chapters.value.getOrNull(index)?.let { seekToChapter(it) }
+        }
+        sleepChapter = index
+        saveSoon()
     }
 
     // ---- Player lifecycle ----
@@ -249,7 +553,7 @@ object PlaybackHub {
         if (!StorageAccess.hasAllFilesAccess()) return null
         val factory = audio ?: return null
         val opened = try {
-            factory.newPlayer(LightAudioUsage.Music, LightAudioPlayback.Detached)
+            factory.newPlayer(usage, LightAudioPlayback.Detached)
         } catch (e: LightAudioException) {
             Log.w("Listen", "Couldn't open the player", e)
             return null
@@ -262,32 +566,39 @@ object PlaybackHub {
 
     /**
      * After connecting: if the service is still playing our queue (Listen was reopened while
-     * music played), keep it. If the service is new and empty, load the saved spot, paused.
+     * it played), keep it. If the service is new and empty, load the saved book or music
+     * spot, paused.
      */
     private suspend fun restoreInto(player: LightAudioPlayer) {
         if (!player.awaitReady()) return
-        if (player.currentMediaItemIndex.value != NO_MEDIA_ITEM && (_queue.value != null || _book.value != null)) return
+        val loadedBook = _book.value
+        if (player.currentMediaItemIndex.value != NO_MEDIA_ITEM && (_queue.value != null || loadedBook != null)) return
 
-        val saved = lastSaved ?: withContext(Dispatchers.IO) { store.load() } ?: return
+        // The service restarted under a loaded book: load its saved place again.
+        if (loadedBook != null) {
+            restoreBook(player, loadedBook.id)
+            return
+        }
+        val saved = _musicSpot.value ?: withContext(Dispatchers.IO) { store.load() } ?: return
+        _musicSpot.value = saved
+        if (saved.book != null && restoreBook(player, saved.book)) return
+
         val state = withContext(Dispatchers.IO) {
             saved.restorable { File(ListenPaths.music, it).isFile }
         } ?: return
-        val songs = songsFor(state.paths)
+        loadMusic(player, state, songsFor(state.paths), playNow = false)
+    }
 
-        val shuffle = state.shuffle
-        val repeat = repeatFrom(state.repeat)
-        _queue.value = MusicQueue(songs, state.source)
-        _index.value = state.index
-        _positionMs.value = state.positionMs
-        _durationMs.value = 0
-        _shuffle.value = shuffle
-        _repeat.value = repeat
-        wantsToPlay = false
-        lastSaved = state
-        _book.value = null
-        player.setShuffleEnabled(shuffle)
-        player.setRepeatMode(repeat)
-        player.setMediaQueue(songs.map(::itemFor), state.index, state.positionMs)
+    /** Loads book [id] paused at its saved place; false when it isn't on the phone. */
+    private suspend fun restoreBook(player: LightAudioPlayer, id: String): Boolean {
+        withTimeoutOrNull(LIBRARY_WAIT_MS) { BookLibrary.state.first { it.loaded } }
+        withTimeoutOrNull(LIBRARY_WAIT_MS) { BookPositions.loaded.first { it } }
+        val book = BookLibrary.state.value.book(id)?.takeIf { it.files.isNotEmpty() } ?: return false
+        val saved = BookPositions.positions.value[id] ?: BookPosition()
+        loadBook(player, book, clamp(book, saved), saved.speed.takeIf { it in SPEEDS } ?: 1f, playNow = false)
+        // The pause started when it was last played, so the rewind fits how long ago that was.
+        pausedAt = saved.lastPlayedAt.takeIf { it > 0 }
+        return true
     }
 
     /** Library songs for [paths], waiting briefly for the library; a file-name fallback otherwise. */
@@ -309,7 +620,10 @@ object PlaybackHub {
                         wantsToPlay = true
                         failuresInARow = 0
                         _message.value = null
+                        // Played again from the notification or a headset: rewind here instead.
+                        if (_book.value != null) rewindAfterPause(player)
                     } else {
+                        if (_book.value != null && pausedAt == null) pausedAt = System.currentTimeMillis()
                         saveSoon()
                     }
                 }
@@ -330,15 +644,17 @@ object PlaybackHub {
             launch { player.repeatMode.collect { if (hasQueue() && _book.value == null) _repeat.value = it } }
             launch { player.error.collect { error -> if (error != null) onError(player, error) } }
             launch {
-                // The service stopped (e.g. swiped away while paused). Keep showing the
-                // song, paused; the next attach opens a fresh player and restores it.
+                // The service stopped (e.g. swiped away while paused). Save, and keep showing
+                // what was loaded, paused; the next attach opens a fresh player and restores it.
                 player.availability.first { it == LightAudioPlayerAvailability.Released }
+                saveCurrent()
                 _isPlaying.value = false
+                if (this@PlaybackHub.player === player) usage = LightAudioUsage.Music
             }
         }
     }
 
-    /** "Can't play this file", then on to the next song (never a crash, never a loop). */
+    /** "Can't play this file", then on to the next song or file (never a crash, never a loop). */
     private fun onError(player: LightAudioPlayer, error: LightAudioError) {
         Log.w("Listen", "Playback error ${error.diagnostic} at item ${error.itemIndex}")
         showMessage(CANT_PLAY)
@@ -365,11 +681,52 @@ object PlaybackHub {
     private fun saveSoon() {
         scope.launch {
             delay(SETTLE_MS)
-            save()
+            saveCurrent()
         }
     }
 
-    private fun save() {
+    private fun saveCurrent() {
+        if (_book.value != null) saveBook() else saveMusic()
+    }
+
+    /** The loaded book's place now; [saved] supplies what the player doesn't know (finished). */
+    private fun currentBookPosition(saved: BookPosition?) = BookPosition(
+        fileIndex = _index.value,
+        positionMs = _positionMs.value,
+        speed = _speed.value,
+        lastPlayedAt = saved?.lastPlayedAt ?: 0,
+        finished = saved?.finished ?: false,
+    )
+
+    /**
+     * Saves the loaded book's place in book_positions.json. It counts as finished once the
+     * last 30 seconds are reached. "Last played" moves on only while it plays or the place
+     * changed, so the rewind knows how long a pause really was.
+     */
+    private fun saveBook() {
+        val book = _book.value ?: return
+        if (_index.value !in book.files.indices) return
+        val saved = BookPositions.positions.value[book.id]
+        val here = currentBookPosition(saved)
+        val moved = saved == null || saved.fileIndex != here.fileIndex || saved.positionMs != here.positionMs
+        BookPositions.record(
+            book.id,
+            here.copy(
+                lastPlayedAt = if (_isPlaying.value || moved) System.currentTimeMillis() else here.lastPlayedAt,
+                // "Mark finished" holds until the place moves on.
+                finished = isAtBookEnd(book, here) || (here.finished && !moved),
+            ),
+        )
+    }
+
+    /** In the book's last 30 seconds, by the index's lengths or the player's for the last file. */
+    private fun isAtBookEnd(book: Book, here: BookPosition): Boolean {
+        val lastFile = here.fileIndex == book.files.lastIndex
+        val playerNearEnd = lastFile && _durationMs.value > 0 && _durationMs.value - here.positionMs <= FINISHED_WITHIN_MS
+        return playerNearEnd || isNearEnd(book, here)
+    }
+
+    private fun saveMusic() {
         val queue = _queue.value ?: return
         val index = _index.value
         if (index !in queue.songs.indices) return
@@ -381,8 +738,14 @@ object PlaybackHub {
             shuffle = _shuffle.value,
             repeat = repeatName(_repeat.value),
         )
-        lastSaved = state
-        scope.launch(Dispatchers.IO) { write(state) }
+        _musicSpot.value = state
+        scope.launch(io) { write(state) }
+    }
+
+    /** Notes in music_state.json that book [id] is loaded, keeping the music spot as it was. */
+    private fun markBookLoaded(id: String) {
+        val state = (_musicSpot.value ?: MusicState()).copy(book = id)
+        scope.launch(io) { write(state) }
     }
 
     @Synchronized
@@ -429,7 +792,14 @@ object PlaybackHub {
         else -> LightRepeatMode.Off
     }
 
-    private const val SAVE_EVERY_MS = 5_000L
+    /** The audiobook speeds on offer (pitch stays natural at every one). */
+    val SPEEDS = listOf(0.75f, 1.0f, 1.1f, 1.25f, 1.5f, 1.75f, 2.0f)
+
+    /** The sleep timer choices in minutes (plus "end of chapter"). */
+    val SLEEP_MINUTES = listOf(15, 30, 45, 60)
+
+    private const val MUSIC_SAVE_EVERY_MS = 5_000L
+    private const val BOOK_SAVE_EVERY_MS = 10_000L
     private const val SETTLE_MS = 300L
     private const val RESTART_THRESHOLD_MS = 3_000L
     private const val LIBRARY_WAIT_MS = 5_000L

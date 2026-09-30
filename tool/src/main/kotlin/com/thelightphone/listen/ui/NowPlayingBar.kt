@@ -40,7 +40,8 @@ private const val ART_GRID_UNITS = 3.6f
 fun NowPlayingBar(onOpen: () -> Unit) {
     val song by PlaybackHub.currentSong.collectAsState()
     val book by PlaybackHub.book.collectAsState()
-    val index by PlaybackHub.index.collectAsState()
+    val chapters by PlaybackHub.chapters.collectAsState()
+    val chapter by PlaybackHub.chapter.collectAsState()
     val playing by PlaybackHub.isPlaying.collectAsState()
     val library by MusicLibrary.state.collectAsState()
     val loadedBook = book
@@ -70,8 +71,8 @@ fun NowPlayingBar(onOpen: () -> Unit) {
             Column(modifier = Modifier.padding(start = 0.75f.gridUnitsAsDp())) {
                 if (loadedBook != null) {
                     OneLine(text = loadedBook.title, variant = LightTextVariant.Copy)
-                    val chapter = loadedBook.files.getOrNull(index)?.label ?: loadedBook.author
-                    OneLine(text = chapter, variant = LightTextVariant.Detail, lighten = true)
+                    val line = chapters.getOrNull(chapter)?.title ?: loadedBook.author
+                    OneLine(text = line, variant = LightTextVariant.Detail, lighten = true)
                 } else if (current != null) {
                     OneLine(text = current.title, variant = LightTextVariant.Copy)
                     OneLine(text = current.artist, variant = LightTextVariant.Detail, lighten = true)

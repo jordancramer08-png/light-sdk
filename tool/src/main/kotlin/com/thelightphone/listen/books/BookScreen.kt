@@ -42,12 +42,13 @@ import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.gridUnitsAsDp
+import com.thelightphone.sdk.ui.lightClickable
 
 /** The cover at the top of the book screen (grid units square). */
 private const val COVER_GRID_UNITS = 9f
 
 /** Chapter rows (grid units, divider included). */
-private const val CHAPTER_ROW_GRID_UNITS = 4f
+const val CHAPTER_ROW_GRID_UNITS = 4f
 
 /**
  * One audiobook: cover, title, author, narrator, series and number, total length and time
@@ -98,8 +99,19 @@ class BookScreen(sealedActivity: SealedLightActivity, private val bookId: String
                 Buttons(
                     book = book,
                     saved = saved,
-                    playLabel = if (isLoaded && playing) "Pause" else "Play",
-                    onPlay = { if (isLoaded) PlaybackHub.togglePlayPause() else PlaybackHub.playBook(book) },
+                    playLabel = when {
+                        isLoaded && playing -> "Pause"
+                        isInProgress(book, saved) -> "Resume"
+                        else -> "Play"
+                    },
+                    onPlay = {
+                        if (isLoaded && playing) {
+                            PlaybackHub.pause()
+                        } else {
+                            PlaybackHub.playBook(book)
+                            openNowPlaying()
+                        }
+                    },
                 )
             }
             item(key = "chapters-label") {
@@ -114,7 +126,16 @@ class BookScreen(sealedActivity: SealedLightActivity, private val bookId: String
                 }
             }
             itemsIndexed(chapters, key = { i, _ -> "chapter:$i" }) { i, chapter ->
-                ChapterRow(number = i + 1, chapter = chapter, isCurrent = i == current, showDivider = i != chapters.lastIndex)
+                ChapterRow(
+                    number = i + 1,
+                    chapter = chapter,
+                    isCurrent = i == current,
+                    showDivider = i != chapters.lastIndex,
+                    onClick = {
+                        PlaybackHub.playBook(book, chapter)
+                        openNowPlaying()
+                    },
+                )
             }
         }
     }
@@ -138,7 +159,7 @@ class BookScreen(sealedActivity: SealedLightActivity, private val bookId: String
                     BookPositions.markFinished(book.id)
                 }
                 ActionButton("Start over", LightIcons.REFRESH, Modifier.weight(1f), enabled = started) {
-                    BookPositions.startOver(book.id)
+                    PlaybackHub.startBookOver(book)
                 }
             }
         }
@@ -198,10 +219,14 @@ private fun Progress(book: Book, saved: BookPosition?, chapters: List<BookChapte
     }
 }
 
-/** Number (or a play mark on the current chapter), title, and length. */
+/** Number (or a play mark on the current chapter), title, and length. Tapping it plays from there. */
 @Composable
-private fun ChapterRow(number: Int, chapter: BookChapter, isCurrent: Boolean, showDivider: Boolean) {
-    UniformRow(heightGridUnits = CHAPTER_ROW_GRID_UNITS, showDivider = showDivider) {
+fun ChapterRow(number: Int, chapter: BookChapter, isCurrent: Boolean, showDivider: Boolean, onClick: () -> Unit) {
+    UniformRow(
+        heightGridUnits = CHAPTER_ROW_GRID_UNITS,
+        showDivider = showDivider,
+        modifier = Modifier.lightClickable(onClickLabel = "Play from here", onClick = onClick),
+    ) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(modifier = Modifier.width(2.5f.gridUnitsAsDp())) {
                 if (isCurrent) {

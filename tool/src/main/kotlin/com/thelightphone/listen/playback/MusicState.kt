@@ -23,7 +23,9 @@ data class QueueSource(val kind: String = KIND_SONGS, val key: String = "") {
 /**
  * The music resume point saved in /sdcard/Listen/.state/music_state.json. [paths] are the
  * queue in its own (unshuffled) order, relative to /sdcard/Listen/Music; [index] points
- * into it. [repeat] is "off", "all" or "one". Missing fields get these defaults, so an
+ * into it. [repeat] is "off", "all" or "one". [book] is the id of the audiobook loaded on
+ * top of this music spot (its own place is in book_positions.json), so Listen reopens the
+ * book, or null when music was last loaded. Missing fields get these defaults, so an
  * older or hand-edited file still loads.
  */
 @Serializable
@@ -36,6 +38,7 @@ data class MusicState(
     val shuffle: Boolean = false,
     val repeat: String = REPEAT_OFF,
     val savedAt: Long = 0,
+    val book: String? = null,
 ) {
     companion object {
         const val REPEAT_OFF = "off"

@@ -69,8 +69,9 @@ class SortScreen(
     }
 }
 
+/** One choice: its label, and a filled circle when it's the current one. */
 @Composable
-private fun ChoiceRow(label: String, isCurrent: Boolean, onSelect: () -> Unit) {
+fun ChoiceRow(label: String, isCurrent: Boolean, onSelect: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()

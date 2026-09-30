@@ -98,6 +98,16 @@ object BookPositions {
         }
     }
 
+    /**
+     * Saves where the player is in book [id] (every 10 s while playing, and on pause, seek,
+     * chapter change and background). Nothing is written when the place didn't change.
+     */
+    fun record(id: String, position: BookPosition) {
+        if (!_loaded.value || _positions.value[id] == position) return
+        _positions.update { all -> all + (id to position) }
+        scope.launch { write() }
+    }
+
     /** Marks the book finished; its place is kept. */
     fun markFinished(id: String) = change(id) { it.copy(finished = true) }
 
@@ -110,9 +120,14 @@ object BookPositions {
         scope.launch { write() }
     }
 
+    private var lastWritten: Map<String, BookPosition>? = null
+
     private fun write() {
+        val books = _positions.value
+        if (books == lastWritten) return
         try {
-            file.save(BookPositionsData(books = _positions.value))
+            file.save(BookPositionsData(books = books))
+            lastWritten = books
             knownModified = file.lastModified
         } catch (e: Exception) {
             Log.w("Listen", "Couldn't save book_positions.json", e)

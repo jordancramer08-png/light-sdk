@@ -106,3 +106,38 @@ fun bookLengthText(ms: Long): String {
     val minutes = ((ms + 30_000) / 60_000).coerceAtLeast(1)
     return if (minutes < 60) "$minutes min" else "${minutes / 60} hr ${minutes % 60} min"
 }
+
+/**
+ * The place [absoluteMs] into the whole book: the file it falls in and the position inside
+ * that file. Clamped to the book; files with no known length are skipped over.
+ */
+fun locate(book: Book, absoluteMs: Long): BookPosition {
+    var left = absoluteMs.coerceAtLeast(0)
+    book.files.forEachIndexed { i, file ->
+        if (left < file.durationMs || i == book.files.lastIndex) {
+            val within = if (file.durationMs > 0) left.coerceAtMost(file.durationMs) else left
+            return BookPosition(fileIndex = i, positionMs = within)
+        }
+        left -= file.durationMs
+    }
+    return BookPosition()
+}
+
+/** Whether [position] is in the book's last 30 seconds (ignoring the finished flag). */
+fun isNearEnd(book: Book, position: BookPosition): Boolean = isFinished(book, position.copy(finished = false))
+
+/** Pauses shorter than this don't rewind (a seek or a skip pauses for a moment, too). */
+const val REWIND_MIN_PAUSE_MS = 2_000L
+
+/** From this long a pause on, the longer rewind applies. */
+const val REWIND_LONG_PAUSE_MS = 10 * 60_000L
+
+/**
+ * How far to go back when a book plays again after a pause of [pausedForMs]: nothing for a
+ * moment's pause, [shortSeconds] under 10 minutes, [longSeconds] after that.
+ */
+fun rewindMs(pausedForMs: Long, shortSeconds: Int, longSeconds: Int): Long = when {
+    pausedForMs < REWIND_MIN_PAUSE_MS -> 0
+    pausedForMs < REWIND_LONG_PAUSE_MS -> shortSeconds.coerceAtLeast(0) * 1000L
+    else -> longSeconds.coerceAtLeast(0) * 1000L
+}

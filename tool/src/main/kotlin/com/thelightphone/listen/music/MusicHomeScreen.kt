@@ -7,6 +7,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import com.thelightphone.listen.ListenScreen
+import com.thelightphone.listen.playback.MusicNowPlayingScreen
+import com.thelightphone.listen.playback.PlaybackHub
 import com.thelightphone.listen.playlists.Playlists
 import com.thelightphone.listen.playlists.PlaylistsScreen
 import com.thelightphone.listen.ui.MenuRow
@@ -28,6 +30,8 @@ class MusicHomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealed
         val library by MusicLibrary.state.collectAsState()
         val playlists by Playlists.playlists.collectAsState()
         val playlistsLoaded by Playlists.loaded.collectAsState()
+        val book by PlaybackHub.book.collectAsState()
+        val musicSpot by PlaybackHub.musicSpot.collectAsState()
         ThemedScreen {
             LightTopBar(
                 leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
@@ -35,6 +39,19 @@ class MusicHomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealed
                 modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
             )
             Column(modifier = Modifier.weight(1f)) {
+                // While a book is loaded: back to the music that was playing before it.
+                val spot = musicSpot
+                if (book != null && spot != null && spot.paths.isNotEmpty()) {
+                    val path = spot.paths.getOrNull(spot.index)
+                    MenuRow(
+                        title = "Resume music",
+                        detail = path?.let { library.song(it)?.title } ?: "Where you left off",
+                        onClick = {
+                            PlaybackHub.resumeMusic()
+                            openNowPlayingMusic()
+                        },
+                    )
+                }
                 MenuRow(
                     title = "Songs",
                     detail = if (library.loaded) songCount(library.songs.size) else null,
@@ -59,6 +76,10 @@ class MusicHomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealed
             UpdatingLine(visible = library.updating)
             NowPlayingBar(onOpen = ::openNowPlaying)
         }
+    }
+
+    private fun openNowPlayingMusic() {
+        navigateTo(screenFactory = { MusicNowPlayingScreen(it) })
     }
 
     private fun openSongs() {

@@ -19,6 +19,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -92,7 +93,7 @@ class MusicNowPlayingScreen(sealedActivity: SealedLightActivity) : ListenScreen(
                 }
                 Column(modifier = Modifier.padding(horizontal = 1.5f.gridUnitsAsDp())) {
                     SongLines(current)
-                    SeekBarWithTimes(current)
+                    SongSeekBar(current)
                     Controls()
                 }
             }
@@ -113,9 +114,9 @@ private fun Artwork(song: Song) {
     )
 }
 
-/** No art: the album's first letter in a thin frame. */
+/** No art: the album's (or book's) first letter in a thin frame. */
 @Composable
-private fun FramedPlaceholder(letter: String, modifier: Modifier) {
+fun FramedPlaceholder(letter: String, modifier: Modifier) {
     Box(
         modifier = modifier.border(1.dp, LightThemeTokens.colors.contentSecondary),
         contentAlignment = Alignment.Center,
@@ -134,7 +135,7 @@ private fun SongLines(song: Song) {
 }
 
 @Composable
-private fun CenteredLine(text: String, variant: LightTextVariant, lighten: Boolean = false) {
+fun CenteredLine(text: String, variant: LightTextVariant, lighten: Boolean = false) {
     LightText(
         text = text,
         variant = variant,
@@ -146,12 +147,22 @@ private fun CenteredLine(text: String, variant: LightTextVariant, lighten: Boole
     )
 }
 
-/** A seek bar you can tap or drag; the times show the drag position while dragging. */
 @Composable
-private fun SeekBarWithTimes(song: Song) {
+private fun SongSeekBar(song: Song) {
     val position by PlaybackHub.positionMs.collectAsState()
     val playerDuration by PlaybackHub.durationMs.collectAsState()
     val duration = if (playerDuration > 0) playerDuration else song.durationMs
+    SeekBarWithTimes(position, duration, onSeek = PlaybackHub::seekTo)
+}
+
+/**
+ * A seek bar you can tap or drag, over [position] of [duration]; the times show the drag
+ * position while dragging. [onSeek] gets the chosen position.
+ */
+@Composable
+fun SeekBarWithTimes(position: Long, duration: Long, onSeek: (Long) -> Unit) {
+    // The gesture handlers outlive a recomposition; they must call the latest onSeek.
+    val seek by rememberUpdatedState(onSeek)
     var dragFraction by remember { mutableStateOf<Float?>(null) }
     val fraction = dragFraction
         ?: if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
@@ -166,7 +177,7 @@ private fun SeekBarWithTimes(song: Song) {
                 val inset = THUMB_RADIUS.dp.toPx()
                 val toFraction = { x: Float -> ((x - inset) / (size.width - 2 * inset)).coerceIn(0f, 1f) }
                 detectTapGestures { offset ->
-                    if (duration > 0) PlaybackHub.seekTo((toFraction(offset.x) * duration).toLong())
+                    if (duration > 0) seek((toFraction(offset.x) * duration).toLong())
                 }
             }
             .pointerInput(duration) {
@@ -175,7 +186,7 @@ private fun SeekBarWithTimes(song: Song) {
                 detectHorizontalDragGestures(
                     onDragStart = { offset -> dragFraction = toFraction(offset.x) },
                     onDragEnd = {
-                        dragFraction?.let { if (duration > 0) PlaybackHub.seekTo((it * duration).toLong()) }
+                        dragFraction?.let { if (duration > 0) seek((it * duration).toLong()) }
                         dragFraction = null
                     },
                     onDragCancel = { dragFraction = null },
@@ -242,7 +253,7 @@ private fun Controls() {
 
 /** A big tap target around an icon; [active] = false draws it faded (shuffle/repeat off). */
 @Composable
-private fun ControlButton(
+fun ControlButton(
     icon: LightIconConfiguration,
     label: String,
     active: Boolean = true,

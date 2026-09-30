@@ -4,6 +4,57 @@ Session-by-session notes for the Listen tool. `CLAUDE.md` says what the app does
 `PLAN.md` says how it's built. The older SDK recon below the line is still accurate
 reference for the SDK's UI kit, screens and sandbox rules.
 
+## Session 5 (2026-09-29): audiobook library — works on the phone
+
+**Built** (all in `books/`)
+- `Book.kt`: `Book` (id, folder relative to `Audiobooks/`, title, author, narrator, series,
+  `seriesNumber: Double?`, year, `coverFile`, files) and `BookFile` (path relative to the
+  book folder, label, size, mtime, `durationMs`, m4b `chapters`, tag title/artist).
+- `BookJson.kt`: tolerant field-by-field parse of book.json (BOM stripped, numbers as text
+  OK, blank = missing, `..` paths refused). Broken file → null → folder fallback.
+- `BookScanner.kt`: a book = a folder with book.json or with audio files (not searched
+  deeper). book.json's files in its order, missing ones skipped; none on phone → every audio
+  file in natural order. Fallbacks: title = folder name ("02 - X" → number 2, title X),
+  author = `Audiobooks/<Author>/…` folder, then tag; series = the folder above the book.
+  Labels: json, else title tag (unless every file has the same tag), else file name.
+  File lengths come from `TagReader` and are re-read only when path/size/mtime change.
+- `BookLibrary.kt`: app-wide, like `MusicLibrary`: index cache `filesDir/cache/book_index.json`
+  (`BookIndex.VERSION` = 1), same stamp idea (last-sync.txt + folder mtimes), publishes as each
+  book is read. Duplicate ids: first one wins.
+- `BookPositions.kt`: store for `/sdcard/Listen/.state/book_positions.json`
+  (`{version, books: {id: {fileIndex, positionMs, speed, lastPlayedAt, finished}}}`), same
+  pattern as `Playlists` (mtime check, broken file moved aside, no write before load). Only
+  `markFinished` / `startOver` write it so far.
+- `BookProgress.kt`: `chaptersOf` (m4b marks or one per file, blank → "Chapter N"),
+  `bookPositionMs`, `isFinished` (flag or last 30 s), `isInProgress`, `percentListened`,
+  `chapterIndexAt`, `chapterSpotText` ("Chapter 12 of 40, 14:32 left in chapter"), `bookLengthText`.
+- `BookGroups.kt`: `libraryEntries` (series of 2+ books by the same author → one row, in
+  `SERIES_ORDER`; Title / Author / Recently played, Z–A reverses only the main field;
+  never-played last), `continueListening`, `seriesBooks`.
+- Screens: `BooksScreen` (Continue listening rows tinted, then entries; sort saved as
+  `ListenSettings.bookSort`), `BookSeriesScreen`, `BookScreen` (header, progress, Play/Pause,
+  Mark finished, Start over, lazy chapter list with ▶ on the current chapter).
+- Shared changes: `ArtSource.folderFirst` (book.json cover before embedded art) and
+  `Book.artSource()`; `SortField.directions` ("newest first / oldest first"); `ArtAndText`
+  takes a `modifier`; Home's Audiobooks row is live.
+- `PlaybackHub.playBook(book)`: saves the music spot, sets `queue = null` and `book = book`,
+  plays file 0 from 0. While a book is loaded nothing writes music_state.json, and music's
+  shuffle/repeat are kept aside (put back by `playSongs`). `openNowPlaying()` opens the book
+  screen while a book is loaded. `PlaybackHub.index` is now public.
+- Version 0.5.0 (5). 9 new JVM tests in `tool/src/test/.../books/BooksTest.kt`.
+
+**For Session 6 (audiobook playback)**
+- Nothing saves book positions while playing yet, so Continue listening / Recently played
+  only fill once Session 6 writes `BookPositions` (every 10 s + pause/seek/chapter/background,
+  set `lastPlayedAt`). Add the writers to the `BookPositions` object; keep the file format.
+- `playBook` always starts at file 0 and the player still uses `LightAudioUsage.Music`;
+  switch to Speech attributes, resume from the saved spot with auto-rewind, and restore the
+  book after the service restarts (today a restart restores music and clears `book`).
+- Chapter rows on `BookScreen` aren't tappable yet; `BookChapter` has `fileIndex` + `startMs`
+  ready for "play from this chapter". The book screen's header is one lazy item taller than
+  a chapter row, so its scrollbar is slightly approximate.
+- The Book Now Playing screen doesn't exist yet; the bottom bar shows book title + file label.
+
 ## Session 4 (2026-09-29): playlists — works on the phone
 
 **Built**

@@ -25,6 +25,7 @@ data class ListenSettings(
     val songSort: ListSort = ListSort(),
     val albumSort: ListSort = ListSort(),
     val artistSort: ListSort = ListSort(),
+    val bookSort: ListSort = ListSort(),
 )
 
 /** Reads and writes [ListenSettings] as JSON. A missing or broken file reads as the defaults. */

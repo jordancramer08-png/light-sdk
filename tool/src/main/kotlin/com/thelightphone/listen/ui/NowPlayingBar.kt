@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import com.thelightphone.listen.artwork.ArtImage
 import com.thelightphone.listen.artwork.ArtSize
 import com.thelightphone.listen.artwork.artLetter
+import com.thelightphone.listen.artwork.artSource
 import com.thelightphone.listen.artwork.songArtSource
 import com.thelightphone.listen.music.MusicLibrary
 import com.thelightphone.listen.playback.PlaybackHub
@@ -31,16 +32,20 @@ private const val BAR_GRID_UNITS = 5f
 private const val ART_GRID_UNITS = 3.6f
 
 /**
- * The small bar at the bottom of list screens: the album cover, the current song, and a
- * play/pause button.
+ * The small bar at the bottom of list screens: the cover, the current song (or book chapter),
+ * and a play/pause button.
  * Tapping the song opens Now Playing. Hidden while nothing is loaded.
  */
 @Composable
 fun NowPlayingBar(onOpen: () -> Unit) {
     val song by PlaybackHub.currentSong.collectAsState()
+    val book by PlaybackHub.book.collectAsState()
+    val index by PlaybackHub.index.collectAsState()
     val playing by PlaybackHub.isPlaying.collectAsState()
     val library by MusicLibrary.state.collectAsState()
-    val current = song ?: return
+    val loadedBook = book
+    val current = song
+    if (loadedBook == null && current == null) return
     HairlineDivider()
     Row(
         modifier = Modifier
@@ -56,15 +61,21 @@ fun NowPlayingBar(onOpen: () -> Unit) {
                 .padding(start = 1f.gridUnitsAsDp()),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ArtImage(
-                source = songArtSource(current, library.albumOf(current)),
-                size = ArtSize.THUMB,
-                letter = artLetter(current.album),
-                modifier = Modifier.size(ART_GRID_UNITS.gridUnitsAsDp()),
-            )
+            val artModifier = Modifier.size(ART_GRID_UNITS.gridUnitsAsDp())
+            if (loadedBook != null) {
+                ArtImage(loadedBook.artSource(), ArtSize.THUMB, artLetter(loadedBook.title), artModifier)
+            } else if (current != null) {
+                ArtImage(songArtSource(current, library.albumOf(current)), ArtSize.THUMB, artLetter(current.album), artModifier)
+            }
             Column(modifier = Modifier.padding(start = 0.75f.gridUnitsAsDp())) {
-                OneLine(text = current.title, variant = LightTextVariant.Copy)
-                OneLine(text = current.artist, variant = LightTextVariant.Detail, lighten = true)
+                if (loadedBook != null) {
+                    OneLine(text = loadedBook.title, variant = LightTextVariant.Copy)
+                    val chapter = loadedBook.files.getOrNull(index)?.label ?: loadedBook.author
+                    OneLine(text = chapter, variant = LightTextVariant.Detail, lighten = true)
+                } else if (current != null) {
+                    OneLine(text = current.title, variant = LightTextVariant.Copy)
+                    OneLine(text = current.artist, variant = LightTextVariant.Detail, lighten = true)
+                }
             }
         }
         Box(

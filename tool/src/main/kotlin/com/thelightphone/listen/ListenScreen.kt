@@ -1,6 +1,9 @@
 package com.thelightphone.listen
 
 import com.thelightphone.listen.artwork.ArtworkCache
+import com.thelightphone.listen.books.BookLibrary
+import com.thelightphone.listen.books.BookPositions
+import com.thelightphone.listen.books.BookScreen
 import com.thelightphone.listen.music.Album
 import com.thelightphone.listen.music.AlbumScreen
 import com.thelightphone.listen.music.Artist
@@ -31,7 +34,9 @@ abstract class ListenScreen(private val sealed: SealedLightActivity) : SimpleLig
         if (StorageAccess.hasAllFilesAccess()) {
             Settings.load()
             Playlists.load()
+            BookPositions.load()
             MusicLibrary.refresh(lightContext.filesDir)
+            BookLibrary.refresh(lightContext.filesDir)
             PlaybackHub.attach(sealed)
         }
     }
@@ -41,8 +46,18 @@ abstract class ListenScreen(private val sealed: SealedLightActivity) : SimpleLig
         PlaybackHub.saveNow()
     }
 
+    /** Now Playing; while a book is loaded that's its book screen (its own player comes in Session 6). */
     protected fun openNowPlaying() {
-        navigateTo(screenFactory = { MusicNowPlayingScreen(it) })
+        val book = PlaybackHub.book.value
+        if (book != null) {
+            openBook(book.id)
+        } else {
+            navigateTo(screenFactory = { MusicNowPlayingScreen(it) })
+        }
+    }
+
+    protected fun openBook(id: String) {
+        navigateTo(screenFactory = { BookScreen(it, id) })
     }
 
     protected fun openAlbum(album: Album) {

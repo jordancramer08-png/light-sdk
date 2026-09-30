@@ -7,6 +7,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import com.thelightphone.listen.books.BookLibrary
+import com.thelightphone.listen.books.BooksScreen
+import com.thelightphone.listen.books.bookCount
 import com.thelightphone.listen.music.MusicHomeScreen
 import com.thelightphone.listen.music.MusicLibrary
 import com.thelightphone.listen.playback.PlaybackHub
@@ -43,6 +46,8 @@ class HomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedActiv
         val access by hasAccess.collectAsState()
         val library by MusicLibrary.state.collectAsState()
         val song by PlaybackHub.currentSong.collectAsState()
+        val book by PlaybackHub.book.collectAsState()
+        val books by BookLibrary.state.collectAsState()
         ThemedScreen {
             LightTopBar(
                 center = LightTopBarCenter.Text("Listen"),
@@ -54,18 +59,28 @@ class HomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedActiv
                 true -> {
                     Column(modifier = Modifier.weight(1f)) {
                         MenuRow(title = "Music", onClick = ::openMusic)
-                        MenuRow(title = "Audiobooks", detail = "Coming in a later update", onClick = null)
+                        MenuRow(
+                            title = "Audiobooks",
+                            detail = if (books.loaded) bookCount(books.books.size) else null,
+                            onClick = ::openAudiobooks,
+                        )
                         MenuRow(
                             title = "Now Playing",
-                            detail = song?.let { "${it.title} · ${it.artist}" } ?: "Nothing playing",
+                            detail = book?.let { "${it.title} · ${it.author}" }
+                                ?: song?.let { "${it.title} · ${it.artist}" }
+                                ?: "Nothing playing",
                             onClick = ::openNowPlaying,
                         )
                     }
-                    UpdatingLine(visible = library.updating)
+                    UpdatingLine(visible = library.updating || books.updating)
                     NowPlayingBar(onOpen = ::openNowPlaying)
                 }
             }
         }
+    }
+
+    private fun openAudiobooks() {
+        navigateTo(screenFactory = { BooksScreen(it) })
     }
 
     private fun openMusic() {

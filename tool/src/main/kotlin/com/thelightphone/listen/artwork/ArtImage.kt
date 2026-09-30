@@ -13,6 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.ContentScale
+import com.thelightphone.listen.books.Book
 import com.thelightphone.listen.music.Album
 import com.thelightphone.listen.music.Song
 import com.thelightphone.listen.storage.ListenPaths
@@ -40,6 +41,23 @@ private fun songArtSource(first: Song, albumKey: String): ArtSource {
         key = "$albumKey|${first.path}|${first.size}|${first.modified}",
         audioFile = file,
         folder = file.parentFile,
+    )
+}
+
+/**
+ * A book's picture: the cover named in book.json first, then the first file's embedded
+ * picture; without a book.json cover, the embedded picture and then cover.jpg / folder.jpg.
+ */
+fun Book.artSource(): ArtSource {
+    val dir = File(ListenPaths.audiobooks, folder)
+    val first = files.firstOrNull()
+    val cover = coverFile
+    return ArtSource(
+        key = "book:$id|$cover|$coverModified|${first?.path}|${first?.size}|${first?.modified}",
+        audioFile = first?.let { File(dir, it.path) },
+        folder = dir,
+        folderImages = if (cover != null) listOf(cover) else MUSIC_FOLDER_IMAGES,
+        folderFirst = cover != null,
     )
 }
 

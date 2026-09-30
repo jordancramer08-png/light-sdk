@@ -21,8 +21,11 @@ import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import com.thelightphone.sdk.ui.lightClickable
 
-/** A field a list can be sorted by: [name] is what's saved, [label] what's shown. */
-data class SortField(val name: String, val label: String)
+/**
+ * A field a list can be sorted by: [name] is what's saved, [label] what's shown. [directions]
+ * replaces "A–Z" / "Z–A" for fields where that reads oddly (e.g. "newest first", "oldest first").
+ */
+data class SortField(val name: String, val label: String, val directions: Pair<String, String>? = null)
 
 /**
  * Sort (like the Reader's Sort & Filter screen): every field A–Z and Z–A, e.g. "Title A–Z",
@@ -38,7 +41,7 @@ class SortScreen(
 
     @Composable
     override fun Content() {
-        val choices = fields.flatMap { field -> listOf(false, true).map { ListSort(field.name, it) to field.label } }
+        val choices = fields.flatMap { field -> listOf(false, true).map { ListSort(field.name, it) to field } }
         ThemedScreen {
             LightTopBar(
                 leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
@@ -52,9 +55,10 @@ class SortScreen(
                     lighten = true,
                     modifier = Modifier.padding(bottom = 0.25f.gridUnitsAsDp()),
                 )
-                choices.forEachIndexed { i, (choice, label) ->
+                choices.forEachIndexed { i, (choice, field) ->
                     ChoiceRow(
-                        label = sortLabel(label, choice.descending),
+                        label = field.directions?.let { "${field.label}, ${if (choice.descending) it.second else it.first}" }
+                            ?: sortLabel(field.label, choice.descending),
                         isCurrent = choice == current,
                         onSelect = { goBack(choice) },
                     )

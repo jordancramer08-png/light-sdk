@@ -1,6 +1,8 @@
 package com.thelightphone.listen.playback
 
 import android.util.Log
+import com.thelightphone.listen.books.Book
+import com.thelightphone.listen.books.BookFile
 import com.thelightphone.listen.music.MusicLibrary
 import com.thelightphone.listen.music.Song
 import com.thelightphone.listen.music.songFrom
@@ -71,6 +73,17 @@ object PlaybackHub {
     private val _message = MutableStateFlow<String?>(null)
 
     val queue: StateFlow<MusicQueue?> = _queue.asStateFlow()
+
+    /**
+     * The audiobook loaded instead of music, or null. While a book is loaded the music queue
+     * is null, and music_state.json is left alone (it keeps the music spot saved just before).
+     * Book positions are saved from Session 6.
+     */
+    private val _book = MutableStateFlow<Book?>(null)
+    val book: StateFlow<Book?> = _book.asStateFlow()
+
+    /** The index of the playing item: a song in the queue, or a file of the book. */
+    val index: StateFlow<Int> = _index.asStateFlow()
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
     val positionMs: StateFlow<Long> = _positionMs.asStateFlow()
     /** The player's duration for the current song, or 0 while it isn't known yet. */
@@ -117,6 +130,11 @@ object PlaybackHub {
         if (songs.isEmpty() || startIndex !in songs.indices) return
         restoreJob?.cancel()
         val player = ensurePlayer() ?: return
+        if (_book.value != null) {
+            _book.value = null
+            player.setShuffleEnabled(_shuffle.value)
+            player.setRepeatMode(_repeat.value)
+        }
         _queue.value = MusicQueue(songs, source)
         _index.value = startIndex
         _positionMs.value = 0
@@ -132,12 +150,35 @@ object PlaybackHub {
         save()
     }
 
+    /**
+     * Plays [book] from the start of its first file. The music spot is saved first and then
+     * kept as it is; music's shuffle and repeat are turned off on the player (and put back
+     * when music plays again).
+     */
+    fun playBook(book: Book) {
+        if (book.files.isEmpty()) return
+        restoreJob?.cancel()
+        val player = ensurePlayer() ?: return
+        save()
+        _queue.value = null
+        _book.value = book
+        _index.value = 0
+        _positionMs.value = 0
+        _durationMs.value = 0
+        failuresInARow = 0
+        wantsToPlay = true
+        player.setShuffleEnabled(false)
+        player.setRepeatMode(LightRepeatMode.Off)
+        player.setMediaQueue(book.files.map { itemFor(book, it) }, 0)
+        player.play()
+    }
+
     fun togglePlayPause() {
         if (_isPlaying.value) pause() else play()
     }
 
     fun play() {
-        if (_queue.value == null) return
+        if (_queue.value == null && _book.value == null) return
         val player = ensurePlayer() ?: return
         wantsToPlay = true
         failuresInARow = 0
@@ -225,7 +266,7 @@ object PlaybackHub {
      */
     private suspend fun restoreInto(player: LightAudioPlayer) {
         if (!player.awaitReady()) return
-        if (player.currentMediaItemIndex.value != NO_MEDIA_ITEM && _queue.value != null) return
+        if (player.currentMediaItemIndex.value != NO_MEDIA_ITEM && (_queue.value != null || _book.value != null)) return
 
         val saved = lastSaved ?: withContext(Dispatchers.IO) { store.load() } ?: return
         val state = withContext(Dispatchers.IO) {
@@ -243,6 +284,7 @@ object PlaybackHub {
         _repeat.value = repeat
         wantsToPlay = false
         lastSaved = state
+        _book.value = null
         player.setShuffleEnabled(shuffle)
         player.setRepeatMode(repeat)
         player.setMediaQueue(songs.map(::itemFor), state.index, state.positionMs)
@@ -283,8 +325,9 @@ object PlaybackHub {
             }
             launch { player.positionMs.collect { if (hasQueue()) _positionMs.value = it } }
             launch { player.durationMs.collect { if (hasQueue()) _durationMs.value = it } }
-            launch { player.shuffleEnabled.collect { if (hasQueue()) _shuffle.value = it } }
-            launch { player.repeatMode.collect { if (hasQueue()) _repeat.value = it } }
+            // While a book plays, these keep music's shuffle and repeat for when music comes back.
+            launch { player.shuffleEnabled.collect { if (hasQueue() && _book.value == null) _shuffle.value = it } }
+            launch { player.repeatMode.collect { if (hasQueue() && _book.value == null) _repeat.value = it } }
             launch { player.error.collect { error -> if (error != null) onError(player, error) } }
             launch {
                 // The service stopped (e.g. swiped away while paused). Keep showing the
@@ -299,9 +342,10 @@ object PlaybackHub {
     private fun onError(player: LightAudioPlayer, error: LightAudioError) {
         Log.w("Listen", "Playback error ${error.diagnostic} at item ${error.itemIndex}")
         showMessage(CANT_PLAY)
-        val size = _queue.value?.songs?.size ?: return
+        val isBook = _book.value != null
+        val size = _queue.value?.songs?.size ?: _book.value?.files?.size ?: return
         failuresInARow++
-        val atEnd = _index.value >= size - 1 && _repeat.value == LightRepeatMode.Off && !_shuffle.value
+        val atEnd = _index.value >= size - 1 && (isBook || (_repeat.value == LightRepeatMode.Off && !_shuffle.value))
         if (failuresInARow >= size || atEnd) return
         player.skipToNext()
         if (wantsToPlay) player.play() else player.prepare()
@@ -360,6 +404,16 @@ object PlaybackHub {
             artist = song.artist,
             album = song.album,
             durationMs = song.durationMs.takeIf { it > 0 },
+        ),
+    )
+
+    private fun itemFor(book: Book, file: BookFile) = LightAudioItem(
+        source = LightAudioSource.FileSource(File(File(ListenPaths.audiobooks, book.folder), file.path)),
+        metadata = LightMediaMetadata(
+            title = file.label.ifBlank { book.title },
+            artist = book.author,
+            album = book.title,
+            durationMs = file.durationMs.takeIf { it > 0 },
         ),
     )
 

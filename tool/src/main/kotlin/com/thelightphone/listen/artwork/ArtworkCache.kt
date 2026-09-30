@@ -28,14 +28,16 @@ enum class ArtSize(val px: Int) {
 
 /**
  * Where an album's (or a book's) picture comes from. [key] names the picture and changes
- * whenever it could have changed (see `artSourceFor`). [audioFile]'s embedded picture is
- * tried first, then the picture files named [folderImages] in [folder].
+ * whenever it could have changed. [audioFile]'s embedded picture is tried first, then the
+ * picture files named [folderImages] in [folder] — or the other way round with [folderFirst]
+ * (a book's cover named in book.json comes before its embedded picture).
  */
 data class ArtSource(
     val key: String,
     val audioFile: File?,
     val folder: File?,
     val folderImages: List<String> = MUSIC_FOLDER_IMAGES,
+    val folderFirst: Boolean = false,
 )
 
 /** Picture files next to an album's songs, in the order they're tried. */
@@ -150,11 +152,23 @@ object ArtworkCache {
 
     // ---- Decoding ----
 
-    /** The embedded picture (any picture type), then a picture file in the folder; scaled to [px]. */
-    private fun decodeFromSource(source: ArtSource, px: Int): Bitmap? {
-        source.audioFile?.let(::embeddedPicture)?.let { bytes ->
-            decodeScaled(px) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, it) }?.let { return it }
+    /**
+     * The embedded picture (any picture type), then a picture file in the folder (or folder
+     * first, for [ArtSource.folderFirst]); scaled to [px].
+     */
+    private fun decodeFromSource(source: ArtSource, px: Int): Bitmap? =
+        if (source.folderFirst) {
+            decodeFolderImage(source, px) ?: decodeEmbedded(source, px)
+        } else {
+            decodeEmbedded(source, px) ?: decodeFolderImage(source, px)
         }
+
+    private fun decodeEmbedded(source: ArtSource, px: Int): Bitmap? {
+        val bytes = source.audioFile?.let(::embeddedPicture) ?: return null
+        return decodeScaled(px) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, it) }
+    }
+
+    private fun decodeFolderImage(source: ArtSource, px: Int): Bitmap? {
         val folder = source.folder ?: return null
         val image = source.folderImages.map { File(folder, it) }.firstOrNull { it.isFile } ?: return null
         return decodeScaled(px) { BitmapFactory.decodeFile(image.path, it) }

@@ -178,9 +178,10 @@ fun LazyListScope.artistRows(artists: List<Artist>, onOpen: (Artist) -> Unit, on
 fun ArtAndText(
     art: @Composable (Modifier) -> Unit,
     artGridUnits: Float,
+    modifier: Modifier = Modifier,
     text: @Composable () -> Unit,
 ) {
-    Row(modifier = Modifier.fillMaxWidth().fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier = modifier.fillMaxWidth().fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
         art(Modifier.size(artGridUnits.gridUnitsAsDp()))
         Spacer(modifier = Modifier.width(ART_GAP_GRID_UNITS.gridUnitsAsDp()))
         Column(modifier = Modifier.weight(1f)) { text() }

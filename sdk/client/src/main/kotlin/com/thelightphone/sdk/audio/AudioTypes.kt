@@ -234,3 +234,21 @@ enum class LightRepeatMode {
     /** Play the current item again and again. */
     One,
 }
+
+/**
+ * What the playing track is, as the player read it from the file. Each value is null when
+ * the file doesn't say.
+ *
+ * @property mimeType the codec, e.g. `audio/mpeg`, `audio/mp4a-latm`, `audio/flac`
+ * @property containerMimeType the file type, e.g. `audio/mp4`, `audio/ogg`, `audio/wav`
+ * @property bitrate average bits per second (else the peak)
+ * @property sampleRate samples per second, e.g. 44100
+ * @property channelCount 1 for mono, 2 for stereo
+ */
+data class LightAudioFormat(
+    val mimeType: String? = null,
+    val containerMimeType: String? = null,
+    val bitrate: Int? = null,
+    val sampleRate: Int? = null,
+    val channelCount: Int? = null,
+)

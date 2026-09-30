@@ -4,11 +4,15 @@ import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences
+import androidx.media3.common.Tracks
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -55,6 +59,7 @@ class LightAudioPlayer internal constructor(
     private val _error = MutableStateFlow<LightAudioError?>(null)
     private val _shuffleEnabled = MutableStateFlow(false)
     private val _repeatMode = MutableStateFlow(LightRepeatMode.Off)
+    private val _currentFormat = MutableStateFlow<LightAudioFormat?>(null)
     private val commands = PendingPlayerCommands()
     private var positionJob: Job? = null
     private var player: Player? = null
@@ -75,6 +80,8 @@ class LightAudioPlayer internal constructor(
     val shuffleEnabled: StateFlow<Boolean> = _shuffleEnabled.asStateFlow()
     /** Whether the queue stops at its end, starts over, or repeats one item. */
     val repeatMode: StateFlow<LightRepeatMode> = _repeatMode.asStateFlow()
+    /** The playing track's codec, bitrate and sample rate, or `null` before it is read. */
+    val currentFormat: StateFlow<LightAudioFormat?> = _currentFormat.asStateFlow()
     /** Connection and command-acceptance lifecycle of this player. */
     val availability: StateFlow<LightAudioPlayerAvailability> = commands.availability
 
@@ -133,6 +140,10 @@ class LightAudioPlayer internal constructor(
             override fun onRepeatModeChanged(repeatMode: Int) {
                 _repeatMode.value = repeatMode.toLightRepeatMode()
             }
+
+            override fun onTracksChanged(tracks: Tracks) {
+                _currentFormat.value = tracks.selectedAudioFormat()?.toLightAudioFormat()
+            }
         })
         val state = connectedPlayer.snapshotState()
         _currentMediaItemIndex.value = state.currentMediaItemIndex
@@ -141,6 +152,7 @@ class LightAudioPlayer internal constructor(
         _isPlaying.value = state.isPlaying
         _shuffleEnabled.value = connectedPlayer.shuffleModeEnabled
         _repeatMode.value = connectedPlayer.repeatMode.toLightRepeatMode()
+        _currentFormat.value = connectedPlayer.currentTracks.selectedAudioFormat()?.toLightAudioFormat()
         _error.value = connectedPlayer.playerError
             ?.toLightAudioError(connectedPlayer.currentMediaItemIndex)
         if (state.isPlaying) {
@@ -304,6 +316,31 @@ class LightAudioPlayer internal constructor(
         commands.dispatch { it.repeatMode = mode.toMedia3RepeatMode() }
     }
 
+    /**
+     * Lets the phone's audio hardware decode the file itself instead of the CPU, which saves
+     * battery on long listening. Only used where the hardware can also play albums gaplessly;
+     * otherwise playback goes on as before. Off by default.
+     */
+    @androidx.annotation.OptIn(UnstableApi::class)
+    fun setAudioOffload(enabled: Boolean) {
+        val preferences = AudioOffloadPreferences.Builder()
+            .setAudioOffloadMode(
+                if (enabled) {
+                    AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED
+                } else {
+                    AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED
+                },
+            )
+            .setIsGaplessSupportRequired(enabled)
+            .build()
+        commands.dispatch { player ->
+            if (player.trackSelectionParameters.audioOffloadPreferences == preferences) return@dispatch
+            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                .setAudioOffloadPreferences(preferences)
+                .build()
+        }
+    }
+
     /** Seeks backward 15 seconds, clamped to the item bounds. */
     fun skipBack() {
         seekTo(skipPosition(positionMs.value, durationMs.value, -SKIP_INTERVAL_MS))
@@ -402,6 +439,24 @@ private fun LightMediaMetadata.toMedia3Metadata(queueIndex: Int): MediaMetadata 
         .setDurationMs(durationMs)
         .setTrackNumber(queueIndex + 1)
         .build()
+}
+
+/** The format of the audio track being played, or null when none is selected. */
+internal fun Tracks.selectedAudioFormat(): Format? =
+    groups.firstOrNull { it.type == C.TRACK_TYPE_AUDIO && it.isSelected }?.let { group ->
+        (0 until group.length).firstOrNull(group::isTrackSelected)?.let(group::getTrackFormat)
+    }
+
+@androidx.annotation.OptIn(UnstableApi::class)
+internal fun Format.toLightAudioFormat(): LightAudioFormat {
+    fun Int.known() = takeIf { it != Format.NO_VALUE && it > 0 }
+    return LightAudioFormat(
+        mimeType = sampleMimeType,
+        containerMimeType = containerMimeType,
+        bitrate = averageBitrate.known() ?: peakBitrate.known(),
+        sampleRate = sampleRate.known(),
+        channelCount = channelCount.known(),
+    )
 }
 
 internal fun LightRepeatMode.toMedia3RepeatMode(): Int = when (this) {

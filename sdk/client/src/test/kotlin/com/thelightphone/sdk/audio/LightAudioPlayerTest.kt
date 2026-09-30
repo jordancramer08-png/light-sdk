@@ -1,6 +1,8 @@
 package com.thelightphone.sdk.audio
 
 import androidx.media3.common.C
+import androidx.media3.common.Format
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
 import java.lang.reflect.Proxy
@@ -176,5 +178,28 @@ class LightAudioPlayerTest {
             "https://example.com/live.mp3",
             LightAudioSource.UrlSource("https://example.com/live.mp3").uriString(),
         )
+    }
+
+    @Test
+    fun formatKeepsKnownValuesAndPrefersAverageBitrate() {
+        val format = Format.Builder()
+            .setSampleMimeType(MimeTypes.AUDIO_MPEG)
+            .setAverageBitrate(190_000)
+            .setPeakBitrate(320_000)
+            .setSampleRate(44_100)
+            .setChannelCount(2)
+            .build()
+
+        assertEquals(
+            LightAudioFormat(mimeType = "audio/mpeg", bitrate = 190_000, sampleRate = 44_100, channelCount = 2),
+            format.toLightAudioFormat(),
+        )
+    }
+
+    @Test
+    fun formatLeavesUnknownValuesNull() {
+        val format = Format.Builder().setSampleMimeType(MimeTypes.AUDIO_FLAC).setPeakBitrate(900_000).build()
+
+        assertEquals(LightAudioFormat(mimeType = "audio/flac", bitrate = 900_000), format.toLightAudioFormat())
     }
 }

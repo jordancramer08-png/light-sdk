@@ -280,6 +280,20 @@ class LightAudioPlayer internal constructor(
         commands.dispatch(Player::prepare)
     }
 
+    /**
+     * Switches what kind of audio this player plays (e.g. [LightAudioUsage.Music] to
+     * [LightAudioUsage.Speech] for an audiobook) without replacing the player, so one
+     * detached session can play both. Audio focus is requested again for the new usage.
+     */
+    fun setUsage(usage: LightAudioUsage) {
+        commands.dispatch { player ->
+            when (player) {
+                is MediaController -> player.sendCustomCommand(setUsageCommand, setUsageArgs(usage))
+                is ExoPlayer -> player.setAudioAttributes(usage.toMedia3AudioAttributes(), true)
+            }
+        }
+    }
+
     /** Turns shuffled playback order on or off. */
     fun setShuffleEnabled(enabled: Boolean) {
         commands.dispatch { it.shuffleModeEnabled = enabled }

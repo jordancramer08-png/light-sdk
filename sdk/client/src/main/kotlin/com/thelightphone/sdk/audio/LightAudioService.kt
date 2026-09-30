@@ -14,6 +14,10 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ShuffleOrder
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
 
 /**
  * Hosts detached playback: one [ExoPlayer] and one [MediaSession], shared by
@@ -104,8 +108,29 @@ internal class LightAudioService : MediaSessionService() {
                 if (player.mediaItemCount == 0) {
                     adoptUsage(requestedUsage)
                 }
+                // Tool players may also switch the session's usage (setUsage).
+                return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                    .setAvailableSessionCommands(
+                        MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
+                            .add(setUsageCommand)
+                            .build(),
+                    )
+                    .build()
             }
             return super.onConnect(session, controller)
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: android.os.Bundle,
+        ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction != setUsageCommand.customAction || !controller.connectionHints.isToolController()) {
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED))
+            }
+            adoptUsage(args.requestedUsage())
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
         }
 
         // Connections are only a prompt to re-evaluate; the answer comes from

@@ -1,6 +1,7 @@
 package com.thelightphone.sdk.audio
 
 import android.os.Bundle
+import androidx.media3.session.SessionCommand
 
 /**
  * What a tool's `MediaController` tells [LightAudioService] as it connects.
@@ -30,6 +31,15 @@ internal fun Bundle.requestedUsage(): LightAudioUsage =
  * session's usage.
  */
 internal fun Bundle.isToolController(): Boolean = getBoolean(TOOL_CONTROLLER_HINT, false)
+
+/**
+ * The custom session command a tool's player sends to change the live session's usage
+ * (Music ↔ Speech), with the new usage in its arguments.
+ */
+internal val setUsageCommand = SessionCommand("com.thelightphone.sdk.audio.SET_USAGE", Bundle.EMPTY)
+
+internal fun setUsageArgs(usage: LightAudioUsage): Bundle =
+    Bundle().apply { putString(USAGE_HINT, usage.name) }
 
 private const val USAGE_HINT = "com.thelightphone.sdk.audio.usage"
 private const val TOOL_CONTROLLER_HINT = "com.thelightphone.sdk.audio.toolController"

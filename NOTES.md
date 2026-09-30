@@ -4,6 +4,57 @@ Session-by-session notes for the Listen tool. `CLAUDE.md` says what the app does
 `PLAN.md` says how it's built. The older SDK recon below the line is still accurate
 reference for the SDK's UI kit, screens and sandbox rules.
 
+## Session 6 (2026-09-30): audiobook playback and positions — works on the phone
+
+**Built**
+- SDK change (own commit, "SDK: let a detached player switch its audio usage"):
+  `LightAudioPlayer.setUsage(usage)` sends a custom session command (`setUsageCommand` in
+  `DetachedConnectionHints.kt`); `LightAudioService` offers it to tool controllers in
+  `onConnect` and applies it in `onCustomCommand` (`adoptUsage`). One player now plays music
+  (`Music`) and books (`Speech`). Speed uses the SDK's `speed` (`PlaybackParameters(speed)`,
+  pitch 1.0, so pitch-corrected).
+- `PlaybackHub` now handles books too:
+  - `playBook(book, chapter?)` resumes from the saved place, rewound by `rewindMs`. It starts
+    over when the saved place is in the last 30 s, and when the book is already loaded it
+    just plays or jumps.
+  - Book controls: `skipBook(±ms)` (across files via `locate`), `previousChapter` /
+    `nextChapter` / `seekToChapter`, `setSpeed`, `startSleepTimer(minutes | null = end of
+    chapter)`, `cancelSleepTimer`, `startBookOver`, and `resumeMusic()`.
+  - New flows: `chapters`, `chapter` (current index), `speed`, `sleep`, `musicSpot`.
+  - Saves: music every 5 s, book every 10 s (`BookPositions.record`), plus on pause, seek,
+    chapter change, background (`saveNow`) and when the service is released.
+  - The book place's `lastPlayedAt` only moves while playing or when the place changed, so
+    the rewind knows how long a pause really was.
+  - `finished` = last 30 s (index lengths, or the player's length on the last file); a
+    manual "Mark finished" is kept until the place moves.
+- Auto-rewind: no rewind for pauses under 2 s (`REWIND_MIN_PAUSE_MS`, because seeks briefly
+  pause), 3 s under 10 minutes, 10 s after that. The amounts are `ListenSettings.rewindShortSeconds` /
+  `rewindLongSeconds` (settings.json only, no screen yet). It runs in `play()`, or in the
+  isPlaying collector when resumed from the notification or a headset.
+- Separate resume points: `MusicState.book` (music_state.json) = id of the book loaded on top
+  of the music spot. On launch `restoreInto` reopens that book paused (else the music).
+  Music writes go through one IO thread (`io`) so they stay in order.
+- Screens: `BookNowPlayingScreen` (chapter seek bar, "Chapter N of M · 3:12:05 of 11:40:00",
+  ⏮ −15 ⏯ +30 ⏭, speed and sleep buttons), `ChaptersScreen` (opens at the current chapter,
+  tap to jump), `ui/ChoiceScreen` (speed, sleep). `openNowPlaying()` opens the book player
+  while a book is loaded. Chapter rows on `BookScreen` play from there, and Play reads
+  "Resume" when a book is in progress. Music home shows "Resume music" while a book is loaded.
+  `SeekBarWithTimes(position, duration, onSeek)`, `ControlButton`, `CenteredLine`,
+  `FramedPlaceholder` and `ChoiceRow` are now shared.
+- Version 0.6.0 (6). 7 new JVM tests in `tool/src/test/.../books/BookPlaybackTest.kt`.
+
+**For Session 7 (quality + polish)**
+- Add the Settings screen: rewind amounts (already in `ListenSettings`), audio offload
+  (default off; only at speed 1.0), theme.
+- The format/bitrate line needs the SDK player to expose the current track `Format`
+  (PLAN.md section 1). Add it in an "SDK: ..." commit like the others.
+- The sleep timer isn't saved, so it ends if Listen's process is killed. Loading music cancels
+  it (`leaveBook`), and so does loading a different book.
+- The fenleon Audiobooks app can now be uninstalled if Jordan wants (Listen's book playback is
+  proven).
+- `resumeMusic` loads on a background thread, so Music Now Playing can show "Nothing is
+  playing" for a moment right after "Resume music".
+
 ## Session 5 (2026-09-29): audiobook library — works on the phone
 
 **Built** (all in `books/`)

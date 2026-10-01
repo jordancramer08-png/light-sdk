@@ -22,6 +22,18 @@ object ListenPaths {
 
     /** The PC script writes a new timestamp here after every change it makes. */
     val lastSync: File = File(state, "last-sync.txt")
+
+    /** Followed podcasts (precious: kept in .state/ so it's backed up). */
+    val podcastSubscriptions: File = File(state, "podcasts.json")
+
+    /** Played marks, positions and downloads of podcast episodes (precious). */
+    val podcastEpisodes: File = File(state, "podcast_episodes.json")
+
+    /** Podcasts.cmd drops the PC's follow list here; Listen merges it, then deletes it. */
+    val podcastInbox: File = File(state, "podcasts_from_pc.json")
+
+    /** Podcasts/<showId>/: feed copies, art and downloads. Rebuildable, so not in .state/. */
+    val podcasts: File = File(root, "Podcasts")
 }
 
 /** Whether Listen has "All files access" (granted by option 9 of Listen-Phone-Sync.cmd). */

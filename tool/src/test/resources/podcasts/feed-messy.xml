@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE rss [
+  <!ENTITY lol "lol">
+  <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+  <!ENTITY xxe SYSTEM "file:///etc/passwd">
+]>
+<!-- A made-up feed full of the mistakes real feeds make. -->
+<rss version="2.0"
+     xmlns:ipod="http://www.itunes.com/DTDs/Podcast-1.0.dtd"
+     xmlns:content="http://purl.org/rss/1.0/modules/content/"
+     xmlns:podcast="https://podcastindex.org/namespace/1.0"
+     xmlns:psc="http://podlove.org/simple-chapters">
+  <channel>
+    <title>Tea &amp; Theology &xxe;</title>
+    <link>http://example.com/tea</link>
+    <ipod:author>Sample Host</ipod:author>
+    <ipod:image href="http://example.com/art/tea-3000.jpg"/>
+    <description>Short.</description>
+    <ipod:summary>A longer summary of the show, which should win because it is longer than the description.</ipod:summary>
+    <ipod:new-feed-url>https://feeds.example.com/tea</ipod:new-feed-url>
+
+    <item>
+      <title>Grace &amp;amp; Truth &amp;#8217;24</title>
+      <guid isPermaLink="false">tea-episode-1</guid>
+      <pubDate>Tue, 29 Sep 2026 10:00:00 GMT</pubDate>
+      <ipod:duration>1:02:03</ipod:duration>
+      <enclosure url="http://media.example.com/tea/ep1.mp3" type="audio/mpeg" length="12345678"/>
+      <content:encoded><![CDATA[<p>Full notes for episode one.</p><ul><li>First point</li><li>Second point</li></ul>]]></content:encoded>
+      <description>Short description that should lose to content:encoded.</description>
+      <podcast:chapters url="https://media.example.com/tea/ep1-chapters.json" type="application/json+chapters"/>
+      <podcast:transcript url="https://media.example.com/tea/ep1.srt" type="application/x-subrip"/>
+      <podcast:transcript url="https://media.example.com/tea/ep1.vtt" type="text/vtt" language="en"/>
+      <psc:chapters version="1.2">
+        <psc:chapter start="00:00:00" title="Welcome"/>
+        <psc:chapter start="00:05:30.500" title="Main topic" href="https://example.com/topic"/>
+        <psc:chapter start="1:00:00" title="Wrap-up"/>
+      </psc:chapters>
+    </item>
+
+    <item>
+      <title>No guid here</title>
+      <pubDate>29 Sep 2026 10:00 EST</pubDate>
+      <ipod:duration>3600</ipod:duration>
+      <enclosure url="http://media.example.com/tea/ep2.mp3" type="audio/mpeg" length="not-a-number"/>
+      <description>Only a description.</description>
+    </item>
+
+    <item>
+      <title>US-style date</title>
+      <guid>https://example.com/tea/3</guid>
+      <pubDate>Wednesday, September 30th 2026 9:30 PM PDT</pubDate>
+      <ipod:duration>45:00</ipod:duration>
+      <enclosure url="https://media.example.com/tea/ep3.m4a" type="audio/x-m4a"/>
+      <ipod:summary>Only an itunes summary.</ipod:summary>
+    </item>
+
+    <item>
+      <title>Wrong weekday, two-digit year</title>
+      <guid>tea-4</guid>
+      <pubDate>Mon, 1 Oct 26 08:00:00 +0200</pubDate>
+      <enclosure url="https://media.example.com/tea/ep4.mp3" type="audio/mpeg"/>
+    </item>
+
+    <item>
+      <title>ISO date</title>
+      <guid>tea-5</guid>
+      <pubDate>2026-09-15T08:00:00-04:00</pubDate>
+      <enclosure url="https://media.example.com/tea/ep5.mp3" type="audio/mpeg"/>
+    </item>
+
+    <item>
+      <title>Garbage date</title>
+      <guid>tea-6</guid>
+      <pubDate>sometime soon</pubDate>
+      <ipod:duration>about an hour</ipod:duration>
+      <enclosure url="https://media.example.com/tea/ep6.mp3" type="audio/mpeg"/>
+    </item>
+
+    <item>
+      <title>A blog post, not an episode</title>
+      <guid>tea-blog</guid>
+      <description>No enclosure, so it is skipped.</description>
+    </item>
+
+    <item>
+      <title>Relative enclosure</title>
+      <guid>tea-8</guid>
+      <pubDate>Thu, 17 Sep 2026 12:00:00 GMT</pubDate>
+      <enclosure url="/audio/ep8.mp3" type="audio/mpeg"/>
+    </item>
+
+    <item>
+      <title>Grace &amp;amp; Truth (repeated by mistake)</title>
+      <guid isPermaLink="false">tea-episode-1</guid>
+      <enclosure url="http://media.example.com/tea/ep1.mp3" type="audio/mpeg"/>
+    </item>
+
+    <item>
+      <title>Bad characters &#x110000; and &#0; and &#xD800;</title>
+      <guid>tea-10</guid>
+      <pubDate>Fri, 18 Sep 2026 12:00:00 GMT</pubDate>
+      <enclosure url="https://media.example.com/tea/ep10.mp3" type="audio/mpeg"/>
+      <description><p>Raw <b>HTML</b> right inside the XML,</p><p>not escaped &amp; not in CDATA.</p></description>
+    </item>
+
+    <item>
+      <ipod:title>Only an itunes title</ipod:title>
+      <guid>tea-11</guid>
+      <pubDate>Sat, 19 Sep 2026 12:00:00 GMT</pubDate>
+      <enclosure url="https://media.example.com/tea/ep11.mp3" type="audio/mpeg"/>
+    </item>
+  </channel>
+</rss>

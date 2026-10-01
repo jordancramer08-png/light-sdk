@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>Bare Bones</title>
+    <managingEditor>editor@example.com (Bare Editor)</managingEditor>
+    <image>
+      <url>https://example.com/bare.png</url>
+      <title>Bare Bones</title>
+    </image>
+    <item>
+      <title>One</title>
+      <guid>bare-1</guid>
+      <pubDate>Tue, 29 Sep 2026 10:00:00 GMT</pubDate>
+      <enclosure url="https://media.example.com/bare/1.mp3" type="audio/mpeg"/>
+    </item>
+    <item>
+      <title>Two</title>
+      <guid>bare-2</guid>
+      <description>   </description>
+      <enclosure url="https://media.example.com/bare/2.mp3" type="audio/mpeg"/>
+    </item>
+  </channel>
+</rss>

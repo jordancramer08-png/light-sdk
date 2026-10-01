@@ -1,0 +1,14 @@
+{
+  "version": "1.2.0",
+  "author": "Sample Host",
+  "title": "Episode one",
+  "chapters": [
+    { "startTime": 330.5, "title": "Main topic", "url": "https://example.com/topic" },
+    { "startTime": 0, "title": "Welcome" },
+    { "startTime": 120, "title": "Sponsor marker", "toc": false },
+    { "startTime": "1:00:00", "title": "Wrap-up &amp; thanks", "endTime": 3720 },
+    { "startTime": 900, "title": "" },
+    { "title": "No start time, ignored" },
+    "not even an object"
+  ]
+}

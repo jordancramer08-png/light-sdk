@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>Café Talk</title>
+    <itunes:owner>
+      <itunes:name>René Owner</itunes:name>
+      <itunes:email>owner@example.com</itunes:email>
+    </itunes:owner>
+    <image>
+      <url>http://example.com/cafe.jpg</url>
+    </image>
+    <description>Plain text description.
+Second line of it.</description>
+    <item>
+      <title>Episode à one</title>
+      <guid>cafe-1</guid>
+      <enclosure url="https://media.example.com/cafe/1.mp3" type="audio/mpeg"/>
+    </item>
+  </channel>
+</rss>

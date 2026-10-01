@@ -1,0 +1,23 @@
+WEBVTT
+Kind: captions
+Language: en
+
+NOTE This is a note block and should be ignored.
+
+STYLE
+::cue { color: yellow; }
+
+1
+00:00:00.000 --> 00:00:04.200 align:start position:0%
+<v Ann>Welcome to the show,
+everyone.</v>
+
+intro-2
+00:00:04.200 --> 00:00:09.000
+<v.loud Bob>Thanks, Ann. It&#39;s <i>great</i> to be here.
+
+00:09.500 --> 00:15.000
+Short timestamps without hours &amp; no speaker.
+
+01:02:03.250 --> 01:02:05.000
+<c.yellow>Over an hour in.</c>

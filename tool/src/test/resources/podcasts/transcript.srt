@@ -1,0 +1,18 @@
+1
+00:00:00,000 --> 00:00:04,200
+Ann: Welcome to the show,
+everyone.
+
+2
+00:00:04,200 --> 00:00:09,000
+<i>Bob:</i> Thanks, Ann.
+
+3
+00:00:09,500 --> 00:00:15,000
+A line without a speaker.
+
+
+
+4
+01:02:03,250 --> 01:02:05,000
+Over an hour in.

@@ -1,0 +1,5 @@
+Welcome to the show, everyone. This is a plain transcript with no times at all.
+
+Bob: Thanks, Ann. Paragraphs are separated by blank lines.
+
+And this is the last paragraph.

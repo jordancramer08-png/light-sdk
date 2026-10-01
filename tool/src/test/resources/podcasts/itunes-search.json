@@ -1,0 +1,9 @@
+{
+ "resultCount": 4,
+ "results": [
+  {"wrapperType":"track","kind":"podcast","collectionId":1111,"trackId":1111,"artistName":"Sample Ministries","collectionName":"Ask a Pastor (Sample)","trackName":"Ask a Pastor (Sample)","feedUrl":"https://feeds.example.com/ask","artworkUrl100":"https://art.example.com/100.jpg","artworkUrl600":"https://art.example.com/600.jpg","trackCount":2100,"primaryGenreName":"Christianity"},
+  {"wrapperType":"track","kind":"podcast","collectionId":2222,"artistName":"No Feed Co","collectionName":"Apple-only show","artworkUrl100":"https://art.example.com/x.jpg"},
+  {"wrapperType":"track","kind":"podcast","collectionId":3333,"artistName":"Old Host","trackName":"Small Art Only","feedUrl":"http://old.example.com/rss","artworkUrl100":"https://art.example.com/small.jpg"},
+  {"wrapperType":"track","kind":"podcast","collectionId":1112,"artistName":"Sample Ministries","collectionName":"Ask a Pastor (duplicate listing)","feedUrl":"https://feeds.example.com/ask"}
+ ]
+}

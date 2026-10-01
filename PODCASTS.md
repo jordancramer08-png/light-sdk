@@ -148,3 +148,4 @@ on the phone, anything left open.
 
 - 2026-10-01, Session 0: plan only (PODCAST_PLAN.md). Storage layout adjusted to /sdcard (above). No app code. Open questions for Jordan are in PODCAST_PLAN.md §11.
 - 2026-10-01, Session 0 answers: streaming yes; no podcast sleep timer; no OPML export available (shows come in by search); internet allowed for Podcasts only (CLAUDE.md updated).
+- 2026-10-01, P1a (logic only, no UI): podcasts/ package: hardened streaming XML reader, feed parser, HTML-to-text, http→https + redirect handling (OkHttp), iTunes search + rate limit, subscription store with PC-inbox merge, episode state store, New Episodes query, chapters (podcast:chapters JSON, psc, ID3 CHAP), transcripts (VTT, SRT, JSON, HTML, text). 75 new unit tests, all 152 pass; nothing installed on the phone yet. Stores use the /sdcard/Listen/.state layout from PODCAST_PLAN.md §8, not filesDir (the session prompt said filesDir; flagged to Jordan).

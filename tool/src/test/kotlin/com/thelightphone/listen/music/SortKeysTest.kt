@@ -34,4 +34,17 @@ class SortKeysTest {
         )
         assertEquals(listOf("Apple", "apple", "Banana", "Éclair", "The Zebra"), sorted.map { it.title })
     }
+
+    @Test
+    fun `fast plain-text keys match the full Unicode ones`() {
+        // What the keys were before the fast path (regular expressions over every name).
+        fun slow(name: String) = java.text.Normalizer.normalize(name.trim(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("""\p{Mn}+"""), "")
+            .replace(Regex("""\s+"""), " ")
+            .lowercase(java.util.Locale.ROOT)
+        val names = listOf("Shane & Shane", "  The Corner   Room ", "Beyoncé", "SIGUR RÓS", "Mötley	Crüe", "Ólafur Arnalds", "AC/DC")
+        for (name in names) assertEquals(slow(name), groupKey(name), name)
+        assertEquals("corner room", sortKey("The Corner Room"))
+        assertEquals("sigur ros", sortKey("Sigur Rós"))
+    }
 }

@@ -11,13 +11,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import com.thelightphone.listen.storage.Settings
 import com.thelightphone.sdk.ui.LightColors
 import com.thelightphone.sdk.ui.LightTheme
 import com.thelightphone.sdk.ui.LightThemeColors
 import com.thelightphone.sdk.ui.LightThemeTokens
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * The four color themes, the same as the Reader's. [colors] is what every screen is drawn
@@ -61,29 +59,18 @@ enum class ListenTheme(val label: String, val colors: LightColors, val accent: C
     }
 }
 
-/**
- * The app's current theme, shared by every screen. Changing it redraws every open screen
- * at once. (Choosing and saving a theme comes with the Settings screen.)
- */
-object ListenThemeController {
-    private val _theme = MutableStateFlow(ListenTheme.DEFAULT)
-    val theme: StateFlow<ListenTheme> = _theme.asStateFlow()
-
-    fun choose(theme: ListenTheme) {
-        _theme.value = theme
-    }
-}
-
 /** The current theme's accent color. */
 val LocalListenAccent = staticCompositionLocalOf { ListenTheme.DEFAULT.accent }
 
 /**
- * Every screen's outer frame: the current theme's colors and accent, and a full-screen
+ * Every screen's outer frame: the chosen theme's colors and accent (saved in settings.json,
+ * so changing it redraws every open screen at once), and a full-screen
  * column filled with the theme's background.
  */
 @Composable
 fun ThemedScreen(content: @Composable ColumnScope.() -> Unit) {
-    val theme by ListenThemeController.theme.collectAsState()
+    val settings by Settings.settings.collectAsState()
+    val theme = ListenTheme.fromSavedName(settings.theme)
     LightTheme(colors = theme.colors) {
         CompositionLocalProvider(LocalListenAccent provides theme.accent) {
             Column(

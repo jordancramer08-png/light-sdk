@@ -30,6 +30,10 @@ data class ListenSettings(
     val rewindShortSeconds: Int = 3,
     /** Seconds an audiobook goes back after a pause of 10 minutes or more. */
     val rewindLongSeconds: Int = 10,
+    /** The color theme's name (see ListenTheme); anything unknown reads as Dark. */
+    val theme: String = "DARK",
+    /** Let the audio hardware decode (saves battery). Off until tested on the phone. */
+    val audioOffload: Boolean = false,
 )
 
 /** Reads and writes [ListenSettings] as JSON. A missing or broken file reads as the defaults. */

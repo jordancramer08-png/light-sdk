@@ -18,12 +18,14 @@ where adb >nul 2>nul || set "ADB=%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.e
 
 echo.
 echo === 1 of 3: Building the app (first build can take several minutes) ===
-call gradlew.bat :tool:assembleDebug
+rem The release build: optimized (lists load about 40x faster than a debug build) and
+rem signed with the same dev key, so it installs over a debug build and back again.
+call gradlew.bat :tool:assembleRelease
 if errorlevel 1 goto :fail
 
 echo.
 echo === 2 of 3: Installing on the phone (phone plugged in, USB debugging on) ===
-"%ADB%" install -r "tool\build\outputs\apk\debug\tool-debug.apk"
+"%ADB%" install -r "tool\build\outputs\apk\release\tool-release.apk"
 if errorlevel 1 goto :installfail
 
 echo.

@@ -1,7 +1,5 @@
 package com.thelightphone.listen.music
 
-import java.text.Normalizer
-import java.util.Locale
 
 /**
  * One album: every song with the same album artist and album name, in disc, then track
@@ -35,14 +33,24 @@ data class Artist(val key: String, val name: String, val albums: List<Album>) {
  * so "Shane & Shane" and "Shane & shane" are one artist. (Unlike [sortKey], a leading
  * "The" is kept: "The Corner Room" and "Corner Room" could be different bands.)
  */
-fun groupKey(name: String): String =
-    Normalizer.normalize(name.trim(), Normalizer.Form.NFD)
-        .replace(COMBINING_MARKS, "")
-        .replace(SPACES, " ")
-        .lowercase(Locale.ROOT)
+fun groupKey(name: String): String = collapseSpaces(plainLowercase(name.trim()))
 
-private val COMBINING_MARKS = Regex("""\p{Mn}+""")
-private val SPACES = Regex("""\s+""")
+/** Runs of spaces, tabs or line breaks as one space. */
+private fun collapseSpaces(text: String): String {
+    if (text.none { it.isWhitespace() && it != ' ' } && !text.contains("  ")) return text
+    val out = StringBuilder(text.length)
+    var inSpace = false
+    for (c in text) {
+        if (c.isWhitespace()) {
+            if (!inSpace) out.append(' ')
+            inSpace = true
+        } else {
+            out.append(c)
+            inSpace = false
+        }
+    }
+    return out.toString()
+}
 
 /** The album a song belongs to: its album artist and album name. */
 fun albumKey(albumArtist: String, album: String): String = groupKey(albumArtist) + "\u0000" + groupKey(album)

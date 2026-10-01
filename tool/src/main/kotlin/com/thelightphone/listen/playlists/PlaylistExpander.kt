@@ -1,6 +1,5 @@
 package com.thelightphone.listen.playlists
 
-import com.thelightphone.listen.music.ARTIST_ALBUM_ORDER
 import com.thelightphone.listen.music.Album
 import com.thelightphone.listen.music.MusicLibraryState
 import com.thelightphone.listen.music.Song
@@ -37,11 +36,11 @@ fun matchEntry(entry: PlaylistEntry, library: MusicLibraryState): EntryMatch =
             val key = groupKey(entry.artist)
             val albums = mutableListOf<Album>()
             val songs = mutableListOf<Song>()
-            for (album in library.albums.sortedWith(ARTIST_ALBUM_ORDER)) {
-                val theirs = if (groupKey(album.artist) == key) {
+            for (album in library.albumsInArtistOrder) {
+                val theirs = if (library.artistKey(album.artist) == key) {
                     album.songs
                 } else {
-                    album.songs.filter { groupKey(it.artist) == key }
+                    album.songs.filter { library.artistKey(it.artist) == key }
                 }
                 if (theirs.isNotEmpty()) {
                     albums += album

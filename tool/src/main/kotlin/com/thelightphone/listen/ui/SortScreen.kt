@@ -79,7 +79,7 @@ fun ChoiceRow(label: String, isCurrent: Boolean, onSelect: () -> Unit) {
             .padding(vertical = 0.75f.gridUnitsAsDp()),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        LightText(text = label, variant = LightTextVariant.Copy, modifier = Modifier.weight(1f))
+        OneLine(text = label, variant = LightTextVariant.Copy, modifier = Modifier.weight(1f))
         LightIcon(icon = if (isCurrent) LightIcons.SELECT_ON else LightIcons.SELECT_OFF)
     }
 }

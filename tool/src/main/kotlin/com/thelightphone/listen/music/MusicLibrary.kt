@@ -30,6 +30,17 @@ data class MusicLibraryState(
     private val artistsByKey: Map<String, Artist> by lazy { artists.associateBy { it.key } }
     private val songsByPath: Map<String, Song> by lazy { songs.associateBy { it.path } }
 
+    /** Albums in the order an artist's albums play (year, then title), sorted once per library. */
+    val albumsInArtistOrder: List<Album> by lazy { albums.sortedWith(ARTIST_ALBUM_ORDER) }
+
+    /** [groupKey] of every artist name in the library, worked out once (it strips accents, which is slow-ish). */
+    private val artistKeys: Map<String, String> by lazy {
+        (songs.asSequence().map { it.artist } + albums.asSequence().map { it.artist }).distinct().associateWith(::groupKey)
+    }
+
+    /** [groupKey] of an artist [name], from the library's cache when it's one of its names. */
+    fun artistKey(name: String): String = artistKeys[name] ?: groupKey(name)
+
     /** The song at [path] (relative to Music/), or null if it isn't on the phone. */
     fun song(path: String): Song? = songsByPath[path]
     fun album(key: String): Album? = albumsByKey[key]
@@ -78,16 +89,21 @@ object MusicLibrary {
     }
 
     private fun refreshNow(indexDir: File) {
+        val started = System.currentTimeMillis()
         val store = MusicIndexStore(File(indexDir, "music_index.json"))
         val known = index ?: store.load().also { saved ->
             index = saved
             publish(saved.songs)
+            Log.i("Listen", "Music: ${saved.songs.size} songs shown from the index in ${System.currentTimeMillis() - started} ms")
         }
 
         val scanner = MusicScanner(ListenPaths.music, ListenPaths.lastSync, TagReader::read)
         // Taken before the scan, so a change made during the scan is caught next time.
         val stamp = scanner.stamp()
-        if (stamp == known.stamp) return
+        if (stamp == known.stamp) {
+            Log.i("Listen", "Music: unchanged (checked in ${System.currentTimeMillis() - started} ms)")
+            return
+        }
 
         _state.update { it.copy(updating = true) }
         try {
@@ -96,6 +112,7 @@ object MusicLibrary {
             index = updated
             publish(songs)
             store.save(updated)
+            Log.i("Listen", "Music: ${songs.size} songs after a rescan in ${System.currentTimeMillis() - started} ms")
         } finally {
             _state.update { it.copy(updating = false) }
         }

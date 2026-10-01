@@ -83,6 +83,7 @@ class BookNowPlayingScreen(sealedActivity: SealedLightActivity) : ListenScreen(s
                     TitleLines(current)
                     ChapterSeekBar()
                     BookPlace(current)
+                    BookFileQuality(current)
                     BookControls()
                     SpeedAndSleep(onSpeed = ::openSpeed, onSleep = ::openSleep)
                 }
@@ -168,6 +169,14 @@ private fun BookPlace(book: Book) {
         }
     }
     CenteredLine(parts.joinToString(" · "), LightTextVariant.Detail, lighten = true)
+}
+
+/** The quality line for the book file playing now. */
+@Composable
+private fun BookFileQuality(book: Book) {
+    val index by PlaybackHub.index.collectAsState()
+    val file = book.files.getOrNull(index)
+    QualityLine(fileName = file?.path ?: "", fileBytes = file?.size ?: 0, durationMs = file?.durationMs ?: 0)
 }
 
 @Composable

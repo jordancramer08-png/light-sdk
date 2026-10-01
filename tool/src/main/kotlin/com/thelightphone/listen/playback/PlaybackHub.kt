@@ -25,6 +25,7 @@ import com.thelightphone.sdk.audio.DefaultLightAudio
 import com.thelightphone.sdk.audio.LightAudio
 import com.thelightphone.sdk.audio.LightAudioError
 import com.thelightphone.sdk.audio.LightAudioException
+import com.thelightphone.sdk.audio.LightAudioFormat
 import com.thelightphone.sdk.audio.LightAudioItem
 import com.thelightphone.sdk.audio.LightAudioPlayback
 import com.thelightphone.sdk.audio.LightAudioPlayer
@@ -44,7 +45,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -134,6 +137,10 @@ object PlaybackHub {
     /** A short note for the user, such as "Can't play this file", or null. */
     val message: StateFlow<String?> = _message.asStateFlow()
 
+    /** The playing file's codec, bitrate and sample rate as the player read them, or null. */
+    private val _format = MutableStateFlow<LightAudioFormat?>(null)
+    val format: StateFlow<LightAudioFormat?> = _format.asStateFlow()
+
     /** The song at the current spot in the queue, or null when nothing is loaded. */
     val currentSong: StateFlow<Song?> = combine(_queue, _index) { queue, index ->
         queue?.songs?.getOrNull(index)
@@ -150,6 +157,8 @@ object PlaybackHub {
     private var lastSavedText: String? = null
     /** When the book was paused (wall clock), for the rewind when it plays again; null while playing. */
     private var pausedAt: Long? = null
+    /** Whether the player was last asked to use audio offload. */
+    private var offloadOn = false
 
     init {
         scope.launch {
@@ -169,6 +178,9 @@ object PlaybackHub {
                 if (chapters.isEmpty() || index < 0) -1
                 else chapterIndexAt(chapters, BookPosition(fileIndex = index, positionMs = position))
             }.collect(::onChapter)
+        }
+        scope.launch {
+            Settings.settings.map { it.audioOffload }.distinctUntilChanged().collect { applyAudioOffload() }
         }
     }
 
@@ -308,6 +320,7 @@ object PlaybackHub {
         val player = ensurePlayer() ?: return
         _speed.value = speed
         player.speed = speed
+        applyAudioOffload()
         saveBook()
     }
 
@@ -447,6 +460,7 @@ object PlaybackHub {
         pausedAt = null
         setUsage(player, LightAudioUsage.Music)
         player.speed = 1f
+        applyAudioOffload()
         player.setShuffleEnabled(_shuffle.value)
         player.setRepeatMode(_repeat.value)
     }
@@ -467,6 +481,7 @@ object PlaybackHub {
         player.setShuffleEnabled(false)
         player.setRepeatMode(LightRepeatMode.Off)
         player.speed = speed
+        applyAudioOffload()
         player.setMediaQueue(book.files.map { itemFor(book, it) }, start.fileIndex, start.positionMs)
         markBookLoaded(book.id)
         if (playNow) player.play()
@@ -545,6 +560,33 @@ object PlaybackHub {
         saveSoon()
     }
 
+    // ---- Audio offload ----
+
+    /**
+     * Audio offload (Settings, off by default) hands decoding to the phone's audio hardware,
+     * which saves battery. It's only used at 1.0× speed: other speeds need the CPU.
+     */
+    private fun applyAudioOffload() {
+        val player = player?.takeIf { it.availability.value != LightAudioPlayerAvailability.Released } ?: return
+        val speed = if (_book.value != null) _speed.value else 1f
+        val wanted = Settings.settings.value.audioOffload && speed == 1f
+        offloadOn = wanted
+        player.setAudioOffload(wanted)
+    }
+
+    /**
+     * Playback went wrong while offload was on: switch the setting off and try the same file
+     * again, since offload is the likelier cause than the file.
+     */
+    private fun turnOffloadOffAfterError(player: LightAudioPlayer) {
+        Settings.change { it.copy(audioOffload = false) }
+        offloadOn = false
+        player.setAudioOffload(false)
+        showMessage("Audio offload switched off")
+        player.prepare()
+        if (wantsToPlay) player.play()
+    }
+
     // ---- Player lifecycle ----
 
     /** The open player, opening a new one if there is none or the old one was released. */
@@ -559,6 +601,8 @@ object PlaybackHub {
             return null
         }
         player = opened
+        offloadOn = false
+        applyAudioOffload()
         follow(opened)
         restoreJob = scope.launch { restoreInto(opened) }
         return opened
@@ -643,6 +687,7 @@ object PlaybackHub {
             launch { player.shuffleEnabled.collect { if (hasQueue() && _book.value == null) _shuffle.value = it } }
             launch { player.repeatMode.collect { if (hasQueue() && _book.value == null) _repeat.value = it } }
             launch { player.error.collect { error -> if (error != null) onError(player, error) } }
+            launch { player.currentFormat.collect { _format.value = it } }
             launch {
                 // The service stopped (e.g. swiped away while paused). Save, and keep showing
                 // what was loaded, paused; the next attach opens a fresh player and restores it.
@@ -657,6 +702,10 @@ object PlaybackHub {
     /** "Can't play this file", then on to the next song or file (never a crash, never a loop). */
     private fun onError(player: LightAudioPlayer, error: LightAudioError) {
         Log.w("Listen", "Playback error ${error.diagnostic} at item ${error.itemIndex}")
+        if (offloadOn) {
+            turnOffloadOffAfterError(player)
+            return
+        }
         showMessage(CANT_PLAY)
         val isBook = _book.value != null
         val size = _queue.value?.songs?.size ?: _book.value?.files?.size ?: return

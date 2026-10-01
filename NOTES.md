@@ -4,6 +4,73 @@ Session-by-session notes for the Listen tool. `CLAUDE.md` says what the app does
 `PLAN.md` says how it's built. The older SDK recon below the line is still accurate
 reference for the SDK's UI kit, screens and sandbox rules.
 
+## Session 7 (2026-09-30): audio quality and polish — built, waiting for Jordan's phone test
+
+Jordan had to unplug the phone and leave. **Nothing from Session 7 is committed except the
+SDK commit below.** All other changes are uncommitted in the working tree.
+
+**Finished**
+- Quality checks against CLAUDE.md, confirmed in code:
+  - Untouched output: no EQ/effects/normalization anywhere; `LightAudioService` builds a
+    plain ExoPlayer.
+  - Gapless: one player with a real playlist (`setMediaQueue`), never recreated per track.
+    The default extractors read LAME/Xing and iTunSMPB gapless data.
+  - Own sample rate: no forced resampling. Speed changes only resample for books at ≠1.0×.
+  - Unplayable files: `PlaybackHub.onError` shows "Can't play this file" and skips, with a
+    loop guard.
+- SDK commit `5692f15` "SDK: expose the playing track's format and an audio offload
+  switch": `LightAudioPlayer.currentFormat` (`LightAudioFormat`: codec, container, bitrate,
+  sample rate, channels) and `setAudioOffload(enabled)` (gapless support required). Checked
+  in the Media3 1.10.1 jar that both are bundled across the MediaController. 2 new SDK tests
+  (13/13 pass).
+- Uncommitted app changes:
+  - `playback/FormatLine.kt` + `QualityLine` on both Now Playing screens ("MP3 · 190 kbps ·
+    44.1 kHz"). If the file has no bitrate, it's worked out from size/length.
+  - Audio offload: `ListenSettings.audioOffload` (default false). `PlaybackHub.applyAudioOffload`
+    turns it on only at 1.0×. A playback error while offload is on switches the setting off
+    and retries the same file ("Audio offload switched off").
+  - Settings screen (`settings/SettingsScreen.kt`, `settings/ThemeScreen.kt`,
+    `ui/SettingRows.kt`): theme, rewind short/long steppers, audio offload. The theme is now
+    saved in settings.json (`ListenSettings.theme`); `ListenThemeController` was removed.
+  - Speed: `MusicLibraryState.albumsInArtistOrder` and `artistKey()` caches for playlist
+    artist entries. `plainLowercase()` fast ASCII path in `sortKey`/`groupKey` (same results;
+    test added in `SortKeysTest`). Timing log lines ("Music: … in N ms") in MusicLibrary and
+    BookLibrary.
+  - `SpeedCheckTest` (1,400 songs / 270 albums, 560-file book) and `FormatLineTest`.
+    All 70 app tests pass.
+  - Polish: sort/choice rows are one line. Music Now Playing no longer flashes "Nothing is
+    playing" right after "Resume music".
+  - Version 1.0.0 (7) in `tool/lighttool.toml`.
+- Phone speed results (1,422 songs): the debug build took 6.5 s to show music, 3.8 s after
+  the key fix. The **release build takes 82 ms** (books 3 ms). The release build ran fine on
+  the phone: it restored the book, showed art and library counts.
+
+**Resumed later the same day (phone plugged back in)**
+- `scripts/Build and Install Listen.cmd` now builds and installs the **release** APK
+  (`assembleRelease` → `tool/build/outputs/apk/release/tool-release.apk`). It uses the same dev
+  key, so it upgrades in place over debug builds.
+- Home: Settings is a gear icon in the top bar. Home and Music home menus scroll instead of
+  squashing rows. Dividers stop at the scrollbar gutter on these two screens.
+- Settings: rewind labels are "Short pause" / "Long pause" (they were cut off), with a note
+  that a long pause is 10 minutes or more.
+- The quality line uses `LightTextVariant.Superfine`. The SDK's `Fine` is 25 sp, larger than
+  `Detail`.
+- Checked on the phone (release build): Home, Settings, and Book Now Playing showing
+  "MP3 · 128 kbps · 44.1 kHz". Playback played at 1.25× and paused with no errors. Music
+  shows from the index in about 85 ms.
+- settings.json on the phone had `"audioOffload": true`, set by hand on the phone (the default
+  is false). Left as Jordan set it.
+- All 70 app tests pass. Still uncommitted, waiting on Jordan's phone test.
+
+**What's left**
+- Jordan runs the final checklist on the phone.
+- End of session (after the test passes): commit "Session 7 - audio quality and polish",
+  push `listen`, and write the final NOTES summary. Decide whether to keep the timing log
+  lines.
+- Known and left as is: music_state.json is about 117 KB with a 1,400-song queue and is
+  rewritten every 5 s while playing (encoding takes about 3 ms). Settings load in the
+  background, so a non-Dark theme can flash Dark for a moment on launch.
+
 ## Session 6 (2026-09-30): audiobook playback and positions — works on the phone
 
 **Built**

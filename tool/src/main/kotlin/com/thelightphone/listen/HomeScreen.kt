@@ -1,7 +1,7 @@
 package com.thelightphone.listen
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -13,6 +13,7 @@ import com.thelightphone.listen.books.bookCount
 import com.thelightphone.listen.music.MusicHomeScreen
 import com.thelightphone.listen.music.MusicLibrary
 import com.thelightphone.listen.playback.PlaybackHub
+import com.thelightphone.listen.settings.SettingsScreen
 import com.thelightphone.listen.storage.StorageAccess
 import com.thelightphone.listen.ui.CenteredMessage
 import com.thelightphone.listen.ui.MenuRow
@@ -21,6 +22,9 @@ import com.thelightphone.listen.ui.ThemedScreen
 import com.thelightphone.listen.ui.UpdatingLine
 import com.thelightphone.sdk.InitialScreen
 import com.thelightphone.sdk.SealedLightActivity
+import com.thelightphone.sdk.ui.LightBarButton
+import com.thelightphone.sdk.ui.LightIcons
+import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
@@ -51,13 +55,19 @@ class HomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedActiv
         ThemedScreen {
             LightTopBar(
                 center = LightTopBarCenter.Text("Listen"),
+                rightButton = if (access == true) {
+                    LightBarButton.LightIcon(icon = LightIcons.SETTINGS, onClick = ::openSettings, contentDescription = "Settings")
+                } else {
+                    null
+                },
                 modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
             )
             when (access) {
                 null -> Box(modifier = Modifier.weight(1f))
                 false -> CenteredMessage(NO_ACCESS_MESSAGE, modifier = Modifier.weight(1f))
                 true -> {
-                    Column(modifier = Modifier.weight(1f)) {
+                    // Scrolls rather than squashing a row when they don't all fit.
+                    LightScrollView(modifier = Modifier.weight(1f).fillMaxWidth()) {
                         MenuRow(title = "Music", onClick = ::openMusic)
                         MenuRow(
                             title = "Audiobooks",
@@ -81,6 +91,10 @@ class HomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedActiv
 
     private fun openAudiobooks() {
         navigateTo(screenFactory = { BooksScreen(it) })
+    }
+
+    private fun openSettings() {
+        navigateTo(screenFactory = { SettingsScreen(it) })
     }
 
     private fun openMusic() {

@@ -63,6 +63,8 @@ class MusicNowPlayingScreen(sealedActivity: SealedLightActivity) : ListenScreen(
     @Composable
     override fun Content() {
         val song by PlaybackHub.currentSong.collectAsState()
+        val book by PlaybackHub.book.collectAsState()
+        val message by PlaybackHub.message.collectAsState()
         ThemedScreen {
             LightTopBar(
                 leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
@@ -77,8 +79,10 @@ class MusicNowPlayingScreen(sealedActivity: SealedLightActivity) : ListenScreen(
             )
             val current = song
             if (current == null) {
+                // Just after "Resume music" the book is still loaded while the music loads:
+                // show nothing for that moment instead of "Nothing is playing".
                 CenteredMessage(
-                    "Nothing is playing.\n\nPick a song in Music.",
+                    message ?: if (book != null) "" else "Nothing is playing.\n\nPick a song in Music.",
                     modifier = Modifier.weight(1f),
                 )
             } else {
@@ -132,6 +136,16 @@ private fun SongLines(song: Song) {
     CenteredLine(song.artist, LightTextVariant.Copy, lighten = true)
     // The album line doubles as the place for "Can't play this file".
     CenteredLine(message ?: song.album, LightTextVariant.Detail, lighten = message == null)
+    QualityLine(fileName = song.path, fileBytes = song.size, durationMs = song.durationMs)
+}
+
+/** "MP3 · 190 kbps · 44.1 kHz" in small text; a blank line of the same height until known. */
+@Composable
+fun QualityLine(fileName: String, fileBytes: Long, durationMs: Long) {
+    val format by PlaybackHub.format.collectAsState()
+    val playerDuration by PlaybackHub.durationMs.collectAsState()
+    val length = if (durationMs > 0) durationMs else playerDuration
+    CenteredLine(formatLine(format, fileName, fileBytes, length) ?: " ", LightTextVariant.Superfine, lighten = true)
 }
 
 @Composable

@@ -101,15 +101,20 @@ object BookLibrary {
     }
 
     private fun refreshNow(indexDir: File) {
+        val started = System.currentTimeMillis()
         val store = BookIndexStore(File(indexDir, "book_index.json"))
         val known = index ?: store.load().also { saved ->
             index = saved
             publish(saved.books)
+            Log.i("Listen", "Books: ${saved.books.size} books shown from the index in ${System.currentTimeMillis() - started} ms")
         }
 
         val scanner = BookScanner(ListenPaths.audiobooks, ListenPaths.lastSync, TagReader::read)
         val stamp = scanner.stamp()
-        if (stamp == known.stamp) return
+        if (stamp == known.stamp) {
+            Log.i("Listen", "Books: unchanged (checked in ${System.currentTimeMillis() - started} ms)")
+            return
+        }
 
         _state.update { it.copy(updating = true) }
         try {
@@ -118,6 +123,7 @@ object BookLibrary {
             index = updated
             publish(books)
             store.save(updated)
+            Log.i("Listen", "Books: ${books.size} books after a rescan in ${System.currentTimeMillis() - started} ms")
         } finally {
             _state.update { it.copy(updating = false) }
         }

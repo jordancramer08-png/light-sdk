@@ -1,6 +1,6 @@
 package com.thelightphone.listen.music
 
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -18,6 +18,7 @@ import com.thelightphone.listen.ui.UpdatingLine
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcons
+import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
@@ -38,7 +39,8 @@ class MusicHomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealed
                 center = LightTopBarCenter.Text("Music"),
                 modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
             )
-            Column(modifier = Modifier.weight(1f)) {
+            // Scrolls rather than squashing a row when they don't all fit ("Resume music" makes five).
+            LightScrollView(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 // While a book is loaded: back to the music that was playing before it.
                 val spot = musicSpot
                 if (book != null && spot != null && spot.paths.isNotEmpty()) {

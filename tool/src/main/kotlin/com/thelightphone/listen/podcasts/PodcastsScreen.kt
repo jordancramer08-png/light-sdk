@@ -17,23 +17,30 @@ import com.thelightphone.listen.music.ArtAndText
 import com.thelightphone.listen.music.ListTopBar
 import com.thelightphone.listen.music.MusicLazyList
 import com.thelightphone.listen.ui.CenteredMessage
+import com.thelightphone.listen.ui.MenuRow
 import com.thelightphone.listen.ui.NowPlayingBar
 import com.thelightphone.listen.ui.OneLine
 import com.thelightphone.listen.ui.StatusLine
 import com.thelightphone.listen.ui.ThemedScreen
 import com.thelightphone.listen.ui.UniformRow
 import com.thelightphone.listen.ui.VolumeKeyScreen
+import com.thelightphone.listen.ui.tapOrHold
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.rememberKeyboardOptions
 import com.thelightphone.sdk.ui.LightBarButton
+import com.thelightphone.sdk.ui.LightBottomBar
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightTextInputEditor
 import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.LightThemeTokens
 
+/** The same size as album covers in Albums. */
+const val SHOW_ART_GRID_UNITS = 5.6f
+
 /**
- * The shows Jordan follows, A–Z, each with its channel art. + adds one by its feed address
- * (the PC's Podcasts.cmd is the easier way). Show pages come in a later session.
+ * Podcasts: New Episodes at the top, then the shows Jordan follows, A–Z, with their channel
+ * art. The magnifier searches for shows (and adds one by its feed address); REFRESH checks
+ * every feed for new episodes.
  */
 class PodcastsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedActivity) {
 
@@ -46,33 +53,36 @@ class PodcastsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedA
         val shows by Podcasts.shows.collectAsState()
         val loaded by Podcasts.loaded.collectAsState()
         val status by Podcasts.status.collectAsState()
+        val refreshing by Podcasts.refreshing.collectAsState()
+        val newEpisodes by Podcasts.newEpisodes.collectAsState()
+        val errors by Podcasts.feedErrors.collectAsState()
         ThemedScreen {
             ListTopBar(
                 title = "Podcasts",
                 onBack = { goBack() },
-                rightButton = LightBarButton.LightIcon(
-                    icon = LightIcons.ADD,
-                    onClick = ::openAddFeed,
-                    contentDescription = "Add a show",
-                ),
+                rightButton = LightBarButton.LightIcon(icon = LightIcons.SEARCH, onClick = ::openSearch, contentDescription = "Search"),
             )
             val listArea = Modifier.weight(1f)
             when {
                 !loaded -> Box(modifier = listArea)
                 shows.isEmpty() -> CenteredMessage(NO_SHOWS, modifier = listArea)
-                else -> Box(modifier = listArea) {
-                    MusicLazyList(tag = "shows", rowGridUnits = ALBUM_ROW_GRID_UNITS) {
-                        itemsIndexed(shows, key = { _, show -> show.showId }) { index, show ->
-                            UniformRow(heightGridUnits = ALBUM_ROW_GRID_UNITS, showDivider = index != shows.lastIndex) {
-                                ArtAndText(
-                                    art = { size ->
-                                        ArtImage(Podcasts.artSource(show.showId), ArtSize.THUMB, artLetter(show.title), size)
-                                    },
-                                    artGridUnits = SHOW_ART_GRID_UNITS,
+                else -> {
+                    MenuRow(title = "New Episodes", detail = newCount(newEpisodes.size), onClick = ::openNewEpisodes)
+                    Box(modifier = listArea) {
+                        MusicLazyList(tag = "shows", rowGridUnits = ALBUM_ROW_GRID_UNITS) {
+                            itemsIndexed(shows, key = { _, show -> show.showId }) { index, show ->
+                                UniformRow(
+                                    heightGridUnits = ALBUM_ROW_GRID_UNITS,
+                                    showDivider = index != shows.lastIndex,
+                                    modifier = Modifier.tapOrHold(onHold = null) { openShow(show.showId) },
                                 ) {
-                                    OneLine(text = show.title.ifEmpty { show.feedUrl }, variant = LightTextVariant.Copy)
-                                    if (show.author.isNotEmpty()) {
-                                        OneLine(text = show.author, variant = LightTextVariant.Detail, lighten = true)
+                                    ArtAndText(
+                                        art = { size -> ArtImage(Podcasts.artSource(show.showId), ArtSize.THUMB, artLetter(show.title), size) },
+                                        artGridUnits = SHOW_ART_GRID_UNITS,
+                                    ) {
+                                        OneLine(text = show.title.ifEmpty { show.feedUrl }, variant = LightTextVariant.Copy)
+                                        if (show.author.isNotEmpty()) OneLine(text = show.author, variant = LightTextVariant.Detail, lighten = true)
+                                        if (show.showId in errors) OneLine(text = "Couldn't update", variant = LightTextVariant.Detail, lighten = true)
                                     }
                                 }
                             }
@@ -81,25 +91,26 @@ class PodcastsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedA
                 }
             }
             StatusLine(status?.text)
+            if (loaded && shows.isNotEmpty() && !refreshing) {
+                LightBottomBar(items = listOf(LightBarButton.Text(text = "REFRESH", onClick = Podcasts::refreshAll)))
+            }
             NowPlayingBar(onOpen = ::openNowPlaying)
         }
     }
 
-    private fun openAddFeed() {
-        navigateTo(
-            screenFactory = { AddFeedScreen(it) },
-            resultCallback = { typed -> Podcasts.add(typed) },
-        )
-    }
+    private fun openSearch() = navigateTo(screenFactory = { PodcastSearchScreen(it) })
+
+    private fun openNewEpisodes() = navigateTo(screenFactory = { NewEpisodesScreen(it) })
+
+    private fun openShow(showId: String) = navigateTo(screenFactory = { ShowScreen(it, showId) })
 
     private companion object {
-        /** The same size as album covers in Albums. */
-        const val SHOW_ART_GRID_UNITS = 5.6f
-
-        const val NO_SHOWS = "No shows yet.\n\nTap + to add one by its feed address, " +
-            "or follow shows with Podcasts.cmd on the PC."
+        const val NO_SHOWS = "No shows yet.\n\nTap the magnifier to search for shows to follow."
     }
 }
+
+/** "3 new", "None right now". */
+fun newCount(count: Int): String = if (count == 0) "None right now" else "$count new"
 
 /**
  * Types a show's feed address with the phone's keyboard. Hands back what was typed; back,

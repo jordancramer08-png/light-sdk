@@ -15,6 +15,8 @@ data class SearchResult(
     val author: String,
     val feedUrl: String,
     val artUrl: String?,
+    /** A small (160 px) version of the art for result rows. */
+    val thumbUrl: String?,
     val appleId: Long?,
     val episodeCount: Int?,
     val genre: String?,
@@ -48,6 +50,9 @@ class ITunesSearch(
 
         private val json = Json { isLenient = true }
 
+        /** Apple art addresses end in a size ("…/100x100bb.jpg"), which can be changed to ask for another. */
+        private val APPLE_ART_SIZE_RE = Regex("""\d+x\d+bb""")
+
         /** The shows in an iTunes Search response. Results without a feed can't be followed and are left out. */
         fun parseResults(text: String): List<SearchResult> {
             val root = try {
@@ -65,6 +70,8 @@ class ITunesSearch(
                     author = s("artistName").orEmpty(),
                     feedUrl = feed,
                     artUrl = s("artworkUrl600") ?: s("artworkUrl100") ?: s("artworkUrl60"),
+                    thumbUrl = (s("artworkUrl100") ?: s("artworkUrl600") ?: s("artworkUrl60"))
+                        ?.replace(APPLE_ART_SIZE_RE, "160x160bb"),
                     appleId = (o["collectionId"] as? JsonPrimitive)?.longOrNull,
                     episodeCount = (o["trackCount"] as? JsonPrimitive)?.intOrNull,
                     genre = s("primaryGenreName"),

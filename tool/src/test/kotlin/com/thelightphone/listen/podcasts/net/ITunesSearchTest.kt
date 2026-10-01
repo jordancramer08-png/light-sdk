@@ -14,8 +14,8 @@ class ITunesSearchTest {
         val results = ITunesSearch.parseResults(Samples.text("itunes-search.json"))
         assertEquals(
             listOf(
-                SearchResult("Ask a Pastor (Sample)", "Sample Ministries", "https://feeds.example.com/ask", "https://art.example.com/600.jpg", 1111, 2100, "Christianity"),
-                SearchResult("Small Art Only", "Old Host", "http://old.example.com/rss", "https://art.example.com/small.jpg", 3333, null, null),
+                SearchResult("Ask a Pastor (Sample)", "Sample Ministries", "https://feeds.example.com/ask", "https://art.example.com/600.jpg", "https://art.example.com/100.jpg", 1111, 2100, "Christianity"),
+                SearchResult("Small Art Only", "Old Host", "http://old.example.com/rss", "https://art.example.com/small.jpg", "https://art.example.com/small.jpg", 3333, null, null),
             ),
             results,
         )

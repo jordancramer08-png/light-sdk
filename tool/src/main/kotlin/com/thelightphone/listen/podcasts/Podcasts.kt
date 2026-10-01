@@ -3,43 +3,79 @@ package com.thelightphone.listen.podcasts
 import android.util.Log
 import com.thelightphone.listen.artwork.ArtSource
 import com.thelightphone.listen.artwork.ArtworkCache
+import com.thelightphone.listen.podcasts.feed.Episode
 import com.thelightphone.listen.podcasts.feed.NotAFeedException
+import com.thelightphone.listen.podcasts.net.ITunesSearch
 import com.thelightphone.listen.podcasts.net.NetError
 import com.thelightphone.listen.podcasts.net.PodcastFetcher
+import com.thelightphone.listen.podcasts.net.SearchResult
+import com.thelightphone.listen.podcasts.store.EpisodeSort
+import com.thelightphone.listen.podcasts.store.EpisodeState
+import com.thelightphone.listen.podcasts.store.EpisodeStateStore
+import com.thelightphone.listen.podcasts.store.FeedNotes
+import com.thelightphone.listen.podcasts.store.FeedSnapshot
+import com.thelightphone.listen.podcasts.store.NEW_EPISODES_WINDOW_DAYS
+import com.thelightphone.listen.podcasts.store.NewEpisode
 import com.thelightphone.listen.podcasts.store.ShowFiles
 import com.thelightphone.listen.podcasts.store.Subscription
 import com.thelightphone.listen.podcasts.store.SubscriptionStore
+import com.thelightphone.listen.podcasts.store.episodeKey
+import com.thelightphone.listen.podcasts.store.newEpisodes
 import com.thelightphone.listen.storage.ListenPaths
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicInteger
 
-/** What the Podcasts screen says under its list: work going on, or how the last add went. */
+/** What the Podcasts screens say under their lists: work going on, or how the last job went. */
 data class PodcastStatus(val text: String, val working: Boolean)
 
+/** What a search on Apple's directory found, or why it couldn't. */
+sealed interface SearchOutcome {
+    data class Found(val results: List<SearchResult>) : SearchOutcome
+    data class Failed(val message: String) : SearchOutcome
+}
+
 /**
- * The app-wide podcasts: the follow list (in /sdcard/Listen/.state/podcasts.json) and adding
- * shows. Every screen calls [load] when it shows: the first time it reads the list; after
- * that it only re-reads it if something else changed the file (a restore from the PC), and
- * it always folds in the PC's inbox if Podcasts.cmd left one. All file and network work
- * happens on [scope], off the main thread, one job at a time.
+ * The app-wide podcasts: the follow list (/sdcard/Listen/.state/podcasts.json), each
+ * episode's played mark and downloads (podcast_episodes.json), the recent episodes behind New
+ * Episodes, and the jobs that change them (add, refresh, unfollow). Every screen calls
+ * [load] when it shows: the first time it reads the files; after that it only re-reads the
+ * list if something else changed it (a restore from the PC), and always folds in the PC's
+ * inbox if Podcasts.cmd left one.
+ *
+ * File work runs on [scope], one job at a time; feeds are fetched on the IO threads, two at a
+ * time (a big feed takes a lot of memory while it's read, and the phone has about 128 MB).
  */
 object Podcasts {
     private const val TAG = "Listen"
 
-    /** Channel art is kept at this size (shorter side, px): sharp on Now Playing, small on disk. */
+    /** Channel art is kept at this size (shorter side, px): sharp on a show page, small on disk. */
     private const val ART_PX = 600
+    private const val ART_FILE = "art.jpg"
+    private const val PARALLEL_FEEDS = 2
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+    private val feedFetching = Dispatchers.IO.limitedParallelism(PARALLEL_FEEDS)
     private val fetcher by lazy { PodcastFetcher() }
+    private val search by lazy { ITunesSearch() }
 
     private var store: SubscriptionStore? = null
+    private var episodeStore: EpisodeStateStore? = null
     /** podcasts.json's change time when Listen last read or wrote it (only used on [scope]). */
     private var knownModified = -1L
 
@@ -50,26 +86,49 @@ object Podcasts {
     private val _loaded = MutableStateFlow(false)
     val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
 
+    private val _states = MutableStateFlow<Map<String, EpisodeState>>(emptyMap())
+    /** Every touched episode's state, keyed "showId/episodeId" ([episodeKey]). */
+    val states: StateFlow<Map<String, EpisodeState>> = _states.asStateFlow()
+
+    /** Each followed show's episodes from the last [NEW_EPISODES_WINDOW_DAYS] days (all New Episodes needs). */
+    private val recent = MutableStateFlow<Map<String, List<Episode>>>(emptyMap())
+
+    /** Unplayed, recent episodes from every followed show, newest first. */
+    val newEpisodes: StateFlow<List<NewEpisode>> = combine(_shows, recent, _states) { shows, eps, states ->
+        newEpisodes(shows, eps, states, System.currentTimeMillis())
+    }.stateIn(CoroutineScope(SupervisorJob() + Dispatchers.Default), SharingStarted.Eagerly, emptyList())
+
     private val _status = MutableStateFlow<PodcastStatus?>(null)
     val status: StateFlow<PodcastStatus?> = _status.asStateFlow()
+
+    private val _refreshing = MutableStateFlow(false)
+    val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
+
+    private val _feedErrors = MutableStateFlow<Map<String, String>>(emptyMap())
+    /** Shows whose last refresh failed, with why ("This show only offers an insecure link…"). */
+    val feedErrors: StateFlow<Map<String, String>> = _feedErrors.asStateFlow()
 
     fun load() {
         scope.launch {
             try {
+                val firstTime = store == null
                 val s = openStore()
                 if (ListenPaths.podcastSubscriptions.lastModified() != knownModified) s.reload()
                 s.mergeInbox()
                 publish(s)
+                if (firstTime) loadRecent(s.shows.value)
             } catch (e: Exception) {
-                Log.w(TAG, "Couldn't read the podcast list", e)
+                Log.w(TAG, "Couldn't read podcasts", e)
             }
         }
     }
 
-    /** Clears the last add's message (when the Podcasts screen is opened again). */
+    /** Clears the last job's message (when a Podcasts screen is opened again). */
     fun clearStatus() {
         if (_status.value?.working == false) _status.value = null
     }
+
+    // ---- Adding and following ----
 
     /**
      * Follows the show at the [typed] address: fetches its feed first (so a wrong address or
@@ -90,41 +149,215 @@ object Podcasts {
                 if (existing != null && existing.following) {
                     PodcastStatus("You already follow ${existing.title.ifEmpty { "that show" }}.", working = false)
                 } else {
-                    val title = follow(s, url)
-                    PodcastStatus("Added $title.", working = false)
+                    PodcastStatus("Added ${follow(s, url)}.", working = false)
                 }
-            } catch (e: NetError) {
-                PodcastStatus(e.message ?: "Couldn't load that address.", working = false)
-            } catch (e: NotAFeedException) {
-                PodcastStatus("That address isn't a podcast feed.", working = false)
-            } catch (e: IOException) {
-                Log.w(TAG, "Couldn't add $url", e)
-                PodcastStatus("Couldn't load that address.", working = false)
             } catch (e: Exception) {
-                Log.w(TAG, "Couldn't add $url", e)
-                PodcastStatus("Something went wrong adding that show.", working = false)
+                PodcastStatus(failure(e, url), working = false)
             }
         }
     }
 
     /** Fetches, saves and follows. Returns the show's title. Runs on [scope]. */
-    private fun follow(s: SubscriptionStore, url: String): String {
-        val fetched = fetcher.fetchFeed(url)
+    private suspend fun follow(s: SubscriptionStore, url: String): String {
+        val fetched = withContext(feedFetching) { fetcher.fetchFeed(url) }
         val show = fetched.feed.show
         val sub = s.follow(fetched.movedTo ?: url, show.title, show.author, show.artUrl)
         val files = showFiles(sub.showId)
         files.save(fetched.feed, System.currentTimeMillis())
         show.artUrl?.let { saveArt(it, files.file(ART_FILE)) }
+        recent.update { it + (sub.showId to recentOf(fetched.feed.episodes)) }
         publish(s)
         return show.title
     }
+
+    /**
+     * Unfollows [showId]. With [deleteDownloads], its downloaded episodes are deleted too;
+     * once nothing downloaded is left, the show's folder (feed copy and art) goes as well.
+     */
+    fun unfollow(showId: String, deleteDownloads: Boolean) {
+        scope.launch {
+            try {
+                val s = openStore()
+                val title = s.get(showId)?.title.orEmpty()
+                s.unfollow(showId)
+                val e = openEpisodeStore()
+                val files = showFiles(showId)
+                if (deleteDownloads) {
+                    for ((episodeId, download) in e.downloadsOf(showId)) {
+                        download.allFiles.forEach { files.file(it).delete() }
+                        e.clearDownload(showId, episodeId)
+                    }
+                }
+                if (e.downloadsOf(showId).isEmpty()) files.dir.deleteRecursively()
+                recent.update { it - showId }
+                _feedErrors.update { it - showId }
+                publish(s)
+                _status.value = PodcastStatus("Unfollowed ${title.ifEmpty { "the show" }}.", working = false)
+            } catch (e: Exception) {
+                Log.w(TAG, "Couldn't unfollow $showId", e)
+            }
+        }
+    }
+
+    /** How many downloaded episodes [showId] has (to ask about them before unfollowing). */
+    fun downloadCount(showId: String): Int = _states.value.count { (k, v) -> k.startsWith("$showId/") && v.download != null }
+
+    // ---- Refresh ----
+
+    /** Fetches every followed show's feed again (two at a time), then updates New Episodes. */
+    fun refreshAll() {
+        if (_refreshing.value) return
+        _refreshing.value = true
+        scope.launch {
+            try {
+                val s = openStore()
+                val shows = s.shows.value
+                val done = AtomicInteger(0)
+                _status.value = PodcastStatus("Checking ${showCount(shows.size)}…", working = true)
+                val failed = coroutineScope {
+                    shows.map { sub ->
+                        async(feedFetching) {
+                            val ok = refreshOne(s, sub)
+                            _status.value = PodcastStatus("Checked ${done.incrementAndGet()} of ${shows.size}…", working = true)
+                            ok
+                        }
+                    }.awaitAll()
+                }.count { !it }
+                publish(s)
+                val newCount = newEpisodes.value.size
+                _status.value = PodcastStatus(
+                    when {
+                        failed > 0 -> "$failed of ${shows.size} couldn't be checked. Open the show to see why."
+                        newCount == 0 -> "Up to date. No new episodes."
+                        newCount == 1 -> "Up to date. 1 new episode."
+                        else -> "Up to date. $newCount new episodes."
+                    },
+                    working = false,
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "Refresh failed", e)
+                _status.value = PodcastStatus("Couldn't refresh.", working = false)
+            } finally {
+                _refreshing.value = false
+            }
+        }
+    }
+
+    /** One show's refresh. Returns false (and remembers why) when it couldn't be fetched. */
+    private fun refreshOne(s: SubscriptionStore, sub: Subscription): Boolean =
+        try {
+            val fetched = fetcher.fetchFeed(sub.feedUrl)
+            val show = fetched.feed.show
+            val files = showFiles(sub.showId)
+            files.save(fetched.feed, System.currentTimeMillis())
+            val art = files.file(ART_FILE)
+            if (show.artUrl != null && (!art.isFile || show.artUrl != sub.artUrl)) saveArt(show.artUrl, art)
+            s.updateFromFeed(sub.showId, show.title, show.author, show.artUrl, fetched.movedTo)
+            recent.update { it + (sub.showId to recentOf(fetched.feed.episodes)) }
+            _feedErrors.update { it - sub.showId }
+            true
+        } catch (e: Exception) {
+            _feedErrors.update { it + (sub.showId to failure(e, sub.feedUrl)) }
+            false
+        }
+
+    // ---- One show ----
+
+    /** A show's saved episode list (feed.json), or null before its first fetch. Call off the main thread. */
+    suspend fun snapshot(showId: String): FeedSnapshot? = withContext(Dispatchers.IO) { showFiles(showId).loadSnapshot() }
+
+    /** A show's saved descriptions. Call off the main thread. */
+    suspend fun notes(showId: String): FeedNotes = withContext(Dispatchers.IO) { showFiles(showId).loadNotes() }
+
+    fun setSort(showId: String, sort: EpisodeSort) {
+        scope.launch {
+            val s = openStore()
+            s.setSort(showId, sort)
+            publish(s)
+        }
+    }
+
+    // ---- Played marks ----
+
+    fun state(showId: String, episodeId: String): EpisodeState = _states.value[episodeKey(showId, episodeId)] ?: EpisodeState()
+
+    fun markPlayed(showId: String, episodeId: String) = changeStates { it.markPlayed(showId, episodeId) }
+
+    fun markUnplayed(showId: String, episodeId: String) = changeStates { it.markUnplayed(showId, episodeId) }
+
+    /** "Mark all played" on New Episodes: every episode in it right now. */
+    fun markAllNewPlayed() {
+        val keys = newEpisodes.value.map { it.show.showId to it.episode.id }
+        changeStates { it.markAllPlayed(keys) }
+    }
+
+    private fun changeStates(change: (EpisodeStateStore) -> Unit) {
+        scope.launch {
+            try {
+                change(openEpisodeStore())
+            } catch (e: Exception) {
+                Log.w(TAG, "Couldn't save podcast_episodes.json", e)
+            }
+        }
+    }
+
+    // ---- Search ----
+
+    /** Searches Apple's directory. Blocks no one else's work: runs on its own IO thread. */
+    suspend fun search(term: String): SearchOutcome = withContext(Dispatchers.IO) {
+        try {
+            SearchOutcome.Found(search.search(term))
+        } catch (e: Exception) {
+            SearchOutcome.Failed(failure(e, "itunes.apple.com"))
+        }
+    }
+
+    /** True when [feedUrl] (however it's written) is a show Jordan follows. */
+    fun isFollowed(feedUrl: String, shows: List<Subscription>): Boolean {
+        val n = PodcastIds.normalizeFeedUrl(feedUrl)
+        return shows.any { n in it.knownUrls }
+    }
+
+    fun followedShow(feedUrl: String, shows: List<Subscription>): Subscription? {
+        val n = PodcastIds.normalizeFeedUrl(feedUrl)
+        return shows.firstOrNull { n in it.knownUrls }
+    }
+
+    // ---- Files ----
 
     private fun saveArt(url: String, file: File) {
         try {
             if (!ArtworkCache.saveScaled(fetcher.fetchArt(url), ART_PX, file)) Log.w(TAG, "Show art at $url isn't a picture")
         } catch (e: Exception) {
-            // No art is fine: the row shows the title's first letter instead.
+            // No art is fine: rows show the title's first letter instead.
             Log.w(TAG, "Couldn't get show art $url: $e")
+        }
+    }
+
+    /** Reads every followed show's saved list once, keeping only recent episodes in memory. */
+    private fun loadRecent(shows: List<Subscription>) {
+        val map = HashMap<String, List<Episode>>()
+        for (sub in shows) {
+            showFiles(sub.showId).loadSnapshot()?.let { map[sub.showId] = recentOf(it.episodes) }
+        }
+        recent.value = map
+    }
+
+    private fun recentOf(episodes: List<Episode>): List<Episode> {
+        val since = System.currentTimeMillis() - (NEW_EPISODES_WINDOW_DAYS + 1) * 24L * 60 * 60 * 1000
+        return episodes.filter { (it.publishedAt ?: 0) >= since }
+    }
+
+    private fun failure(e: Exception, url: String): String = when (e) {
+        is NetError -> e.message ?: "Couldn't load that address."
+        is NotAFeedException -> "That address isn't a podcast feed."
+        is IOException -> {
+            Log.w(TAG, "Couldn't load $url: $e")
+            "Couldn't load that address."
+        }
+        else -> {
+            Log.w(TAG, "Couldn't load $url", e)
+            "Something went wrong."
         }
     }
 
@@ -132,6 +365,14 @@ object Podcasts {
         store ?: SubscriptionStore(ListenPaths.podcastSubscriptions, ListenPaths.podcastInbox).also {
             store = it
             makePodcastsFolder()
+            openEpisodeStore()
+        }
+
+    private fun openEpisodeStore(): EpisodeStateStore =
+        episodeStore ?: EpisodeStateStore(ListenPaths.podcastEpisodes).also { e ->
+            episodeStore = e
+            // Mirror its states for the screens (it updates on whichever thread saved).
+            CoroutineScope(SupervisorJob() + Dispatchers.Default).launch { e.states.collect { _states.value = it } }
         }
 
     /** Podcasts/ with a .nomedia file, so other apps don't list downloaded episodes as music. */
@@ -151,8 +392,6 @@ object Podcasts {
     }
 
     fun showFiles(showId: String) = ShowFiles(File(ListenPaths.podcasts, showId))
-
-    private const val ART_FILE = "art.jpg"
 
     /** A show's saved channel art (art.jpg in its folder), for [com.thelightphone.listen.artwork.ArtImage]. */
     fun artSource(showId: String): ArtSource {

@@ -170,6 +170,13 @@ object ArtworkCache {
         }
     }
 
+    /** A downloaded picture ([bytes]) shrunk to [px] for drawing, or null when it isn't a picture. */
+    fun decodeBytes(bytes: ByteArray, px: Int): ImageBitmap? =
+        decodeScaled(px) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, it) }?.let {
+            it.prepareToDraw()
+            it.asImageBitmap()
+        }
+
     // ---- Decoding ----
 
     /**

@@ -57,6 +57,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedActiv
         val books by BookLibrary.state.collectAsState()
         val shows by Podcasts.shows.collectAsState()
         val showsLoaded by Podcasts.loaded.collectAsState()
+        val newEpisodes by Podcasts.newEpisodes.collectAsState()
         ThemedScreen {
             LightTopBar(
                 center = LightTopBarCenter.Text("Listen"),
@@ -81,7 +82,11 @@ class HomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedActiv
                         )
                         MenuRow(
                             title = "Podcasts",
-                            detail = if (showsLoaded) showCount(shows.size) else null,
+                            detail = when {
+                                !showsLoaded -> null
+                                newEpisodes.isEmpty() -> showCount(shows.size)
+                                else -> showCount(shows.size) + " · " + newEpisodes.size + " new"
+                            },
                             onClick = ::openPodcasts,
                         )
                         MenuRow(

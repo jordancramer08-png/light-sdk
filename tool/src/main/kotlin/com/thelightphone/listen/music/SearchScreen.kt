@@ -155,9 +155,12 @@ class SearchScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedAct
 
 private const val UNDERLINE_THICKNESS_PX = 3f
 
-/** The words typed so far on an underlined line, with a cursor while the keyboard is up. Tap to type. */
+/**
+ * The words typed so far on an underlined line, with a cursor while the keyboard is up, and
+ * [placeholder] while it's empty. Tap to type. (Podcast search uses it too.)
+ */
 @Composable
-private fun SearchBox(typed: String, keyboardShown: Boolean, onTap: () -> Unit) {
+fun SearchBox(typed: String, keyboardShown: Boolean, placeholder: String = "Songs, artists, albums", onTap: () -> Unit) {
     val colors = LightThemeTokens.colors
     Column(
         modifier = Modifier
@@ -170,7 +173,7 @@ private fun SearchBox(typed: String, keyboardShown: Boolean, onTap: () -> Unit) 
             if (typed.isEmpty()) {
                 if (keyboardShown) Cursor()
                 LightText(
-                    text = "Songs, artists, albums",
+                    text = placeholder,
                     variant = LightTextVariant.Subheading,
                     lighten = true,
                     maxLines = 1,

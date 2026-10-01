@@ -16,8 +16,8 @@ import com.thelightphone.listen.ui.HairlineDivider
 import com.thelightphone.listen.ui.ListenTheme
 import com.thelightphone.listen.ui.LocalListenAccent
 import com.thelightphone.listen.ui.ThemedScreen
+import com.thelightphone.listen.ui.VolumeKeyScreen
 import com.thelightphone.sdk.SealedLightActivity
-import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
@@ -35,7 +35,7 @@ import com.thelightphone.sdk.ui.lightClickable
  * so you can see it first; the current one has a filled circle. Tapping one switches every
  * screen to it, saves it in settings.json, and goes back.
  */
-class ThemeScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Unit>(sealedActivity) {
+class ThemeScreen(sealedActivity: SealedLightActivity) : VolumeKeyScreen<Unit>(sealedActivity) {
 
     @Composable
     override fun Content() {

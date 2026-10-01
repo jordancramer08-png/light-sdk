@@ -9,7 +9,6 @@ import androidx.compose.ui.Modifier
 import com.thelightphone.listen.music.ListSort
 import com.thelightphone.listen.music.sortLabel
 import com.thelightphone.sdk.SealedLightActivity
-import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcon
 import com.thelightphone.sdk.ui.LightIcons
@@ -37,7 +36,7 @@ class SortScreen(
     private val title: String,
     private val fields: List<SortField>,
     private val current: ListSort,
-) : SimpleLightScreen<ListSort>(sealedActivity) {
+) : VolumeKeyScreen<ListSort>(sealedActivity) {
 
     @Composable
     override fun Content() {

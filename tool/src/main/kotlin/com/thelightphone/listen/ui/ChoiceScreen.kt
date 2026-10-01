@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.thelightphone.sdk.SealedLightActivity
-import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightScrollView
@@ -25,7 +24,7 @@ class ChoiceScreen(
     private val heading: String,
     private val choices: List<String>,
     private val current: Int,
-) : SimpleLightScreen<Int>(sealedActivity) {
+) : VolumeKeyScreen<Int>(sealedActivity) {
 
     @Composable
     override fun Content() {

@@ -4,9 +4,33 @@ Session-by-session notes for the Listen tool. `CLAUDE.md` says what the app does
 `PLAN.md` says how it's built. The older SDK recon below the line is still accurate
 reference for the SDK's UI kit, screens and sandbox rules.
 
-## Next up: Session 8 Part B
+## Session 8 Part B (2026-10-01): volume buttons — works on the phone
 
-Not started. Jordan's instructions, copied word for word from the Session 8 request (the
+Jordan tested it on the phone (checks 1–5 passed). Committed as "SDK: let a tool change the media volume" and "Session 8B - volume buttons". Version 1.2.0 (9).
+
+- SDK (to commit separately as "SDK: ..."): `sdk/client/.../audio/LightMediaVolume.kt`
+  (`raise()` / `lower()` / `level` on `STREAM_MUSIC`, flags 0 so no system panel;
+  `LightVolumeLevel(step, maxStep).fraction`), exposed as `SealedLightContext.mediaVolume`.
+  `LightMediaVolumeTest` (2 tests). Needed because `getSystemService` is banned in tool code.
+  Catching the keys needed no SDK change: `LightActivity.onKeyDown` asks the screen first and
+  only forwards unhandled volume keys to LightOS (which uses them for the ringer).
+- App: `ui/VolumeKeys.kt` — `VolumeKeyScreen<T>` base class. `ListenScreen` and the six
+  dialog-like screens (Theme, Choice, Sort, PlaylistName, DeletePlaylist) extend it, so
+  every Listen screen catches volume down/up (and the key-ups) → media volume, plus a
+  "Volume 7 of 15" box with a bar near the top for 2 s (`LightModalManager`, doesn't take
+  taps, uses the saved theme). `VolumeTextTest`; all 77 app tests pass.
+- Checked on the phone with injected key presses (`adb shell input keyevent`):
+  - Inside Listen, nothing playing: media 15 → 14 → 15, ringer untouched, bar shows. ✔
+  - Screen off while Listen plays: media 3 → 2. Android already routes it to our media
+    session (`adjustSuggestedStreamVolume ... STREAM_MUSIC` from systemui). ✔
+  - **LightOS home screen (screen on) while Listen plays: LightOS takes the button for the
+    ringer** (silent → "vibrate only"), media unchanged. Other SDK tools forward the keys to
+    LightOS the same way. This is LightOS itself, so per Jordan's rule we stopped and told
+    him; nothing tried yet. Jordan's volumes were put back (media 15, ringer silent).
+  - **Decision (Jordan, 2026-10-01): leave it as it is.** No SDK change for other tools and
+    no request to Light. Don't revisit unless Jordan brings it up.
+
+Jordan's original instructions, copied word for word from the Session 8 request (the
 spec is also in CLAUDE.md under "Volume buttons"):
 
 > PART B - Volume buttons

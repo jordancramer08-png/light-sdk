@@ -10,8 +10,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import com.thelightphone.listen.ui.ThemedScreen
+import com.thelightphone.listen.ui.VolumeKeyScreen
 import com.thelightphone.sdk.SealedLightActivity
-import com.thelightphone.sdk.SimpleLightScreen
 import com.thelightphone.sdk.rememberKeyboardOptions
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightBottomBar
@@ -32,7 +32,7 @@ class PlaylistNameScreen(
     sealedActivity: SealedLightActivity,
     private val title: String,
     private val initialName: String = "",
-) : SimpleLightScreen<String>(sealedActivity) {
+) : VolumeKeyScreen<String>(sealedActivity) {
 
     @Composable
     override fun Content() {
@@ -58,7 +58,7 @@ class PlaylistNameScreen(
 class DeletePlaylistScreen(
     sealedActivity: SealedLightActivity,
     private val playlistName: String,
-) : SimpleLightScreen<Boolean>(sealedActivity) {
+) : VolumeKeyScreen<Boolean>(sealedActivity) {
 
     @Composable
     override fun Content() {

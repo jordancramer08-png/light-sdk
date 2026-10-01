@@ -18,8 +18,8 @@ import com.thelightphone.listen.playlists.PlaylistEntry
 import com.thelightphone.listen.playlists.Playlists
 import com.thelightphone.listen.storage.Settings
 import com.thelightphone.listen.storage.StorageAccess
+import com.thelightphone.listen.ui.VolumeKeyScreen
 import com.thelightphone.sdk.SealedLightActivity
-import com.thelightphone.sdk.SimpleLightScreen
 
 /**
  * What every Listen screen does: each time it comes to the front (launch and resume) it
@@ -27,7 +27,7 @@ import com.thelightphone.sdk.SimpleLightScreen
  * restored, and that the settings and playlists are read; when Listen goes to the background it saves the
  * music spot or the book's place.
  */
-abstract class ListenScreen(private val sealed: SealedLightActivity) : SimpleLightScreen<Unit>(sealed) {
+abstract class ListenScreen(private val sealed: SealedLightActivity) : VolumeKeyScreen<Unit>(sealed) {
 
     override fun willShow() {
         super.willShow()

@@ -16,6 +16,7 @@ import com.thelightphone.listen.playback.PlaybackHub
 import com.thelightphone.listen.playlists.AddToPlaylistScreen
 import com.thelightphone.listen.playlists.PlaylistEntry
 import com.thelightphone.listen.playlists.Playlists
+import com.thelightphone.listen.podcasts.Podcasts
 import com.thelightphone.listen.storage.Settings
 import com.thelightphone.listen.storage.StorageAccess
 import com.thelightphone.listen.ui.VolumeKeyScreen
@@ -36,6 +37,7 @@ abstract class ListenScreen(private val sealed: SealedLightActivity) : VolumeKey
             Settings.load()
             Playlists.load()
             BookPositions.load()
+            Podcasts.load()
             MusicLibrary.refresh(lightContext.filesDir)
             BookLibrary.refresh(lightContext.filesDir)
             PlaybackHub.attach(sealed)

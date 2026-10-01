@@ -13,6 +13,9 @@ import com.thelightphone.listen.books.bookCount
 import com.thelightphone.listen.music.MusicHomeScreen
 import com.thelightphone.listen.music.MusicLibrary
 import com.thelightphone.listen.playback.PlaybackHub
+import com.thelightphone.listen.podcasts.Podcasts
+import com.thelightphone.listen.podcasts.PodcastsScreen
+import com.thelightphone.listen.podcasts.showCount
 import com.thelightphone.listen.settings.SettingsScreen
 import com.thelightphone.listen.storage.StorageAccess
 import com.thelightphone.listen.ui.CenteredMessage
@@ -31,7 +34,7 @@ import com.thelightphone.sdk.ui.gridUnitsAsDp
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
- * Listen's first screen: Music, Audiobooks and Now Playing. Without All files access it
+ * Listen's first screen: Music, Audiobooks, Podcasts and Now Playing. Without All files access it
  * shows how to grant it instead, and checks again each time Listen comes back to the front.
  */
 @InitialScreen
@@ -52,6 +55,8 @@ class HomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedActiv
         val song by PlaybackHub.currentSong.collectAsState()
         val book by PlaybackHub.book.collectAsState()
         val books by BookLibrary.state.collectAsState()
+        val shows by Podcasts.shows.collectAsState()
+        val showsLoaded by Podcasts.loaded.collectAsState()
         ThemedScreen {
             LightTopBar(
                 center = LightTopBarCenter.Text("Listen"),
@@ -75,6 +80,11 @@ class HomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedActiv
                             onClick = ::openAudiobooks,
                         )
                         MenuRow(
+                            title = "Podcasts",
+                            detail = if (showsLoaded) showCount(shows.size) else null,
+                            onClick = ::openPodcasts,
+                        )
+                        MenuRow(
                             title = "Now Playing",
                             detail = book?.let { "${it.title} · ${it.author}" }
                                 ?: song?.let { "${it.title} · ${it.artist}" }
@@ -91,6 +101,10 @@ class HomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedActiv
 
     private fun openAudiobooks() {
         navigateTo(screenFactory = { BooksScreen(it) })
+    }
+
+    private fun openPodcasts() {
+        navigateTo(screenFactory = { PodcastsScreen(it) })
     }
 
     private fun openSettings() {

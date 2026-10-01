@@ -51,6 +51,29 @@ object PodcastIds {
     }
 
     /**
+     * A feed address as typed on the phone, tidied: spaces dropped, "https://" added when
+     * there's no scheme, and podcast-app schemes (feed://, itpc://, pcast://) made https.
+     * Null when it can't be a web address.
+     */
+    fun cleanTypedFeedAddress(typed: String): String? {
+        var s = typed.trim().replace(Regex("""\s+"""), "")
+        if (s.isEmpty()) return null
+        val scheme = s.substringBefore("://", missingDelimiterValue = "").lowercase()
+        s = when (scheme) {
+            "" -> "https://$s"
+            "http", "https" -> s
+            "feed", "itpc", "pcast", "podcast" -> "https://" + s.substringAfter("://")
+            else -> return null
+        }
+        val host = try {
+            URI(s).host
+        } catch (e: Exception) {
+            null
+        } ?: return null
+        return s.takeIf { '.' in host && !host.startsWith('.') && !host.endsWith('.') }
+    }
+
+    /**
      * [href] made absolute against [base] (feeds sometimes use "/episode.mp3"), or null when
      * it isn't a usable web address.
      */

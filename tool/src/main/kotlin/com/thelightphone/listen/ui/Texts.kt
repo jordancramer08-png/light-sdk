@@ -47,15 +47,22 @@ fun CenteredMessage(message: String, modifier: Modifier = Modifier) {
 /** The small "Updating library…" line under a list while new music is being read. */
 @Composable
 fun UpdatingLine(visible: Boolean) {
-    if (!visible) return
+    if (visible) StatusLine("Updating library…")
+}
+
+/** A small centered note under a list ("Adding show…", or what went wrong); up to three lines. */
+@Composable
+fun StatusLine(text: String?) {
+    if (text.isNullOrEmpty()) return
     LightText(
-        text = "Updating library…",
+        text = text,
         variant = LightTextVariant.Detail,
         lighten = true,
         align = TextAlign.Center,
-        maxLines = 1,
+        maxLines = 3,
+        overflow = TextOverflow.Ellipsis,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 0.5f.gridUnitsAsDp()),
+            .padding(vertical = 0.5f.gridUnitsAsDp(), horizontal = 1f.gridUnitsAsDp()),
     )
 }

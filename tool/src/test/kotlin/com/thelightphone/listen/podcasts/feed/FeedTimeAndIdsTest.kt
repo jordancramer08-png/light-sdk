@@ -64,6 +64,19 @@ class FeedTimeAndIdsTest {
     }
 
     @Test
+    fun `a feed address typed on the phone is tidied`() {
+        assertEquals("https://feeds.example.com/rss", PodcastIds.cleanTypedFeedAddress(" feeds.example.com/rss "))
+        assertEquals("https://feeds.example.com/rss", PodcastIds.cleanTypedFeedAddress("feeds.example .com/rss"))
+        assertEquals("http://feeds.example.com/rss", PodcastIds.cleanTypedFeedAddress("http://feeds.example.com/rss"))
+        assertEquals("https://feeds.example.com/rss", PodcastIds.cleanTypedFeedAddress("itpc://feeds.example.com/rss"))
+        assertEquals("https://example.com/feed?id=1&x=2", PodcastIds.cleanTypedFeedAddress("example.com/feed?id=1&x=2"))
+        assertNull(PodcastIds.cleanTypedFeedAddress(""))
+        assertNull(PodcastIds.cleanTypedFeedAddress("hello"))
+        assertNull(PodcastIds.cleanTypedFeedAddress("ftp://example.com/rss"))
+        assertNull(PodcastIds.cleanTypedFeedAddress("https://.com"))
+    }
+
+    @Test
     fun `http becomes https, and relative addresses resolve`() {
         assertEquals("https://a.com/x.mp3", PodcastIds.upgradeToHttps("http://a.com/x.mp3"))
         assertEquals("https://a.com/x.mp3", PodcastIds.upgradeToHttps("HTTP://a.com/x.mp3"))

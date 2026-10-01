@@ -55,7 +55,13 @@ class PodcastFetcher(private val transport: HttpTransport = OkHttpTransport()) {
         return Transcripts.parse(format, fetchTranscriptText(url))
     }
 
+    /** Channel art as downloaded (shrunk before saving; see ArtworkCache.saveScaled). */
+    fun fetchArt(url: String): ByteArray = Http.readBytes(Http.open(transport, url), MAX_ART_BYTES)
+
     companion object {
+        /** Art bigger than this isn't downloaded (a 3,000 px JPEG is usually 1–3 MB). */
+        const val MAX_ART_BYTES = 15L * 1024 * 1024
+
         /** Biggest feed read (PODCAST_PLAN.md §5). Big shows' feeds are usually 1–10 MB. */
         const val MAX_FEED_BYTES = 20L * 1024 * 1024
 

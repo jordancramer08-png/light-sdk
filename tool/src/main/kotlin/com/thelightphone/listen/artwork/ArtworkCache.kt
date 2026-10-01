@@ -142,12 +142,32 @@ object ArtworkCache {
     private fun writeJpeg(bitmap: Bitmap, file: File) {
         val tmp = File(file.path + ".tmp")
         FileOutputStream(tmp).use { bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, it) }
-        if (!tmp.renameTo(file)) tmp.delete()
+        if (!tmp.renameTo(file)) {
+            // Some file systems won't rename over an existing file.
+            file.delete()
+            if (!tmp.renameTo(file)) tmp.delete()
+        }
     }
 
     private fun hash(text: String): String {
         val crc = CRC32().apply { update(text.toByteArray()) }
         return "%08x%08x".format(crc.value, text.hashCode())
+    }
+
+    /**
+     * Saves a downloaded picture ([bytes]) as a JPEG at [file], shrunk so its shorter side is
+     * at most [px] (podcast feeds often ship 3,000 px art). Never holds it at full size.
+     * Returns false when the bytes aren't a picture. Call off the main thread.
+     */
+    fun saveScaled(bytes: ByteArray, px: Int, file: File): Boolean {
+        val bitmap = decodeScaled(px) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, it) } ?: return false
+        return try {
+            file.parentFile?.mkdirs()
+            writeJpeg(bitmap, file)
+            file.isFile
+        } finally {
+            bitmap.recycle()
+        }
     }
 
     // ---- Decoding ----

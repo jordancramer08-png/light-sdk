@@ -240,6 +240,9 @@ My PC script `Listen-Phone-Sync.cmd` copies files onto the phone like this:
 
 - Don't scan anything outside `/sdcard/Listen/`.
 - Don't delete or modify audio files on the phone. The PC script handles adding and
-  removing.
-- Don't reach the internet. No online metadata or artwork lookups.
+  removing. (Podcast downloads in `/sdcard/Listen/Podcasts/` are the exception: Listen
+  downloaded them, so Listen may remove them, as PODCASTS.md describes.)
+- Don't reach the internet for music or audiobooks. No online metadata or artwork lookups.
+  **Exception: Podcasts** (approved 2026-10-01) may use the internet, but only for what I
+  ask for: Refresh, search, follow, download and streaming. See PODCASTS.md.
 - Don't put copyrighted audio or my library in the repo.

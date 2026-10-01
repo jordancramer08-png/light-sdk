@@ -40,7 +40,8 @@ change how they behave unless a session prompt says so.
 6. **After finishing an episode**: a setting, "Delete download" or "Keep download".
    Default: Keep. Deleting removes the audio, chapter file and transcript together.
 7. **Playback**: reuse Listen's existing player. Per-episode resume position.
-   Speed 1.0x–2.0x (steps of 0.1x, one global setting, pitch preserved). Skip back 15 s /
+   Episodes that aren't downloaded stream when Play is tapped (Jordan, 2026-10-01).
+   No sleep timer for podcasts. Speed 1.0x–2.0x (steps of 0.1x, one global setting, pitch preserved). Skip back 15 s /
    forward 30 s. Channel art on Now Playing. Side volume buttons work as they already do
    in Listen.
 8. **Played / unplayed marks**: automatic when an episode finishes (last 30 s or 95%),
@@ -146,3 +147,4 @@ Add a line here at the end of each session: date, what was built, what Jordan ve
 on the phone, anything left open.
 
 - 2026-10-01, Session 0: plan only (PODCAST_PLAN.md). Storage layout adjusted to /sdcard (above). No app code. Open questions for Jordan are in PODCAST_PLAN.md §11.
+- 2026-10-01, Session 0 answers: streaming yes; no podcast sleep timer; no OPML export available (shows come in by search); internet allowed for Podcasts only (CLAUDE.md updated).

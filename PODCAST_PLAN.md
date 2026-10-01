@@ -39,8 +39,9 @@ to `music/` and `books/`.
 - It has two modes today: **music** (a queue of songs) and **book** (a book's files plus its
   chapter list). They keep separate resume points.
 - Podcasts become a **third mode, "episode"**. It's modelled closely on book mode: a
-  single file, a chapter list, speech audio attributes, −15 s / +30 s, and a position saved
-  every 10 s and on every pause, seek, background and stop. Starting an episode saves the
+  single file (downloaded, or **streamed** when it isn't downloaded), a chapter list,
+  speech audio attributes, −15 s / +30 s, and a position saved every 10 s and on every
+  pause, seek, background and stop. No sleep timer for podcasts (Jordan, 2026-10-01). Starting an episode saves the
   music or book spot first, the same way starting a book saves the music spot today.
 
 ### Where files and positions are stored
@@ -110,7 +111,7 @@ sides only ever add to each other.
 |---|---|
 | Add `"android.permission.INTERNET"` and `"android.permission.ACCESS_NETWORK_STATE"` to `permissions` in `lighttool.toml` | Says honestly what the tool does, and doesn't depend on a library's manifest |
 | Use **OkHttp** directly. It's already on the tool's compile classpath through `:sdk:client` (checked with `gradlew :tool:dependencies`), so no new dependency is needed. | Feeds, the iTunes search, chapter JSON, transcripts, art and downloads |
-| Update CLAUDE.md's "Don't reach the internet" rule to "only for Podcasts, and only when Jordan asks (Refresh, search, download)" | The rule is still right for music and books, which must stay offline. Jordan approves the wording in Session 1. |
+| CLAUDE.md's "Don't reach the internet" rule now has a Podcasts exception (**approved by Jordan, 2026-10-01**; done in Session 0) | Music and audiobooks stay fully offline |
 
 **Cleartext (plain `http://`) stays blocked.** The target SDK is 36, and the plugin writes
 no `usesCleartextTraffic` or network security config, so Android refuses plain `http://`.
@@ -228,7 +229,7 @@ steps: 1.0, 1.1 … 2.0, **one global setting** (saved in `settings.json`), not 
 - **Chapters:** `PlaybackHub` already combines `chapters`, `index` and `positionMs` into
   the current-chapter index (`chapterIndexAt`). An episode is a one-file book: its chapters
   become `BookChapter(fileIndex = 0, startMs = …)`, and the same code works, including
-  previous/next chapter and the end-of-chapter sleep timer.
+  previous/next chapter.
 - **Transcripts:** 250 ms is plenty, since cues last seconds. The transcript screen finds
   the current cue with a binary search over sorted start times whenever `positionMs`
   changes, and only scrolls when the cue changes. Tapping a line calls
@@ -260,7 +261,10 @@ No SDK change is needed for either.
   4. For each `CHAP`, read the element id, start ms, end ms, and the `TIT2` sub-frame for
      the title (in any of the 4 text encodings). Ignore chapter images (not cheap).
   5. Order by `CTOC` if there is one, otherwise by start time.
-- It runs once, right after a download finishes, and only if the feed had no chapters. The
+- It runs once, right after a download finishes, and only if the feed had no chapters.
+  A **streamed** episode only gets feed chapters (`podcast:chapters`/`psc:chapters`),
+  because the file isn't on the phone to read. That's fine: shows that care about chapters
+  almost always publish them in the feed as well. The
   result is saved as `<episodeId>.chapters.json` in the same format as feed chapters, so
   Now Playing only ever reads one format.
 
@@ -367,6 +371,30 @@ the phone can never be lost by a PC sync, and an unfollow can't be undone by a s
 
 ---
 
+## 9b. Streaming (approved by Jordan, 2026-10-01)
+
+Tapping Play on an episode that isn't downloaded **streams it**. Details:
+
+- **Resolve the address first.** The SDK's player (ExoPlayer's default HTTP source) won't
+  follow a redirect from `https` to `http`, and plain `http` is blocked anyway. So before
+  playing, Listen runs the same redirect loop as downloads (upgrading each hop to
+  `https`) and hands the player the **final** secure address. If no secure address
+  works: "Needs a secure link", with the PC as the workaround.
+- **Keep Wi-Fi awake with the screen off.** The SDK's media service uses
+  `WAKE_MODE_LOCAL`, which keeps the CPU awake but lets Wi-Fi doze, so a stream can stall
+  with the screen off. Fix: an **"SDK: keep the network awake while streaming"** commit
+  that uses `C.WAKE_MODE_NETWORK` while the item is a web address (and local for files).
+  It's within Jordan's SDK approval and needs no new permission (`WAKE_LOCK` is already
+  declared).
+- **Positions work the same** as for downloads, keyed by `showId/episodeId`, so an episode
+  started streaming and downloaded later resumes at the same spot. If a download finishes
+  while that episode is streaming, it keeps streaming until the next time it's played.
+- **Offline:** with no connection, an episode that isn't downloaded shows "No connection.
+  Download it to listen offline." instead of trying.
+- The format line on Now Playing starts with "Streaming".
+
+---
+
 ## 10. Session-by-session plan
 
 Same rhythm as BUILD_GUIDE.md: one session at a time; build, install, and let Jordan test on
@@ -377,10 +405,10 @@ sessions P1 to P9** (this plan was P0). Every start prompt begins with
 | # | Session | Builds | Jordan checks on the phone | Size |
 |---|---|---|---|---|
 | P1 | **Foundations: network + feed parsing** | Internet permission; check LightOS allows network; OkHttp client with http→https upgrade, manual redirects, size caps and timeouts; adapted XML tokenizer; `FeedParser` (all fields in PODCASTS.md); HTML→text; storage files (`podcasts.json`, `feed.json`, `notes.json`) with atomic writes; Podcasts row on Home; **Add by feed URL**; plain Shows list with art | Add one feed by URL. The show appears with its art. Airplane mode gives a friendly "No connection", not a crash. | **Large.** If it runs long, stop after the parser and tests (no UI) and commit. |
-| P2 | **Podcasts.cmd (PC)** | The new .cmd: search Apple and follow, **OPML import** (his old app can probably export one), add private feed URL (fetches http feeds fine), list/unfollow, sync (pull, merge, push inbox). App side: merge the inbox on launch/resume. | Import OPML on the PC, sync, open Listen: all shows appear. Follow one on the phone, sync again: it's still there. | Medium. Early on purpose, so he can load his real shows without typing URLs on the phone. |
+| P2 | **Podcasts.cmd (PC)** | The new .cmd: **search Apple and follow** (the main way Jordan adds his shows; his old app can't export OPML), add private feed URL (fetches http feeds fine), list/unfollow, sync (pull, merge, push inbox). OPML import stays because PODCASTS.md lists it, but it's kept small. App side: merge the inbox on launch/resume. | Search and follow several shows on the PC, sync, open Listen: they all appear. Follow one on the phone, sync again: it's still there. | Medium. Early on purpose, so he can load his real shows without typing on the phone. |
 | P3 | **Show + episode pages, Refresh, New Episodes** | Show page (art, title, author, description with "More", every episode, newest/oldest toggle remembered per show); Episode page (title, show, date, length, full notes, "Has chapters"/"Has transcript"); Refresh (all shows, in the background, with an "Updating…" line); New Episodes (last 30 days and after followedAt, unplayed, newest first, "Mark all played"); manual Mark played/unplayed; "Needs a secure link" message | Long show notes read cleanly (paragraphs, bullets, no HTML junk). New Episodes doesn't flood with back catalog. | Medium-large |
 | P4 | **Downloads** | Download queue, progress, cancel, retry, resume after interruption, `LightWork` job, "Remove download", podcast storage total, free-space check; chapters file and transcript come along | Download a 1-hour episode, leave Listen, come back: it finished. Turn Wi-Fi off mid-download, on again, Retry: it continues, not restarts. | Medium-large |
-| P5 | **Playback** | Episode mode in `PlaybackHub` (separate resume point, speech attributes, position saved every 10 s and on pause/seek/background/stop); podcast Now Playing (channel art, −15/+30, speed 1.0–2.0 by 0.1, global); auto-played at last 30 s or 95%; after-finish Keep/Delete setting; now-playing bar and Home row show the episode | Play, swipe Listen away, reopen: same spot. Switch to music and back: each keeps its place. Speed 1.7× sounds natural. Finish an episode: marked played (and deleted if set). | **Large and the riskiest.** `PlaybackHub` is 857 lines and music and books must not change. If it runs long, stop once playback and resume work, and commit; move speed and after-finish to P6. |
+| P5 | **Playback + streaming** | Episode mode in `PlaybackHub` (separate resume point, speech attributes, position saved every 10 s and on pause/seek/background/stop); **streaming** for episodes that aren't downloaded (§9b, including the "SDK: keep the network awake while streaming" commit); podcast Now Playing (channel art, −15/+30, speed 1.0–2.0 by 0.1, global; no sleep timer); auto-played at last 30 s or 95%; after-finish Keep/Delete setting; now-playing bar and Home row show the episode | Play a downloaded episode, swipe Listen away, reopen: same spot. Stream one that isn't downloaded with the screen off for 10 minutes: no stalls. Switch to music and back: each keeps its place. Speed 1.7× sounds natural. Finish an episode: marked played (and deleted if set). | **Large and the riskiest.** `PlaybackHub` is 857 lines, and music and books must not change. If it runs long, stop once downloaded playback and resume work, and commit; move streaming, speed and after-finish to the start of P6. |
 | P6 | **Chapters** | `podcast:chapters` JSON, `psc:chapters`, ID3 `CHAP` reader; normalized `chapters.json`; Chapters list on Now Playing, current chapter under the title, previous/next chapter (hidden when there are no chapters) | An episode with chapters shows them and jumps correctly. One without shows no Chapters button. | Medium |
 | P7 | **Transcripts** | VTT, SRT, Podcasting 2.0 JSON, HTML and plain-text parsers (capped sizes); Transcript screen from Now Playing and Episode page; lazy list; current line highlighted and kept in view; tap a line to jump | A long timed transcript scrolls smoothly and follows along; tapping a line jumps the audio. | Medium |
 | P8 | **Search on the phone** | Search screen (keyboard + results with art), iTunes API with the 20-a-minute limit, Follow; Unfollow (asks whether to delete that show's downloads) | Search "ask pastor john", follow it, it appears in Shows. Unfollow asks about downloads. | Medium |
@@ -394,17 +422,12 @@ sessions P1 to P9** (this plan was P0). Every start prompt begins with
 
 ---
 
-## 11. Open questions for Jordan
+## 11. Decisions (Jordan, 2026-10-01)
 
-1. **Streaming.** PODCASTS.md only mentions downloaded playback. Should tapping Play on an
-   episode that isn't downloaded stream it? (Easy: the SDK already has `UrlSource`. It uses
-   data, and the same http→https rule applies.) The plan assumes **downloads only** unless
-   you say otherwise.
-2. **Sleep timer for podcasts.** It comes almost free from the book code. Include it in P5?
-3. **New Episodes window:** "last 30 days" is fixed in PODCASTS.md. It's stored as a
-   setting (`newWindowDays`) in case you ever want to change it, but there's no screen for
-   it unless you ask.
-4. **CLAUDE.md's "Don't reach the internet" rule** needs a podcast exception. P1 proposes
-   the wording for your OK.
-5. **Your old app:** does it export OPML? If so, P2's import moves your shows over in one
-   step.
+1. **Streaming: yes.** Episodes that aren't downloaded stream when Play is tapped (§9b, built in P5).
+2. **Sleep timer: no**, not for podcasts. (Audiobooks keep theirs.)
+3. **OPML: he can't export one** from his old app. His shows come in through search on the PC
+   (P2) or the phone (P8). OPML import stays in Podcasts.cmd because PODCASTS.md lists it, but
+   it's low priority.
+4. **Internet: allowed for Podcasts only.** CLAUDE.md updated. Music and audiobooks stay offline.
+5. The New Episodes window stays at 30 days (saved as `newWindowDays`, with no screen to change it).

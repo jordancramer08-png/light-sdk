@@ -4,10 +4,91 @@ Session-by-session notes for the Listen tool. `CLAUDE.md` says what the app does
 `PLAN.md` says how it's built. The older SDK recon below the line is still accurate
 reference for the SDK's UI kit, screens and sandbox rules.
 
-## Session 7 (2026-09-30): audio quality and polish — built, waiting for Jordan's phone test
+## Final summary (2026-09-30): Listen 1.0.0 is complete
 
-Jordan had to unplug the phone and leave. **Nothing from Session 7 is committed except the
-SDK commit below.** All other changes are uncommitted in the working tree.
+### What the app does
+
+Listen is a music and audiobook player for the Light Phone III. It replaces the fenleon
+Audiobooks app.
+
+- **Music:** Songs, Artists, Albums and Playlists, read from the files' own tags with album
+  art. Every list sorts A–Z or Z–A and remembers the choice. Albums are grouped by album
+  artist, and they play in disc, then track order, gaplessly. Playlists are live: an artist
+  or album entry picks up music sent later. Music removed from the phone shows greyed as
+  "Not on phone" and comes back when the music does.
+- **Audiobooks:** Continue listening at the top, then the library grouped by author and
+  series. Each book has its own place, speed (0.75–2.0×, natural pitch) and finished
+  state. It rewinds a little after a pause (amounts in Settings). Chapters, a sleep timer,
+  −15 / +30 buttons.
+- **Now Playing:** one player for both. Playback keeps going with the screen off or in
+  another tool, and works from the notification and Bluetooth/headset buttons. It pauses
+  when headphones disconnect. A small line shows the file's format, bitrate and sample rate.
+  Music and books keep separate resume points.
+- **Settings** (gear on Home): color theme, audiobook rewind amounts, audio offload (off by
+  default; it saves battery, and Listen turns it off by itself after a playback error).
+- Files are played untouched (no EQ, effects or resampling). A file that can't be played
+  shows "Can't play this file" and is skipped.
+
+### Where your playlists and positions are stored
+
+Everything you'd hate to lose is on the phone's shared storage, **not** inside the app, so an
+uninstall or a new signing key can't wipe it. The PC script backs it up (option 7) and can
+restore it.
+
+| What | File on the phone |
+|---|---|
+| Playlists | `/sdcard/Listen/.state/playlists.json` |
+| Audiobook places, speeds, finished flags | `/sdcard/Listen/.state/book_positions.json` |
+| Music resume point (queue, song, position, shuffle, repeat) and which book was loaded | `/sdcard/Listen/.state/music_state.json` |
+| Settings and sort choices | `/sdcard/Listen/.state/settings.json` |
+| Last sync time (written by the PC script) | `/sdcard/Listen/.state/last-sync.txt` |
+
+The music lives in `/sdcard/Listen/Music/` and the books in `/sdcard/Listen/Audiobooks/`,
+put there by `Listen-Phone-Sync.cmd`. The tag index and artwork thumbnails are a cache inside
+the app (`files/cache/`). An uninstall throws them away, and Listen rebuilds them on its own.
+Every state file is written safely (to `name.tmp` first, then renamed). A broken
+playlists file is set aside as `playlists.broken-<time>.json`, never overwritten.
+
+### How to rebuild and reinstall from scratch
+
+On the Windows laptop, in PowerShell:
+
+1. Get the code (skip if the folder already exists):
+   ```powershell
+   cd $HOME\Documents
+   git clone https://github.com/jordancramer08-png/light-sdk listen
+   cd listen
+   git checkout listen
+   ```
+   Needs Java 17 (Temurin, `JAVA_HOME` set) and the Android SDK at
+   `%LOCALAPPDATA%\Android\Sdk`. `local.properties` (not in git) holds one line,
+   `sdk.dir=C\:\\Users\\bjc38\\AppData\\Local\\Android\\Sdk`. Copy it from the old folder or
+   create it with that line.
+2. Plug in the phone (USB debugging on) and check it shows up: `adb devices`
+3. Build and install, one of:
+   - Double-click `scripts\Build and Install Listen.cmd` (it builds, installs and reboots), or
+   - by hand:
+     ```powershell
+     .\gradlew.bat :tool:assembleRelease
+     adb install -r tool\build\outputs\apk\release\tool-release.apk
+     ```
+   The release build is optimized; it loads the library about 40× faster than a debug build.
+   Both are signed with the repo's dev key (`sdk/keys/lightsdk-dev.jks`), so `install -r`
+   always upgrades in place and keeps everything.
+4. **First install on a phone only:** reboot the phone so the launcher shows Listen. Then run
+   `Listen-Phone-Sync.cmd` and choose **9** to grant All files access (without it Listen
+   shows a screen saying so).
+5. To bring back playlists and positions after a reset, restore the `.state` backup with the
+   PC script.
+
+Tests (no phone needed): `.\gradlew.bat :tool:testDebugUnitTest` (70 tests, including
+`SpeedCheckTest` for a 1,400-song library and a 560-file book).
+
+## Session 7 (2026-09-30): audio quality and polish — works on the phone
+
+Committed as "SDK: expose the playing track's format and an audio offload switch" and
+"Session 7 - audio quality and polish". (Jordan unplugged mid-session once; the notes below
+were written then and on resuming.)
 
 **Finished**
 - Quality checks against CLAUDE.md, confirmed in code:
@@ -60,13 +141,11 @@ SDK commit below.** All other changes are uncommitted in the working tree.
   shows from the index in about 85 ms.
 - settings.json on the phone had `"audioOffload": true`, set by hand on the phone (the default
   is false). Left as Jordan set it.
-- All 70 app tests pass. Still uncommitted, waiting on Jordan's phone test.
+- All 70 app tests pass. Jordan ran the final checklist on the phone and it passed.
 
-**What's left**
-- Jordan runs the final checklist on the phone.
-- End of session (after the test passes): commit "Session 7 - audio quality and polish",
-  push `listen`, and write the final NOTES summary. Decide whether to keep the timing log
-  lines.
+**Done.** Committed, pushed, and the final summary is at the top of this file. The
+"Music: … in N ms" / "Books: …" timing lines stay in logcat (tag `Listen`); they're cheap and
+useful if the library ever feels slow.
 - Known and left as is: music_state.json is about 117 KB with a 1,400-song queue and is
   rewritten every 5 s while playing (encoding takes about 3 ms). Settings load in the
   background, so a non-Dark theme can flash Dark for a moment on launch.

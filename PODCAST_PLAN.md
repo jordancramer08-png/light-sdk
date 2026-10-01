@@ -431,3 +431,6 @@ sessions P1 to P9** (this plan was P0). Every start prompt begins with
    it's low priority.
 4. **Internet: allowed for Podcasts only.** CLAUDE.md updated. Music and audiobooks stay offline.
 5. The New Episodes window stays at 30 days (saved as `newWindowDays`, with no screen to change it).
+6. **Storage stays on /sdcard** (confirmed again after P1a): subscriptions and episode state in
+   `/sdcard/Listen/.state/`, feed copies and downloads in `/sdcard/Listen/Podcasts/`, as in §8.
+   Never `filesDir`, even if a session prompt says so.

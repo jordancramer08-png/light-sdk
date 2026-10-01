@@ -4,6 +4,56 @@ Session-by-session notes for the Listen tool. `CLAUDE.md` says what the app does
 `PLAN.md` says how it's built. The older SDK recon below the line is still accurate
 reference for the SDK's UI kit, screens and sandbox rules.
 
+## Next up: Session 8 Part B
+
+Not started. Jordan's instructions, copied word for word from the Session 8 request (the
+spec is also in CLAUDE.md under "Volume buttons"):
+
+> PART B - Volume buttons
+> - While I'm inside Listen, the phone's volume up and down buttons always change the
+>   MEDIA volume, never the ringer, whether or not anything is playing.
+> - While a song or audiobook is playing, the buttons also change the media volume when
+>   I'm outside Listen or the screen is off. Check whether Android already does this for
+>   our media session on LightOS, and tell me what you find.
+> - Show a small volume bar on screen for about 2 seconds whenever I press a button,
+>   because LightOS may not show its own.
+> - If the Light SDK blocks catching the volume keys or setting the volume, add what's
+>   needed to my SDK fork as a separate commit, the same way we did before. If LightOS
+>   itself blocks it, stop and tell me before trying anything else.
+
+Also from the same request: build Part B, install it on the phone (check `adb devices`
+first), and wait for Jordan to test it before committing. Keep CLAUDE.md's spec complete.
+
+Starting points: screens can override `onKeyDown` / `onKeyUp` (`LightKeyHandler`, see the
+appendix §2), but `getSystemService` is blocked in tool code, so setting the volume
+probably needs a small SDK helper (like the earlier "SDK: ..." commits). The SDK's
+`LightModalManager` (appendix §1, auto-dismiss after 2 s) may suit the volume bar.
+
+## Session 8 Part A (2026-10-01): music search — works on the phone
+
+Committed and pushed as "Session 8A - music search" (`d410140`). Version 1.1.0 (8).
+
+- Magnifier at the top right of Music home opens `music/SearchScreen.kt`: a search box,
+  live results under Songs / Artists / Albums, and the LP3 keyboard. DONE or Return puts
+  the keyboard away (results fill the screen, now-playing bar shows); tapping the box brings
+  it back. Back, or emptying the box after typing, closes search. The typed words live on
+  the screen object, so they survive opening an album or artist and coming back.
+- `music/Search.kt`: `MusicSearchIndex` (built once per library as
+  `MusicLibraryState.searchIndex`, searched on `Dispatchers.Default`). Songs match on title,
+  artists on name, albums on title; every typed word must appear, in any order; capitals,
+  accents and apostrophes ignored (`searchText`). Order: name starts with the query, then a
+  word starts with the first query word, then the rest, A–Z within each.
+- Tapping a song plays it, then the rest of its album (`QueueSource.KIND_ALBUM`).
+  Long-press on any result = "Add to playlist…". Rows reuse `songRows` / `artistRows` /
+  `albumRows` (with art); the scrollbar is approximate because row heights differ.
+- SDK change (included in the same commit, at Jordan's request):
+  `rememberLightKeyboard(state, keyboardOptionsFlow, key, ...)` in
+  `sdk/ui/.../LightTextInputEditor.kt`, public, so a tool can place
+  `LightEmbeddedLp3Keyboard` under its own layout. `LightTextInputEditor` now uses it
+  (unchanged behavior for other tools).
+- 6 new tests in `SearchTest.kt`; all 76 app tests pass. Checked on the phone: typing
+  "well" shows results with art; no errors in logcat.
+
 ## Final summary (2026-09-30): Listen 1.0.0 is complete
 
 ### What the app does

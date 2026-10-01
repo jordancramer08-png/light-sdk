@@ -60,23 +60,13 @@ fun LightTextInputEditor(
     editorKey: Any = remember { Any() },
 ) {
     val currentOnSubmit by rememberUpdatedState(onSubmit)
-    val hapticsEnabled = LocalHapticsEnabled.current
-    val context = LocalContext.current
-    val currentOnHaptic by rememberUpdatedState {
-        if (hapticsEnabled) LightHapticFeedback.click(context)
-    }
-    val keyboardCallback = remember(state, singleLine) {
-        TextInputKeyboardCallback(
-            state = state,
-            singleLine = singleLine,
-            onReturn = { currentOnSubmit(state.text) },
-            onHaptic = { currentOnHaptic() },
-        )
-    }
-
-    val keyboardViewModel: Lp3KeyboardViewModel<*> = viewModel<EnQwertyLp3KeyboardViewModel<*>>(
-        key = "LightTextInputEditor-$editorKey",
-        factory = factory(keyboardCallback, keyboardOptionsFlow, initialCaps),
+    val keyboardViewModel = rememberLightKeyboard(
+        state = state,
+        keyboardOptionsFlow = keyboardOptionsFlow,
+        key = editorKey,
+        singleLine = singleLine,
+        initialCaps = initialCaps,
+        onReturn = { currentOnSubmit(state.text) },
     )
 
     LightTextInputEditor(
@@ -218,6 +208,41 @@ fun LightTextInputEditor(
             )
         }
     }
+}
+
+/**
+ * The LP3 keyboard typing into [state], with the user's haptics, for a tool that lays out its
+ * own screen around [LightEmbeddedLp3Keyboard] (for example a search box with live results
+ * between the box and the keyboard). Return calls [onReturn] when [singleLine]. Each [key]
+ * gets its own keyboard, so pass the same key to keep the keyboard across recompositions.
+ */
+@Composable
+fun rememberLightKeyboard(
+    state: TextFieldState,
+    keyboardOptionsFlow: StateFlow<KeyboardOptions>,
+    key: Any,
+    singleLine: Boolean = true,
+    initialCaps: Boolean = false,
+    onReturn: () -> Unit = {},
+): Lp3KeyboardViewModel<*> {
+    val currentOnReturn by rememberUpdatedState(onReturn)
+    val hapticsEnabled = LocalHapticsEnabled.current
+    val context = LocalContext.current
+    val currentOnHaptic by rememberUpdatedState {
+        if (hapticsEnabled) LightHapticFeedback.click(context)
+    }
+    val keyboardCallback = remember(state, singleLine) {
+        TextInputKeyboardCallback(
+            state = state,
+            singleLine = singleLine,
+            onReturn = { currentOnReturn() },
+            onHaptic = { currentOnHaptic() },
+        )
+    }
+    return viewModel<EnQwertyLp3KeyboardViewModel<*>>(
+        key = "LightTextInputEditor-$key",
+        factory = factory(keyboardCallback, keyboardOptionsFlow, initialCaps),
+    )
 }
 
 private fun factory(

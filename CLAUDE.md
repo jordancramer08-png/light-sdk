@@ -81,6 +81,35 @@ My PC script `Listen-Phone-Sync.cmd` copies files onto the phone like this:
   their albums (with art), then "All songs". An album shows its art, title, artist, year,
   track list, and Play and Shuffle buttons.
 
+## Music search
+
+- A **Search** button (magnifier) sits at the top right of the Music section. It opens a
+  search screen with a text box and the phone's keyboard.
+- As I type, results appear under three headings: **Songs** (by title), **Artists** and
+  **Albums** (by title). Matching ignores capitals, accents and apostrophes, and finds
+  partial words anywhere in the name. Every typed word must appear, in any order ("getty"
+  finds Keith & Kristyn Getty, "well" finds "It Is Well"). Names that start with what I
+  typed come first, then A–Z.
+- Search uses the music index already in memory, so results appear instantly on 1,400
+  songs. Never read files or tags while searching.
+- Tapping a song plays it, then the rest of its album. Tapping an artist or album opens its
+  screen. Long-pressing any result offers "Add to playlist...", like everywhere else.
+- Results show album art thumbnails, like the other lists.
+- DONE (or Return) puts the keyboard away so the results fill the screen; tapping the box
+  brings it back. Clearing the box or pressing back closes search. Coming back from a
+  result keeps what I typed.
+
+## Volume buttons
+
+- While I'm inside Listen, the volume up and down buttons always change the **media**
+  volume, never the ringer, whether or not anything is playing.
+- While a song or audiobook is playing, the buttons also change the media volume when I'm
+  outside Listen or the screen is off.
+- Whenever I press a volume button in Listen, show a small volume bar on screen for about
+  2 seconds (LightOS may not show its own).
+- If the Light SDK blocks catching the volume keys or setting the volume, change the SDK
+  fork in a separate "SDK: ..." commit. If LightOS itself blocks it, stop and tell me.
+
 ## Playlists
 
 - A playlist is an **ordered list of entries**. Each entry is one of three kinds:

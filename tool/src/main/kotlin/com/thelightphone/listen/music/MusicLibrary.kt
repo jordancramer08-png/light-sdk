@@ -38,6 +38,9 @@ data class MusicLibraryState(
         (songs.asSequence().map { it.artist } + albums.asSequence().map { it.artist }).distinct().associateWith(::groupKey)
     }
 
+    /** The library ready for Search, built the first time it's needed (off the main thread). */
+    val searchIndex: MusicSearchIndex by lazy { MusicSearchIndex(songs, artists, albums) }
+
     /** [groupKey] of an artist [name], from the library's cache when it's one of its names. */
     fun artistKey(name: String): String = artistKeys[name] ?: groupKey(name)
 

@@ -23,7 +23,7 @@ import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 
-/** Music: Songs, Artists, Albums and Playlists. */
+/** Music: Songs, Artists, Albums and Playlists, with Search at the top right. */
 class MusicHomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedActivity) {
 
     @Composable
@@ -37,6 +37,7 @@ class MusicHomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealed
             LightTopBar(
                 leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
                 center = LightTopBarCenter.Text("Music"),
+                rightButton = LightBarButton.LightIcon(icon = LightIcons.SEARCH, onClick = ::openSearch, contentDescription = "Search"),
                 modifier = Modifier.padding(bottom = 1f.gridUnitsAsDp()),
             )
             // Scrolls rather than squashing a row when they don't all fit ("Resume music" makes five).
@@ -82,6 +83,10 @@ class MusicHomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealed
 
     private fun openNowPlayingMusic() {
         navigateTo(screenFactory = { MusicNowPlayingScreen(it) })
+    }
+
+    private fun openSearch() {
+        navigateTo(screenFactory = { SearchScreen(it) })
     }
 
     private fun openSongs() {

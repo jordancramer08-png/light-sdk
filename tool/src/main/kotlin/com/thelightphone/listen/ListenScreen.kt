@@ -16,6 +16,7 @@ import com.thelightphone.listen.playback.PlaybackHub
 import com.thelightphone.listen.playlists.AddToPlaylistScreen
 import com.thelightphone.listen.playlists.PlaylistEntry
 import com.thelightphone.listen.playlists.Playlists
+import com.thelightphone.listen.podcasts.PodcastNowPlayingScreen
 import com.thelightphone.listen.podcasts.Podcasts
 import com.thelightphone.listen.storage.Settings
 import com.thelightphone.listen.storage.StorageAccess
@@ -49,9 +50,11 @@ abstract class ListenScreen(private val sealed: SealedLightActivity) : VolumeKey
         PlaybackHub.saveNow()
     }
 
-    /** Now Playing: the audiobook player while a book is loaded, else the music player. */
+    /** Now Playing: the podcast player for an episode, the audiobook player for a book, else the music player. */
     protected fun openNowPlaying() {
-        if (PlaybackHub.book.value != null) {
+        if (PlaybackHub.episode.value != null) {
+            navigateTo(screenFactory = { PodcastNowPlayingScreen(it) })
+        } else if (PlaybackHub.book.value != null) {
             navigateTo(screenFactory = { BookNowPlayingScreen(it) })
         } else {
             navigateTo(screenFactory = { MusicNowPlayingScreen(it) })

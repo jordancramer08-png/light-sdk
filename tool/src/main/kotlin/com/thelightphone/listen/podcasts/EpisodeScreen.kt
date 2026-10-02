@@ -40,8 +40,8 @@ import com.thelightphone.sdk.ui.gridUnitsAsDp
 
 /**
  * One episode: title, show, date and length, where Jordan is in it, "Has chapters" / "Has
- * transcript" when the feed offers them, Mark played / unplayed, then the full show notes
- * as plain text. Long notes are laid out a paragraph at a time, only as they scroll into view.
+ * transcript" when the feed offers them, Play (once downloaded), the download controls,
+ * Transcript, Mark played / unplayed, then the full show notes as plain text. Long notes are laid out a paragraph at a time, only as they scroll into view.
  */
 class EpisodeScreen(
     sealedActivity: SealedLightActivity,
@@ -108,7 +108,20 @@ class EpisodeScreen(
                 OneLine(text = labels.joinToString("  ·  "), variant = LightTextVariant.Detail)
             }
             Spacer(modifier = Modifier.height(1f.gridUnitsAsDp()))
+            if (state.download != null) {
+                val resume = state.positionMs > 0 && !state.played
+                ActionButton(if (resume) "Resume" else "Play", LightIcons.PLAY, Modifier.fillMaxWidth()) {
+                    Podcasts.play(showId, episodeId) { openNowPlaying() }
+                }
+                Spacer(modifier = Modifier.height(1f.gridUnitsAsDp()))
+            }
             DownloadControls(episode, state, download)
+            if (episode.hasTranscript || state.download?.transcript != null) {
+                Spacer(modifier = Modifier.height(1f.gridUnitsAsDp()))
+                ActionButton("Transcript", LightIcons.LIST, Modifier.fillMaxWidth()) {
+                    navigateTo(screenFactory = { TranscriptScreen(it, showId, episodeId) })
+                }
+            }
             Spacer(modifier = Modifier.height(1f.gridUnitsAsDp()))
             if (state.played) {
                 ActionButton("Mark unplayed", LightIcons.CLOSE, Modifier.fillMaxWidth()) { Podcasts.markUnplayed(showId, episodeId) }

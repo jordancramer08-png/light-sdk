@@ -125,9 +125,14 @@ object Transcripts {
             if (timeRow < 0) continue // WEBVTT header, NOTE, STYLE, REGION
             val m = CUE_TIME_RE.find(rows[timeRow])!!
             val body = rows.drop(timeRow + 1).joinToString(" ")
-            val speaker = VOICE_RE.find(body)?.groupValues?.get(1)?.trim()
+            var speaker = VOICE_RE.find(body)?.groupValues?.get(1)?.trim()
+            var text = cueText(body)
+            BRACKET_SPEAKER_RE.find(text)?.let {
+                if (speaker == null) speaker = realSpeaker(it.groupValues[1])
+                text = text.substring(it.range.last + 1).trim()
+            }
             out += TranscriptLine(
-                text = cueText(body),
+                text = text,
                 startMs = FeedTime.parseClock(m.groupValues[1]),
                 endMs = FeedTime.parseClock(m.groupValues[2]),
                 speaker = speaker,
@@ -147,7 +152,11 @@ object Transcripts {
             val m = CUE_TIME_RE.find(rows[timeRow])!!
             var body = cueText(rows.drop(timeRow + 1).joinToString(" "))
             var speaker: String? = null
-            SPEAKER_PREFIX_RE.find(body)?.let {
+            BRACKET_SPEAKER_RE.find(body)?.let {
+                speaker = realSpeaker(it.groupValues[1])
+                body = body.substring(it.range.last + 1).trim()
+            }
+            if (speaker == null) SPEAKER_PREFIX_RE.find(body)?.let {
                 speaker = it.groupValues[1].trim()
                 body = body.substring(it.range.last + 1).trim()
             }
@@ -301,6 +310,13 @@ object Transcripts {
         if (sb.isNotBlank()) out += line.copy(text = sb.toString().trim())
         return out
     }
+
+    /** "[Ann]: …" or "[SPEAKER_00]: …" at the start of a cue. */
+    private val BRACKET_SPEAKER_RE = Regex("""^\[([^\]]{1,40})\]:?\s*""")
+    private val PLACEHOLDER_SPEAKER_RE = Regex("""^(speaker[ _-]?\d+|unknown|spk\d+)$""", RegexOption.IGNORE_CASE)
+
+    /** A speaker's name, or null for machine labels like "SPEAKER_00" and "UNKNOWN". */
+    private fun realSpeaker(name: String): String? = name.trim().takeIf { it.isNotEmpty() && !PLACEHOLDER_SPEAKER_RE.matches(it) }
 
     private val BLANK_LINES_RE = Regex("""\n\s*\n""")
     private val SPACES_RE = Regex("""\s+""")

@@ -17,6 +17,7 @@ import com.thelightphone.listen.books.rewindMs
 import com.thelightphone.listen.music.MusicLibrary
 import com.thelightphone.listen.music.Song
 import com.thelightphone.listen.music.songFrom
+import com.thelightphone.listen.podcasts.Podcasts
 import com.thelightphone.listen.storage.ListenPaths
 import com.thelightphone.listen.storage.Settings
 import com.thelightphone.listen.storage.StorageAccess
@@ -80,6 +81,11 @@ sealed interface SleepTimer {
  * Saving: music every 5 seconds while playing, a book every 10 seconds, and both at once on
  * pause, skip, seek, chapter change, when Listen goes to the background and when the service
  * stops.
+ *
+ * Podcast episodes play through the book path as a one-file book (see [bookFor]); [episode]
+ * says when the loaded book is really an episode. Then its place is saved in
+ * podcast_episodes.json instead of book_positions.json, its speed is the one podcast speed,
+ * and finishing it can delete its download (Settings).
  */
 object PlaybackHub {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -117,6 +123,13 @@ object PlaybackHub {
     /** The loaded book's speed (music always plays at 1.0). */
     private val _speed = MutableStateFlow(1f)
     val speed: StateFlow<Float> = _speed.asStateFlow()
+
+    /** Set while the loaded book is a podcast episode (null for music and audiobooks). */
+    private val _episode = MutableStateFlow<LoadedEpisode?>(null)
+    val episode: StateFlow<LoadedEpisode?> = _episode.asStateFlow()
+
+    /** An episode played to the end whose download is to be deleted once it stops (Settings). */
+    private var deleteWhenDone: LoadedEpisode? = null
 
     private val _sleep = MutableStateFlow<SleepTimer?>(null)
     val sleep: StateFlow<SleepTimer?> = _sleep.asStateFlow()
@@ -235,6 +248,45 @@ object PlaybackHub {
         }
     }
 
+    // ---- Podcasts ----
+
+    /**
+     * Plays a downloaded episode from where it was left (a little earlier after a pause, as
+     * for books), or from the start when it was finished. The music spot or the book's place
+     * is saved first. When it's already loaded, it just plays.
+     */
+    fun playEpisode(e: EpisodeToPlay) {
+        if (_book.value?.id == episodeBookId(e.showId, e.episodeId)) {
+            play()
+            return
+        }
+        restoreJob?.cancel()
+        val player = ensurePlayer() ?: return
+        if (_book.value == null) saveMusic() else saveBook()
+        val nearEnd = e.durationMs > 0 && e.durationMs - e.positionMs <= FINISHED_WITHIN_MS
+        val start = if (e.played || nearEnd || e.positionMs <= 0) {
+            0L
+        } else {
+            val back = rewindFor(System.currentTimeMillis() - (e.lastPlayedAt ?: 0))
+            (e.positionMs - back).coerceAtLeast(0)
+        }
+        loadBook(player, bookFor(e), BookPosition(positionMs = start), podcastSpeed(), playNow = true, episode = e.loaded())
+        saveBook()
+    }
+
+    private fun podcastSpeed(): Float = Settings.settings.value.podcastSpeed.coerceIn(PODCAST_SPEEDS.first(), PODCAST_SPEEDS.last())
+
+    /** Deletes a finished episode's download once it has stopped at the end, or another item has taken its place. */
+    private fun deleteFinishedDownload() {
+        val done = deleteWhenDone ?: return
+        val loaded = _episode.value
+        val stillHere = loaded != null && loaded.isEpisode(done.showId, done.episodeId)
+        val stoppedAtEnd = !_isPlaying.value && _durationMs.value > 0 && _durationMs.value - _positionMs.value <= ENDED_WITHIN_MS
+        if (stillHere && !stoppedAtEnd) return
+        deleteWhenDone = null
+        Podcasts.removeDownload(done.showId, done.episodeId)
+    }
+
     // ---- Audiobooks ----
 
     /**
@@ -320,6 +372,8 @@ object PlaybackHub {
         val player = ensurePlayer() ?: return
         _speed.value = speed
         player.speed = speed
+        // An episode's speed is the one podcast speed, not remembered per episode.
+        if (_episode.value != null) Settings.change { it.copy(podcastSpeed = speed) }
         applyAudioOffload()
         saveBook()
     }
@@ -355,7 +409,20 @@ object PlaybackHub {
         if (_queue.value == null && _book.value == null) return
         val player = ensurePlayer() ?: return
         val book = _book.value
-        if (book != null) {
+        val episode = _episode.value
+        if (book != null && episode != null) {
+            if (!episode.audio.isFile) {
+                showMessage("This episode's download was removed")
+                return
+            }
+            // Played to the end: starts again from the beginning.
+            if (isAtBookEnd(book, currentBookPosition(saved = null))) {
+                pausedAt = null
+                seekBookTo(player, BookPosition())
+            } else {
+                rewindAfterPause(player)
+            }
+        } else if (book != null) {
             // Played to the end: starts again from the beginning.
             if (isAtBookEnd(book, currentBookPosition(saved = null))) {
                 startBookOver(book)
@@ -456,6 +523,8 @@ object PlaybackHub {
         if (_book.value != null) saveBook()
         cancelSleepTimer()
         _book.value = null
+        _episode.value = null
+        deleteFinishedDownload()
         _chapters.value = emptyList()
         pausedAt = null
         setUsage(player, LightAudioUsage.Music)
@@ -465,10 +534,20 @@ object PlaybackHub {
         player.setRepeatMode(_repeat.value)
     }
 
-    private fun loadBook(player: LightAudioPlayer, book: Book, start: BookPosition, speed: Float, playNow: Boolean) {
+    private fun loadBook(
+        player: LightAudioPlayer,
+        book: Book,
+        start: BookPosition,
+        speed: Float,
+        playNow: Boolean,
+        episode: LoadedEpisode? = null,
+    ) {
         if (_book.value?.id != book.id) cancelSleepTimer()
         _queue.value = null
         _book.value = book
+        _episode.value = episode
+        lastEpisodeSaveMs = -1
+        deleteFinishedDownload()
         _chapters.value = chaptersOf(book)
         _index.value = start.fileIndex
         _positionMs.value = start.positionMs
@@ -635,6 +714,7 @@ object PlaybackHub {
 
     /** Loads book [id] paused at its saved place; false when it isn't on the phone. */
     private suspend fun restoreBook(player: LightAudioPlayer, id: String): Boolean {
+        if (id.startsWith(EPISODE_ID_PREFIX)) return restoreEpisode(player, id)
         withTimeoutOrNull(LIBRARY_WAIT_MS) { BookLibrary.state.first { it.loaded } }
         withTimeoutOrNull(LIBRARY_WAIT_MS) { BookPositions.loaded.first { it } }
         val book = BookLibrary.state.value.book(id)?.takeIf { it.files.isNotEmpty() } ?: return false
@@ -642,6 +722,17 @@ object PlaybackHub {
         loadBook(player, book, clamp(book, saved), saved.speed.takeIf { it in SPEEDS } ?: 1f, playNow = false)
         // The pause started when it was last played, so the rewind fits how long ago that was.
         pausedAt = saved.lastPlayedAt.takeIf { it > 0 }
+        return true
+    }
+
+    /** Loads episode [id] ("podcast:showId/episodeId") paused at its saved place; false when its download is gone. */
+    private suspend fun restoreEpisode(player: LightAudioPlayer, id: String): Boolean {
+        val parts = id.removePrefix(EPISODE_ID_PREFIX).split('/', limit = 2)
+        if (parts.size != 2) return false
+        val e = Podcasts.episodeToPlay(parts[0], parts[1]) ?: return false
+        val start = if (e.played) 0L else e.positionMs
+        loadBook(player, bookFor(e), BookPosition(positionMs = start), podcastSpeed(), playNow = false, episode = e.loaded())
+        pausedAt = e.lastPlayedAt
         return true
     }
 
@@ -669,6 +760,10 @@ object PlaybackHub {
                     } else {
                         if (_book.value != null && pausedAt == null) pausedAt = System.currentTimeMillis()
                         saveSoon()
+                        scope.launch {
+                            delay(SETTLE_MS * 2)
+                            deleteFinishedDownload()
+                        }
                     }
                 }
             }
@@ -755,6 +850,10 @@ object PlaybackHub {
     private fun saveBook() {
         val book = _book.value ?: return
         if (_index.value !in book.files.indices) return
+        _episode.value?.let {
+            saveEpisode(it, book)
+            return
+        }
         val saved = BookPositions.positions.value[book.id]
         val here = currentBookPosition(saved)
         val moved = saved == null || saved.fileIndex != here.fileIndex || saved.positionMs != here.positionMs
@@ -766,6 +865,26 @@ object PlaybackHub {
                 finished = isAtBookEnd(book, here) || (here.finished && !moved),
             ),
         )
+    }
+
+    /** The last position saved for the loaded episode, so a paused one doesn't count as "played just now". */
+    private var lastEpisodeSaveMs = -1L
+
+    /**
+     * Saves the loaded episode's place in podcast_episodes.json. Reaching its last 30 seconds
+     * (or 95%) marks it played; with "After finishing: Delete download", the download goes
+     * once it stops at the end or something else is played.
+     */
+    private fun saveEpisode(e: LoadedEpisode, book: Book) {
+        val position = _positionMs.value
+        val duration = _durationMs.value.takeIf { it > 0 } ?: book.files.first().durationMs
+        val touch = _isPlaying.value || position != lastEpisodeSaveMs
+        lastEpisodeSaveMs = position
+        Podcasts.savePlayback(e.showId, e.episodeId, position, duration, touch) {
+            scope.launch {
+                if (Settings.settings.value.deleteAfterFinishing) deleteWhenDone = e
+            }
+        }
     }
 
     /** In the book's last 30 seconds, by the index's lengths or the player's for the last file. */
@@ -854,4 +973,7 @@ object PlaybackHub {
     private const val LIBRARY_WAIT_MS = 5_000L
     private const val MESSAGE_MS = 4_000L
     private const val CANT_PLAY = "Can't play this file"
+
+    /** An episode stopped this close to its end has finished playing. */
+    private const val ENDED_WITHIN_MS = 3_000L
 }

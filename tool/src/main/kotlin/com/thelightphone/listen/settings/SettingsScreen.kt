@@ -10,6 +10,7 @@ import com.thelightphone.listen.ListenScreen
 import com.thelightphone.listen.storage.Settings
 import com.thelightphone.listen.ui.HairlineDivider
 import com.thelightphone.listen.ui.ListenTheme
+import com.thelightphone.listen.ui.ChoiceScreen
 import com.thelightphone.listen.ui.OnOffRow
 import com.thelightphone.listen.ui.SettingHeading
 import com.thelightphone.listen.ui.SettingNote
@@ -47,7 +48,7 @@ class SettingsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedA
                 )
                 HairlineDivider()
 
-                SettingHeading("Audiobooks: go back after a pause")
+                SettingHeading("Audiobooks and podcasts: go back after a pause")
                 RewindStepper("Short pause", settings.rewindShortSeconds, SHORT_REWINDS) { s ->
                     Settings.change { it.copy(rewindShortSeconds = s) }
                 }
@@ -57,11 +58,30 @@ class SettingsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedA
                 SettingNote("A long pause is 10 minutes or more.")
                 HairlineDivider()
 
+                SettingHeading("Podcasts")
+                ValueRow(
+                    label = "After finishing",
+                    value = if (settings.deleteAfterFinishing) "Delete download" else "Keep download",
+                    onClick = ::chooseAfterFinishing,
+                )
+                SettingNote("What happens to a downloaded episode once it's played to the end.")
+                HairlineDivider()
+
                 SettingHeading("Sound")
                 OnOffRow(label = "Audio offload", isOn = settings.audioOffload, onClick = ::toggleOffload)
                 SettingNote(OFFLOAD_NOTE)
             }
         }
+    }
+
+    private fun chooseAfterFinishing() {
+        val choices = listOf("Keep download", "Delete download")
+        navigateTo(
+            screenFactory = {
+                ChoiceScreen(it, "After finishing", "After an episode is played to the end", choices, if (Settings.settings.value.deleteAfterFinishing) 1 else 0)
+            },
+            resultCallback = { i -> Settings.change { it.copy(deleteAfterFinishing = i == 1) } },
+        )
     }
 
     private fun toggleOffload() {

@@ -3,6 +3,13 @@ package com.thelightphone.listen.podcasts
 import android.util.Log
 import com.thelightphone.listen.artwork.ArtSource
 import com.thelightphone.listen.artwork.ArtworkCache
+import com.thelightphone.listen.books.ChapterMark
+import com.thelightphone.listen.playback.EpisodeToPlay
+import com.thelightphone.listen.playback.PlaybackHub
+import com.thelightphone.listen.podcasts.chapters.ChapterList
+import com.thelightphone.listen.podcasts.download.pickTranscript
+import com.thelightphone.listen.podcasts.transcripts.MAX_TRANSCRIPT_BYTES
+import com.thelightphone.listen.podcasts.transcripts.Transcripts
 import com.thelightphone.listen.podcasts.feed.Episode
 import com.thelightphone.listen.podcasts.feed.NotAFeedException
 import com.thelightphone.listen.podcasts.net.ITunesSearch
@@ -38,6 +45,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicInteger
@@ -335,6 +343,103 @@ object Podcasts {
     /** Everything podcasts use on the phone (downloads, feed copies, art), in bytes. Off the main thread. */
     suspend fun storageBytes(): Long = withContext(Dispatchers.IO) {
         ListenPaths.podcasts.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+    }
+
+    // ---- Playback ----
+
+    /**
+     * A downloaded episode, ready for the player: its file, chapters (from the saved
+     * chapters.json), transcript and saved place. Null when it isn't downloaded (or the file
+     * has gone). Off the main thread.
+     */
+    suspend fun episodeToPlay(showId: String, episodeId: String): EpisodeToPlay? = withContext(Dispatchers.IO) {
+        val state = openEpisodeStore().get(showId, episodeId)
+        val download = state.download ?: return@withContext null
+        val files = showFiles(showId)
+        val audio = files.file(download.audio).takeIf { it.isFile } ?: return@withContext null
+        val snapshot = files.loadSnapshot()
+        val episode = snapshot?.episodes?.firstOrNull { it.id == episodeId }
+        val showTitle = _shows.value.firstOrNull { it.showId == showId }?.title?.ifEmpty { null } ?: snapshot?.show?.title.orEmpty()
+        EpisodeToPlay(
+            showId = showId,
+            episodeId = episodeId,
+            title = episode?.title ?: "Episode",
+            showTitle = showTitle,
+            audio = audio,
+            durationMs = state.durationMs.takeIf { it > 0 } ?: episode?.durationMs ?: 0,
+            chapters = download.chapters?.let { readChapters(files.file(it)) }.orEmpty(),
+            positionMs = state.positionMs,
+            lastPlayedAt = state.lastPlayedAt,
+            played = state.played,
+            transcript = download.transcript?.let { files.file(it) }?.takeIf { it.isFile },
+            transcriptType = download.transcriptType,
+        )
+    }
+
+    private val chaptersJson = Json { ignoreUnknownKeys = true }
+
+    private fun readChapters(file: File): List<ChapterMark> = try {
+        chaptersJson.decodeFromString(ChapterList.serializer(), file.readText()).chapters.map { ChapterMark(it.title, it.startMs) }
+    } catch (e: Exception) {
+        emptyList()
+    }
+
+    /**
+     * Plays a downloaded episode, then calls [onStarted] on the main thread (to open Now
+     * Playing). Says so in [status] if it isn't downloaded after all.
+     */
+    fun play(showId: String, episodeId: String, onStarted: () -> Unit) {
+        mainScope.launch {
+            val e = episodeToPlay(showId, episodeId)
+            if (e == null) {
+                _status.value = PodcastStatus("This episode isn't downloaded.", working = false)
+                return@launch
+            }
+            PlaybackHub.playEpisode(e)
+            onStarted()
+        }
+    }
+
+    /**
+     * Saves where an episode is (from the player). Reaching its end marks it played, and then
+     * [onFinished] runs (for "After finishing: Delete download").
+     */
+    fun savePlayback(showId: String, episodeId: String, positionMs: Long, durationMs: Long, touch: Boolean, onFinished: () -> Unit) {
+        scope.launch {
+            try {
+                if (openEpisodeStore().savePosition(showId, episodeId, positionMs, durationMs, touch)) onFinished()
+            } catch (e: Exception) {
+                Log.w(TAG, "Couldn't save the episode's place", e)
+            }
+        }
+    }
+
+    private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /**
+     * An episode's transcript, read into lines: from its download when it has one, otherwise
+     * fetched from the feed's address (and not saved). Off the main thread.
+     */
+    suspend fun loadTranscript(showId: String, episodeId: String): TranscriptLoad = withContext(Dispatchers.IO) {
+        try {
+            val files = showFiles(showId)
+            val download = openEpisodeStore().get(showId, episodeId).download
+            val saved = download?.transcript?.let { files.file(it) }?.takeIf { it.isFile }
+            val transcript = if (saved != null) {
+                if (saved.length() > MAX_TRANSCRIPT_BYTES) return@withContext TranscriptLoad.Failed("This transcript is too long to show.")
+                val format = Transcripts.formatOf(download.transcriptType, saved.name)
+                    ?: return@withContext TranscriptLoad.Failed("Listen can't read this kind of transcript.")
+                Transcripts.parse(format, saved.readText())
+            } else {
+                val episode = files.loadSnapshot()?.episodes?.firstOrNull { it.id == episodeId }
+                val (link, _) = pickTranscript(episode?.transcripts.orEmpty())
+                    ?: return@withContext TranscriptLoad.Failed("This episode has no transcript Listen can read.")
+                fetcher.fetchTranscript(link.url, link.type)
+            }
+            if (transcript == null) TranscriptLoad.Failed("The transcript is empty.") else TranscriptLoad.Loaded(transcript)
+        } catch (e: Exception) {
+            TranscriptLoad.Failed(failure(e, "transcript"))
+        }
     }
 
     // ---- Search ----

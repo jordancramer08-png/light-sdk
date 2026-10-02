@@ -34,6 +34,10 @@ data class ListenSettings(
     val theme: String = "DARK",
     /** Let the audio hardware decode (saves battery). Off until tested on the phone. */
     val audioOffload: Boolean = false,
+    /** Podcast speed, one setting for every episode (1.0–2.0, pitch stays natural). */
+    val podcastSpeed: Float = 1f,
+    /** After an episode is played to the end: delete its download (false = keep it). */
+    val deleteAfterFinishing: Boolean = false,
 )
 
 /** Reads and writes [ListenSettings] as JSON. A missing or broken file reads as the defaults. */

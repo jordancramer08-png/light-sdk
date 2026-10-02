@@ -93,9 +93,11 @@ class EpisodeStateStore(file: File, private val clock: () -> Long = System::curr
     /**
      * Saves where playback is. Reaching the end ([isPodcastFinished]) marks the episode
      * played and returns true (so the caller can apply "after finishing: delete download").
+     * [touch] moves "last played" on (false when saving a paused episode that hasn't moved,
+     * so the rewind after a pause knows how long the pause really was).
      */
     @Synchronized
-    fun savePosition(showId: String, episodeId: String, positionMs: Long, durationMs: Long): Boolean {
+    fun savePosition(showId: String, episodeId: String, positionMs: Long, durationMs: Long, touch: Boolean = true): Boolean {
         val now = clock()
         var justFinished = false
         change(showId, episodeId) {
@@ -107,7 +109,7 @@ class EpisodeStateStore(file: File, private val clock: () -> Long = System::curr
                 durationMs = duration,
                 played = it.played || finished,
                 playedAt = if (justFinished) now else it.playedAt,
-                lastPlayedAt = now,
+                lastPlayedAt = if (touch || it.lastPlayedAt == null) now else it.lastPlayedAt,
             )
         }
         return justFinished

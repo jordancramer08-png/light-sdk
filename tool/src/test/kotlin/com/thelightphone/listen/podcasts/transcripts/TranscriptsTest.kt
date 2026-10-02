@@ -112,4 +112,22 @@ class TranscriptsTest {
         assertNull(Transcripts.parse(TranscriptFormat.TEXT, "   \n\n  "))
         assertNull(Transcripts.parse(TranscriptFormat.TEXT, "x".repeat(MAX_TRANSCRIPT_BYTES + 1)))
     }
+
+    @Test
+    fun `bracketed speakers, with machine labels dropped`() {
+        val vtt = """
+            WEBVTT
+
+            00:00.232 --> 00:01.516
+            [UNKNOWN]: Thank you.
+
+            00:13.263 --> 00:16.745
+            [SPEAKER_00]: Welcome back.
+
+            00:17.000 --> 00:18.000
+            [Robby]: Hi.
+        """.trimIndent()
+        val t = Transcripts.parse(TranscriptFormat.VTT, vtt)!!
+        assertEquals(listOf(null to "Thank you.", null to "Welcome back.", "Robby" to "Hi."), t.lines.map { it.speaker to it.text })
+    }
 }

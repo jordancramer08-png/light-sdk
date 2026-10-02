@@ -142,13 +142,32 @@ object Podcasts {
                 val firstTime = store == null
                 val s = openStore()
                 if (ListenPaths.podcastSubscriptions.lastModified() != knownModified) s.reload()
-                s.mergeInbox()
+                val fromPc = s.mergeInbox()
                 publish(s)
                 if (firstTime) loadRecent(s.shows.value)
+                if (fromPc) fetchNewShows(s)
             } catch (e: Exception) {
                 Log.w(TAG, "Couldn't read podcasts", e)
             }
         }
+    }
+
+    /**
+     * After a sync from Podcasts.cmd: shows followed on the PC have no episodes on the phone
+     * yet, so their feeds are fetched now (only theirs; nothing is downloaded).
+     */
+    private suspend fun fetchNewShows(s: SubscriptionStore) {
+        val missing = s.shows.value.filter { showFiles(it.showId).loadSnapshot() == null }
+        if (missing.isEmpty()) return
+        _status.value = PodcastStatus("Getting episodes for ${showCount(missing.size)} from the PC…", working = true)
+        val failed = coroutineScope {
+            missing.map { sub -> async(feedFetching) { refreshOne(s, sub) } }.awaitAll()
+        }.count { !it }
+        publish(s)
+        _status.value = PodcastStatus(
+            if (failed == 0) "Added ${showCount(missing.size)} from the PC." else "$failed of ${missing.size} new shows couldn't be checked. Open the show to see why.",
+            working = false,
+        )
     }
 
     /** Clears the last job's message (when a Podcasts screen is opened again). */

@@ -72,6 +72,7 @@ class ShowScreen(sealedActivity: SealedLightActivity, private val showId: String
         val refreshing by Podcasts.refreshing.collectAsState()
         val states by Podcasts.states.collectAsState()
         val errors by Podcasts.feedErrors.collectAsState()
+        val downloads by com.thelightphone.listen.podcasts.download.PodcastDownloads.status.collectAsState()
         val show = shows.firstOrNull { it.showId == showId }
         // Read again after a refresh finishes, so new episodes appear.
         val snapshot by produceState<FeedSnapshot?>(null, showId, refreshing) {
@@ -108,6 +109,7 @@ class ShowScreen(sealedActivity: SealedLightActivity, private val showId: String
                                 episode = ep,
                                 state = state,
                                 showDivider = index != episodes.lastIndex,
+                                download = downloads[episodeKey(showId, ep.id)],
                                 onOpen = { openEpisode(ep.id) },
                                 onHold = {
                                     if (state.played) Podcasts.markUnplayed(showId, ep.id) else Podcasts.markPlayed(showId, ep.id)

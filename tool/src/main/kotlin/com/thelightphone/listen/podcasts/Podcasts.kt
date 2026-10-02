@@ -9,6 +9,7 @@ import com.thelightphone.listen.podcasts.net.ITunesSearch
 import com.thelightphone.listen.podcasts.net.NetError
 import com.thelightphone.listen.podcasts.net.PodcastFetcher
 import com.thelightphone.listen.podcasts.net.SearchResult
+import com.thelightphone.listen.podcasts.store.DownloadedFiles
 import com.thelightphone.listen.podcasts.store.EpisodeSort
 import com.thelightphone.listen.podcasts.store.EpisodeState
 import com.thelightphone.listen.podcasts.store.EpisodeStateStore
@@ -301,6 +302,41 @@ object Podcasts {
         }
     }
 
+    // ---- Downloads ----
+
+    /** Saves that an episode's files are on the phone (called by the download job, on its thread). */
+    fun recordDownload(showId: String, episodeId: String, files: DownloadedFiles) =
+        openEpisodeStore().setDownloaded(showId, episodeId, files)
+
+    /** Remove Download: deletes the audio, chapters and transcript; the episode stays listed. */
+    fun removeDownload(showId: String, episodeId: String) {
+        scope.launch {
+            try {
+                val e = openEpisodeStore()
+                val files = showFiles(showId)
+                e.get(showId, episodeId).download?.allFiles?.forEach { files.file(it).delete() }
+                deleteParts(files, episodeId)
+                e.clearDownload(showId, episodeId)
+            } catch (e: Exception) {
+                Log.w(TAG, "Couldn't remove download $showId/$episodeId", e)
+            }
+        }
+    }
+
+    /** Deletes what a cancelled download had saved so far. */
+    fun deletePartialDownload(showId: String, episodeId: String) {
+        scope.launch { deleteParts(showFiles(showId), episodeId) }
+    }
+
+    private fun deleteParts(files: ShowFiles, episodeId: String) {
+        files.dir.listFiles { f -> f.name.startsWith("$episodeId.") && f.name.endsWith(".part") }?.forEach { it.delete() }
+    }
+
+    /** Everything podcasts use on the phone (downloads, feed copies, art), in bytes. Off the main thread. */
+    suspend fun storageBytes(): Long = withContext(Dispatchers.IO) {
+        ListenPaths.podcasts.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+    }
+
     // ---- Search ----
 
     /** Searches Apple's directory. Blocks no one else's work: runs on its own IO thread. */
@@ -368,6 +404,7 @@ object Podcasts {
             openEpisodeStore()
         }
 
+    @Synchronized
     private fun openEpisodeStore(): EpisodeStateStore =
         episodeStore ?: EpisodeStateStore(ListenPaths.podcastEpisodes).also { e ->
             episodeStore = e

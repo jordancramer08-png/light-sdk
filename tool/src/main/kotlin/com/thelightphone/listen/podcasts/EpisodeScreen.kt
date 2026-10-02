@@ -16,6 +16,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import com.thelightphone.listen.ListenScreen
 import com.thelightphone.listen.music.ListTopBar
 import com.thelightphone.listen.music.lengthText
+import com.thelightphone.listen.podcasts.download.DownloadStatus
+import com.thelightphone.listen.podcasts.download.PodcastDownloads
+import com.thelightphone.listen.podcasts.download.downloadProgressText
+import com.thelightphone.listen.podcasts.download.sizeText
 import com.thelightphone.listen.podcasts.feed.Episode
 import com.thelightphone.listen.podcasts.store.EpisodeState
 import com.thelightphone.listen.podcasts.store.FeedNotes
@@ -49,6 +53,7 @@ class EpisodeScreen(
     override fun Content() {
         val shows by Podcasts.shows.collectAsState()
         val states by Podcasts.states.collectAsState()
+        val downloads by PodcastDownloads.status.collectAsState()
         val show = shows.firstOrNull { it.showId == showId }
         val snapshot by produceState<FeedSnapshot?>(null, showId) { value = Podcasts.snapshot(showId) }
         val notes by produceState<FeedNotes?>(null, showId) { value = Podcasts.notes(showId) }
@@ -67,7 +72,7 @@ class EpisodeScreen(
                         // Paragraphs differ in height, so the scrollbar is approximate.
                         uniformItemHeightGridUnits = 4f,
                     ) {
-                        item(key = "header") { Header(episode, show?.title.orEmpty(), state) }
+                        item(key = "header") { Header(episode, show?.title.orEmpty(), state, downloads[episodeKey(showId, episodeId)]) }
                         itemsIndexed(paragraphs, key = { i, _ -> "p$i" }) { _, paragraph ->
                             LightText(
                                 text = paragraph,
@@ -83,7 +88,7 @@ class EpisodeScreen(
     }
 
     @Composable
-    private fun Header(episode: Episode, showTitle: String, state: EpisodeState) {
+    private fun Header(episode: Episode, showTitle: String, state: EpisodeState, download: DownloadStatus?) {
         Column(modifier = Modifier.fillMaxWidth()) {
             LightText(text = episode.title, variant = LightTextVariant.Subheading, maxLines = 4, overflow = TextOverflow.Ellipsis)
             Spacer(modifier = Modifier.height(0.25f.gridUnitsAsDp()))
@@ -97,12 +102,13 @@ class EpisodeScreen(
             val labels = listOfNotNull(
                 "Has chapters".takeIf { episode.feedHasChapters },
                 "Has transcript".takeIf { episode.hasTranscript },
-                "Downloaded".takeIf { state.download != null },
             )
             if (labels.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(0.5f.gridUnitsAsDp()))
                 OneLine(text = labels.joinToString("  ·  "), variant = LightTextVariant.Detail)
             }
+            Spacer(modifier = Modifier.height(1f.gridUnitsAsDp()))
+            DownloadControls(episode, state, download)
             Spacer(modifier = Modifier.height(1f.gridUnitsAsDp()))
             if (state.played) {
                 ActionButton("Mark unplayed", LightIcons.CLOSE, Modifier.fillMaxWidth()) { Podcasts.markUnplayed(showId, episodeId) }
@@ -112,6 +118,42 @@ class EpisodeScreen(
             Spacer(modifier = Modifier.height(1f.gridUnitsAsDp()))
             HairlineDivider()
             Spacer(modifier = Modifier.height(1f.gridUnitsAsDp()))
+        }
+    }
+
+    /**
+     * Download (with its size when the feed says), then progress and Cancel while it runs,
+     * the reason and Retry if it failed, and Remove download once it's on the phone.
+     */
+    @Composable
+    private fun DownloadControls(episode: Episode, state: EpisodeState, download: DownloadStatus?) {
+        val files = state.download
+        when {
+            files != null -> {
+                OneLine(text = "Downloaded · ${sizeText(files.bytes)}", variant = LightTextVariant.Detail, lighten = true)
+                Spacer(modifier = Modifier.height(0.5f.gridUnitsAsDp()))
+                ActionButton("Remove download", LightIcons.TRASH, Modifier.fillMaxWidth()) { Podcasts.removeDownload(showId, episodeId) }
+            }
+            download is DownloadStatus.Active -> {
+                OneLine(text = downloadProgressText(download), variant = LightTextVariant.Detail)
+                Spacer(modifier = Modifier.height(0.5f.gridUnitsAsDp()))
+                ActionButton("Cancel download", LightIcons.CLOSE, Modifier.fillMaxWidth()) {
+                    PodcastDownloads.cancel(lightContext, showId, episodeId)
+                }
+            }
+            download is DownloadStatus.Failed -> {
+                LightText(text = download.message, variant = LightTextVariant.Detail)
+                Spacer(modifier = Modifier.height(0.5f.gridUnitsAsDp()))
+                ActionButton("Retry", LightIcons.REFRESH, Modifier.fillMaxWidth()) {
+                    PodcastDownloads.start(lightContext, showId, episodeId)
+                }
+            }
+            else -> {
+                val size = episode.enclosureBytes?.let { " (${sizeText(it)})" }.orEmpty()
+                ActionButton("Download$size", LightIcons.DOWNLOAD_ARROW, Modifier.fillMaxWidth()) {
+                    PodcastDownloads.start(lightContext, showId, episodeId)
+                }
+            }
         }
     }
 }

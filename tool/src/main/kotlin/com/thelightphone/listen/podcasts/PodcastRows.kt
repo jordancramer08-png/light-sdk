@@ -10,6 +10,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
+import com.thelightphone.listen.podcasts.download.DownloadStatus
+import com.thelightphone.listen.podcasts.download.downloadRowText
 import com.thelightphone.listen.podcasts.feed.Episode
 import com.thelightphone.listen.podcasts.store.EpisodeState
 import com.thelightphone.listen.ui.OneLine
@@ -33,7 +35,7 @@ const val EPISODE_ROW_GRID_UNITS = 5f
 
 /**
  * One episode in a list: its title (lighter once played), the date, length and progress
- * under it, and a downloaded mark at the right. Tap to open it; press and hold to mark it
+ * under it (and how a download is going), and a downloaded mark at the right. Tap to open it; press and hold to mark it
  * played or unplayed.
  */
 @Composable
@@ -43,6 +45,7 @@ fun EpisodeRow(
     showDivider: Boolean,
     onOpen: () -> Unit,
     onHold: () -> Unit,
+    download: DownloadStatus? = null,
 ) {
     UniformRow(
         heightGridUnits = EPISODE_ROW_GRID_UNITS,
@@ -52,7 +55,8 @@ fun EpisodeRow(
         Row(modifier = Modifier.fillMaxWidth().fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
                 OneLine(text = episode.title, variant = LightTextVariant.Copy, lighten = state.played)
-                OneLine(text = episodeDetail(episode, state), variant = LightTextVariant.Detail, lighten = true)
+                val detail = listOf(episodeDetail(episode, state), downloadRowText(download)).filter { it.isNotEmpty() }.joinToString(" · ")
+                OneLine(text = detail, variant = LightTextVariant.Detail, lighten = true)
             }
             if (state.download != null) {
                 LightIcon(

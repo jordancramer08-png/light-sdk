@@ -7,6 +7,9 @@ import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import com.thelightphone.listen.podcasts.download.PodcastDownloads
+import com.thelightphone.listen.podcasts.download.sizeText
 import androidx.compose.ui.Modifier
 import com.thelightphone.listen.ListenScreen
 import com.thelightphone.listen.artwork.ArtImage
@@ -56,6 +59,10 @@ class PodcastsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedA
         val refreshing by Podcasts.refreshing.collectAsState()
         val newEpisodes by Podcasts.newEpisodes.collectAsState()
         val errors by Podcasts.feedErrors.collectAsState()
+        val states by Podcasts.states.collectAsState()
+        val downloads by PodcastDownloads.status.collectAsState()
+        // Worked out again whenever a download finishes or is removed.
+        val storage by produceState<Long?>(null, states, downloads.size) { value = Podcasts.storageBytes() }
         ThemedScreen {
             ListTopBar(
                 title = "Podcasts",
@@ -90,7 +97,7 @@ class PodcastsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedA
                     }
                 }
             }
-            StatusLine(status?.text)
+            StatusLine(status?.text ?: storage?.takeIf { loaded && shows.isNotEmpty() }?.let { "Podcasts use ${sizeText(it)} on the phone" })
             if (loaded && shows.isNotEmpty() && !refreshing) {
                 LightBottomBar(items = listOf(LightBarButton.Text(text = "REFRESH", onClick = Podcasts::refreshAll)))
             }

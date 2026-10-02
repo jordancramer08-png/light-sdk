@@ -44,7 +44,7 @@ fun interface HttpTransport {
 sealed class NetError(message: String) : IOException(message) {
     /** The address only works over plain http, which the phone blocks. */
     class NeedsSecureLink(val url: String) :
-        NetError("This show only offers an insecure (http) link, which the phone blocks. Add it from the PC instead.")
+        NetError("This link only works without security (http), and the phone blocks those links.")
 
     /** Couldn't reach the server at all (no connection, or the name doesn't exist). */
     class NoConnection(cause: Throwable?) : NetError("Can't connect. Check Wi-Fi or mobile data.") {

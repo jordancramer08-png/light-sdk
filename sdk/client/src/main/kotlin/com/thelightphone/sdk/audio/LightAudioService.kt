@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
@@ -56,6 +57,10 @@ internal class LightAudioService : MediaSessionService() {
                     refreshIdleStop()
                 }
 
+                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                    updateWakeMode(mediaItem)
+                }
+
                 override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
                     if (shuffleModeEnabled) shuffleFromCurrentItem()
                 }
@@ -79,6 +84,16 @@ internal class LightAudioService : MediaSessionService() {
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession = session
+
+    /**
+     * While a web address plays (a streamed episode), keep the network awake too, so the
+     * stream doesn't stall with the screen off; files on the phone only need the CPU.
+     * Needs WAKE_LOCK, as the local mode does.
+     */
+    private fun updateWakeMode(item: MediaItem?) {
+        if (!hasWakeLockPermission()) return
+        player.setWakeMode(wakeModeFor(item?.localConfiguration?.uri?.scheme))
+    }
 
     override fun onDestroy() {
         idleHandler.removeCallbacks(idleStop)
@@ -222,3 +237,7 @@ internal const val IDLE_STOP_MS = 60_000L
 /** A random order of `0 until count` that starts with [first]. */
 internal fun shuffledFrom(first: Int, count: Int, random: kotlin.random.Random = kotlin.random.Random): IntArray =
     intArrayOf(first) + (0 until count).filter { it != first }.shuffled(random)
+
+/** [C.WAKE_MODE_NETWORK] for http(s) streams, [C.WAKE_MODE_LOCAL] for everything else. */
+internal fun wakeModeFor(scheme: String?): Int =
+    if (scheme.equals("http", ignoreCase = true) || scheme.equals("https", ignoreCase = true)) C.WAKE_MODE_NETWORK else C.WAKE_MODE_LOCAL

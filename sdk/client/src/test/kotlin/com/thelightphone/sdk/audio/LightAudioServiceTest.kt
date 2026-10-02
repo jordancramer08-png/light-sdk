@@ -24,6 +24,14 @@ class LightAudioServiceTest {
         }
         assertEquals(listOf(0), shuffledFrom(first = 0, count = 1).toList())
     }
+
+    @Test
+    fun streamsKeepTheNetworkAwakeAndFilesOnlyTheCpu() {
+        assertEquals(androidx.media3.common.C.WAKE_MODE_NETWORK, wakeModeFor("https"))
+        assertEquals(androidx.media3.common.C.WAKE_MODE_NETWORK, wakeModeFor("HTTP"))
+        assertEquals(androidx.media3.common.C.WAKE_MODE_LOCAL, wakeModeFor("file"))
+        assertEquals(androidx.media3.common.C.WAKE_MODE_LOCAL, wakeModeFor(null))
+    }
 }
 
 class DetachedSessionStateTest {

@@ -28,6 +28,7 @@ import com.thelightphone.listen.playback.LoadedEpisode
 import com.thelightphone.listen.playback.PODCAST_SPEEDS
 import com.thelightphone.listen.playback.PlaybackHub
 import com.thelightphone.listen.playback.QualityLine
+import com.thelightphone.listen.playback.formatLine
 import com.thelightphone.listen.playback.SeekBarWithTimes
 import com.thelightphone.listen.playback.speedText
 import com.thelightphone.listen.podcasts.store.EpisodeState
@@ -91,7 +92,11 @@ class PodcastNowPlayingScreen(sealedActivity: SealedLightActivity) : ListenScree
                 Column(modifier = Modifier.padding(horizontal = 1.5f.gridUnitsAsDp())) {
                     TitleLines(current, loaded)
                     EpisodeSeekBar()
-                    current.files.firstOrNull()?.let { QualityLine(fileName = it.path, fileBytes = it.size, durationMs = it.durationMs) }
+                    if (loaded.streaming) {
+                        StreamingLine()
+                    } else {
+                        current.files.firstOrNull()?.let { QualityLine(fileName = it.path, fileBytes = it.size, durationMs = it.durationMs) }
+                    }
                     Controls(loaded.hasChapters)
                     val state = states[episodeKey(loaded.showId, loaded.episodeId)] ?: EpisodeState()
                     Buttons(loaded, state)
@@ -110,7 +115,7 @@ class PodcastNowPlayingScreen(sealedActivity: SealedLightActivity) : ListenScree
             horizontalArrangement = Arrangement.spacedBy(0.75f.gridUnitsAsDp()),
         ) {
             FramedTextButton(speedText(speed), Modifier.weight(1f), ::openSpeed)
-            if (loaded.transcript != null) {
+            if (loaded.hasTranscript) {
                 FramedTextButton("Transcript", Modifier.weight(1.4f)) { openTranscript(loaded) }
             }
             FramedTextButton(if (state.played) "Unplayed" else "Played", Modifier.weight(1.2f)) {
@@ -146,6 +151,15 @@ private fun TitleLines(book: Book, loaded: LoadedEpisode) {
     if (loaded.hasChapters && chapter >= 0) {
         CenteredLine("${book.author} · Chapter ${chapter + 1} of ${chapters.size}", LightTextVariant.Detail, lighten = true)
     }
+}
+
+/** "Streaming · MP3 · 128 kbps · 44.1 kHz" in small text. */
+@Composable
+private fun StreamingLine() {
+    val format by PlaybackHub.format.collectAsState()
+    val duration by PlaybackHub.durationMs.collectAsState()
+    val quality = formatLine(format, fileName = "", fileBytes = 0, durationMs = duration)
+    CenteredLine(listOfNotNull("Streaming", quality).joinToString(" · "), LightTextVariant.Superfine, lighten = true)
 }
 
 /** The seek bar covers the whole episode. */

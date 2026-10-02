@@ -34,6 +34,7 @@ abstract class ListenScreen(private val sealed: SealedLightActivity) : VolumeKey
     override fun willShow() {
         super.willShow()
         ArtworkCache.setFilesDir(lightContext.filesDir)
+        Podcasts.useNetworkCheck(lightContext.network)
         if (StorageAccess.hasAllFilesAccess()) {
             Settings.load()
             Playlists.load()

@@ -25,6 +25,10 @@ data class EpisodeToPlay(
     val played: Boolean,
     val transcript: File?,
     val transcriptType: String?,
+    /** Set when the episode isn't downloaded: the address it streams from ([audio] doesn't exist then). */
+    val streamUrl: String? = null,
+    /** Whether the feed offers a transcript (read online when it isn't downloaded). */
+    val hasTranscript: Boolean = transcript != null,
 )
 
 /** The episode loaded in the player (its book stand-in is [PlaybackHub.book]). */
@@ -36,7 +40,12 @@ data class LoadedEpisode(
     val hasChapters: Boolean,
     val transcript: File?,
     val transcriptType: String?,
+    /** The address it streams from, or null when it plays its download. */
+    val streamUrl: String? = null,
+    val hasTranscript: Boolean = transcript != null,
 ) {
+    val streaming: Boolean get() = streamUrl != null
+
     fun isEpisode(showId: String, episodeId: String) = this.showId == showId && this.episodeId == episodeId
 }
 
@@ -78,7 +87,8 @@ internal fun bookFor(e: EpisodeToPlay): Book {
     )
 }
 
-internal fun EpisodeToPlay.loaded() = LoadedEpisode(showId, episodeId, audio, chapters.isNotEmpty(), transcript, transcriptType)
+internal fun EpisodeToPlay.loaded() =
+    LoadedEpisode(showId, episodeId, audio, chapters.isNotEmpty(), transcript, transcriptType, streamUrl, hasTranscript)
 
 /** Podcast speeds: 1.0× to 2.0× in steps of 0.1 (pitch stays natural at every one). */
 val PODCAST_SPEEDS: List<Float> = (10..20).map { it / 10f }

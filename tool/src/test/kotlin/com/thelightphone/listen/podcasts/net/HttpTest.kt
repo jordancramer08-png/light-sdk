@@ -76,7 +76,7 @@ class HttpTest {
         assertEquals("http://insecure.com/rss", secure.url)
         // An https address that fails TLS isn't an "http only" problem.
         assertFailsWith<SSLHandshakeException> { Http.open(web, "https://secure.com/rss") }
-        assertFailsWith<NetError.NoConnection> { Http.open(web, "https://nowhere.invalid/rss") }
+        assertFailsWith<NetError.NoConnection> { Http.open(web, "https://nowhere.invalid/rss", sleep = {}) }
     }
 
     @Test
@@ -97,5 +97,27 @@ class HttpTest {
         val unknownLength = FakeWeb(mapOf("https://a.com/big" to { HttpResponse(200, null, null, -1, ByteArrayInputStream(ByteArray(50))) }))
         assertFailsWith<NetError.TooLarge> { Http.readBytes(Http.open(unknownLength, "https://a.com/big"), 10) }
         assertEquals(10, Http.readBytes(Http.open(web, "https://a.com/big"), 10).size)
+    }
+
+    @Test
+    fun `a failed connection is tried once more after a pause (switching Wi-Fi to mobile data)`() {
+        var calls = 0
+        val slept = mutableListOf<Long>()
+        val flaky = HttpTransport { _, _ ->
+            calls++
+            if (calls == 1) throw UnknownHostException("a.com") else ok("hi")()
+        }
+        val opened = Http.open(flaky, "https://a.com/feed", sleep = { slept += it })
+        assertEquals("hi", Http.readText(opened, 100))
+        assertEquals(2, calls)
+        assertEquals(listOf(Http.RETRY_DELAY_MS), slept)
+
+        calls = 0
+        val down = HttpTransport { _, _ ->
+            calls++
+            throw UnknownHostException("a.com")
+        }
+        assertFailsWith<NetError.NoConnection> { Http.open(down, "https://a.com/feed", sleep = {}) }
+        assertEquals(2, calls, "only one retry")
     }
 }

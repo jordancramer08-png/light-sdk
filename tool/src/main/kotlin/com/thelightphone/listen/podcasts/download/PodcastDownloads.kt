@@ -48,7 +48,8 @@ sealed interface DownloadStatus {
  * where they stopped). Only ever started by a tap: Listen never downloads on its own.
  */
 @LightJob("podcast-download")
-val podcastDownload: LightJobHandler = { _, input ->
+val podcastDownload: LightJobHandler = { context, input ->
+    Podcasts.useNetworkCheck(context.network)
     val showId = input["showId"]
     val episodeId = input["episodeId"]
     if (showId == null || episodeId == null) LightJobResult.Error() else PodcastDownloads.run(showId, episodeId)
@@ -159,7 +160,10 @@ object PodcastDownloads {
     }
 
     private fun message(e: Exception): String = when (e) {
-        is NetError, is NotEnoughSpace, is NotAudio -> e.message ?: "Couldn't download this episode."
+        is NetError, is NotEnoughSpace, is NotAudio -> {
+            Log.w(TAG, "Download failed", e)
+            if (e is NetError.NoConnection) Podcasts.noConnectionText(streaming = false) else e.message ?: "Couldn't download this episode."
+        }
         is IOException -> {
             Log.w(TAG, "Download stopped: $e")
             "The download stopped. Check the connection, then tap Retry."

@@ -30,6 +30,7 @@ import com.thelightphone.listen.ui.CenteredMessage
 import com.thelightphone.listen.ui.HairlineDivider
 import com.thelightphone.listen.ui.NowPlayingBar
 import com.thelightphone.listen.ui.OneLine
+import com.thelightphone.listen.ui.StatusLine
 import com.thelightphone.listen.ui.ThemedScreen
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.ui.LightIcons
@@ -40,7 +41,7 @@ import com.thelightphone.sdk.ui.gridUnitsAsDp
 
 /**
  * One episode: title, show, date and length, where Jordan is in it, "Has chapters" / "Has
- * transcript" when the feed offers them, Play (once downloaded), the download controls,
+ * transcript" when the feed offers them, Play (or Stream when not downloaded), the download controls,
  * Transcript, Mark played / unplayed, then the full show notes as plain text. Long notes are laid out a paragraph at a time, only as they scroll into view.
  */
 class EpisodeScreen(
@@ -54,6 +55,7 @@ class EpisodeScreen(
         val shows by Podcasts.shows.collectAsState()
         val states by Podcasts.states.collectAsState()
         val downloads by PodcastDownloads.status.collectAsState()
+        val status by Podcasts.status.collectAsState()
         val show = shows.firstOrNull { it.showId == showId }
         val snapshot by produceState<FeedSnapshot?>(null, showId) { value = Podcasts.snapshot(showId) }
         val notes by produceState<FeedNotes?>(null, showId) { value = Podcasts.notes(showId) }
@@ -83,6 +85,7 @@ class EpisodeScreen(
                     }
                 }
             }
+            StatusLine(status?.text)
             NowPlayingBar(onOpen = ::openNowPlaying)
         }
     }
@@ -108,13 +111,15 @@ class EpisodeScreen(
                 OneLine(text = labels.joinToString("  ·  "), variant = LightTextVariant.Detail)
             }
             Spacer(modifier = Modifier.height(1f.gridUnitsAsDp()))
-            if (state.download != null) {
-                val resume = state.positionMs > 0 && !state.played
-                ActionButton(if (resume) "Resume" else "Play", LightIcons.PLAY, Modifier.fillMaxWidth()) {
-                    Podcasts.play(showId, episodeId) { openNowPlaying() }
-                }
-                Spacer(modifier = Modifier.height(1f.gridUnitsAsDp()))
+            val resume = state.positionMs > 0 && !state.played
+            val playLabel = when {
+                state.download != null -> if (resume) "Resume" else "Play"
+                else -> if (resume) "Resume (stream)" else "Stream"
             }
+            ActionButton(playLabel, LightIcons.PLAY, Modifier.fillMaxWidth()) {
+                Podcasts.play(showId, episodeId) { openNowPlaying() }
+            }
+            Spacer(modifier = Modifier.height(1f.gridUnitsAsDp()))
             DownloadControls(episode, state, download)
             if (episode.hasTranscript || state.download?.transcript != null) {
                 Spacer(modifier = Modifier.height(1f.gridUnitsAsDp()))
@@ -158,12 +163,14 @@ class EpisodeScreen(
                 LightText(text = download.message, variant = LightTextVariant.Detail)
                 Spacer(modifier = Modifier.height(0.5f.gridUnitsAsDp()))
                 ActionButton("Retry", LightIcons.REFRESH, Modifier.fillMaxWidth()) {
+                    Podcasts.clearStatus()
                     PodcastDownloads.start(lightContext, showId, episodeId)
                 }
             }
             else -> {
                 val size = episode.enclosureBytes?.let { " (${sizeText(it)})" }.orEmpty()
                 ActionButton("Download$size", LightIcons.DOWNLOAD_ARROW, Modifier.fillMaxWidth()) {
+                    Podcasts.clearStatus()
                     PodcastDownloads.start(lightContext, showId, episodeId)
                 }
             }

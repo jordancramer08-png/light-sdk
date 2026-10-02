@@ -55,6 +55,14 @@ class PodcastFetcher(private val transport: HttpTransport = OkHttpTransport()) {
         return Transcripts.parse(format, fetchTranscriptText(url))
     }
 
+    /**
+     * Where an episode's audio really is: follows the tracking redirects (upgrading each hop
+     * to https) with a tiny 2-byte request, and returns the final secure address for the
+     * player, which can't follow an https-to-http redirect itself.
+     */
+    fun resolveStreamUrl(url: String): String =
+        Http.open(transport, url, mapOf("Range" to "bytes=0-1")).use { it.url }
+
     /** Channel art as downloaded (shrunk before saving; see ArtworkCache.saveScaled). */
     fun fetchArt(url: String): ByteArray = Http.readBytes(Http.open(transport, url), MAX_ART_BYTES)
 

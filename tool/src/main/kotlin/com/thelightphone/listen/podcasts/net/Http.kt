@@ -47,6 +47,7 @@ sealed class NetError(message: String) : IOException(message) {
         NetError("This link only works without security (http), and the phone blocks those links.")
 
     /** Couldn't reach the server at all (no connection, or the name doesn't exist). */
+    /** Couldn't connect (even after one retry). Whether the phone is offline is checked separately, for the message. */
     class NoConnection(cause: Throwable?) : NetError("Can't connect. Check Wi-Fi or mobile data.") {
         init {
             cause?.let { initCause(it) }
@@ -79,15 +80,25 @@ object Http {
      * blocked on the phone and tracking redirects (podtrac and friends) often bounce through
      * http. A non-2xx answer throws [NetError.HttpStatus]. When the https version of an
      * http address can't be reached securely, throws [NetError.NeedsSecureLink].
+     *
+     * A connection that can't be made (no address lookup, refused, timed out) is tried once
+     * more after [retryDelayMs]: when the phone switches between Wi-Fi and mobile data there
+     * are a few seconds with no working network.
      */
-    fun open(transport: HttpTransport, url: String, headers: Map<String, String> = emptyMap()): Opened {
+    fun open(
+        transport: HttpTransport,
+        url: String,
+        headers: Map<String, String> = emptyMap(),
+        retryDelayMs: Long = RETRY_DELAY_MS,
+        sleep: (Long) -> Unit = Thread::sleep,
+    ): Opened {
         var current = url.trim()
         var movedTo: String? = null
         var everHttp = current.startsWith("http://", ignoreCase = true)
         repeat(MAX_REDIRECTS + 1) { hop ->
             val secure = PodcastIds.upgradeToHttps(current)
             val response = try {
-                transport.get(secure, headers)
+                getWithRetry(transport, secure, headers, retryDelayMs, sleep)
             } catch (e: IOException) {
                 throw classify(e, wasHttp = everHttp, url = current)
             }
@@ -108,6 +119,23 @@ object Http {
         }
         throw NetError.TooManyRedirects()
     }
+
+    private fun getWithRetry(
+        transport: HttpTransport,
+        url: String,
+        headers: Map<String, String>,
+        retryDelayMs: Long,
+        sleep: (Long) -> Unit,
+    ): HttpResponse = try {
+        transport.get(url, headers)
+    } catch (e: IOException) {
+        if (!isConnectionFailure(e) || retryDelayMs <= 0) throw e
+        sleep(retryDelayMs)
+        transport.get(url, headers)
+    }
+
+    private fun isConnectionFailure(e: IOException) =
+        e is UnknownHostException || e is ConnectException || e is SocketTimeoutException
 
     /** The whole body as bytes, refusing more than [maxBytes]. */
     fun readBytes(opened: Opened, maxBytes: Long): ByteArray = opened.use {
@@ -134,6 +162,7 @@ object Http {
     private fun isCleartextError(e: IOException) = e.message?.contains("CLEARTEXT", ignoreCase = true) == true
 
     private val REDIRECT_CODES = setOf(301, 302, 303, 307, 308)
+    const val RETRY_DELAY_MS = 2_000L
     private val CHARSET_RE = Regex("""charset\s*=\s*"?([A-Za-z0-9._-]+)""", RegexOption.IGNORE_CASE)
 }
 

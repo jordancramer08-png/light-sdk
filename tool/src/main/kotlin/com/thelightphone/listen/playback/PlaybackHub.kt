@@ -411,7 +411,7 @@ object PlaybackHub {
         val book = _book.value
         val episode = _episode.value
         if (book != null && episode != null) {
-            if (!episode.audio.isFile) {
+            if (!episode.streaming && !episode.audio.isFile) {
                 showMessage("This episode's download was removed")
                 return
             }
@@ -561,7 +561,9 @@ object PlaybackHub {
         player.setRepeatMode(LightRepeatMode.Off)
         player.speed = speed
         applyAudioOffload()
-        player.setMediaQueue(book.files.map { itemFor(book, it) }, start.fileIndex, start.positionMs)
+        val stream = episode?.streamUrl
+        val items = if (stream != null) listOf(streamItem(book, stream)) else book.files.map { itemFor(book, it) }
+        player.setMediaQueue(items, start.fileIndex, start.positionMs)
         markBookLoaded(book.id)
         if (playNow) player.play()
     }
@@ -945,6 +947,17 @@ object PlaybackHub {
             artist = book.author,
             album = book.title,
             durationMs = file.durationMs.takeIf { it > 0 },
+        ),
+    )
+
+    /** A streamed episode: its one "file" is a web address. */
+    private fun streamItem(book: Book, url: String) = LightAudioItem(
+        source = LightAudioSource.UrlSource(url),
+        metadata = LightMediaMetadata(
+            title = book.title,
+            artist = book.author,
+            album = book.author,
+            durationMs = book.files.firstOrNull()?.durationMs?.takeIf { it > 0 },
         ),
     )
 

@@ -7,6 +7,7 @@ import com.thelightphone.listen.books.ChapterMark
 import com.thelightphone.listen.playback.EpisodeToPlay
 import com.thelightphone.listen.playback.PlaybackHub
 import com.thelightphone.listen.podcasts.chapters.ChapterList
+import com.thelightphone.listen.podcasts.chapters.pscChapters
 import com.thelightphone.listen.podcasts.download.pickTranscript
 import com.thelightphone.listen.podcasts.transcripts.MAX_TRANSCRIPT_BYTES
 import com.thelightphone.listen.podcasts.transcripts.Transcripts
@@ -30,6 +31,7 @@ import com.thelightphone.listen.podcasts.store.SubscriptionStore
 import com.thelightphone.listen.podcasts.store.episodeKey
 import com.thelightphone.listen.podcasts.store.newEpisodes
 import com.thelightphone.listen.storage.ListenPaths
+import com.thelightphone.sdk.LightNetwork
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -52,6 +54,12 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** What the Podcasts screens say under their lists: work going on, or how the last job went. */
 data class PodcastStatus(val text: String, val working: Boolean)
+
+/** An episode made ready to play, or why it couldn't be. */
+sealed interface EpisodeReady {
+    data class Ready(val episode: EpisodeToPlay) : EpisodeReady
+    data class Failed(val message: String) : EpisodeReady
+}
 
 /** What a search on Apple's directory found, or why it couldn't. */
 sealed interface SearchOutcome {
@@ -348,32 +356,82 @@ object Podcasts {
     // ---- Playback ----
 
     /**
-     * A downloaded episode, ready for the player: its file, chapters (from the saved
-     * chapters.json), transcript and saved place. Null when it isn't downloaded (or the file
-     * has gone). Off the main thread.
+     * An episode ready for the player. Downloaded: its file, saved chapters and transcript.
+     * Not downloaded (and [allowStream]): streamed from the address its tracking redirects
+     * lead to (each hop upgraded to https), with the feed's chapters; its transcript is read
+     * online. Off the main thread.
      */
-    suspend fun episodeToPlay(showId: String, episodeId: String): EpisodeToPlay? = withContext(Dispatchers.IO) {
+    suspend fun prepareEpisode(showId: String, episodeId: String, allowStream: Boolean): EpisodeReady = withContext(Dispatchers.IO) {
         val state = openEpisodeStore().get(showId, episodeId)
-        val download = state.download ?: return@withContext null
         val files = showFiles(showId)
-        val audio = files.file(download.audio).takeIf { it.isFile } ?: return@withContext null
         val snapshot = files.loadSnapshot()
         val episode = snapshot?.episodes?.firstOrNull { it.id == episodeId }
         val showTitle = _shows.value.firstOrNull { it.showId == showId }?.title?.ifEmpty { null } ?: snapshot?.show?.title.orEmpty()
-        EpisodeToPlay(
-            showId = showId,
-            episodeId = episodeId,
-            title = episode?.title ?: "Episode",
-            showTitle = showTitle,
-            audio = audio,
-            durationMs = state.durationMs.takeIf { it > 0 } ?: episode?.durationMs ?: 0,
-            chapters = download.chapters?.let { readChapters(files.file(it)) }.orEmpty(),
-            positionMs = state.positionMs,
-            lastPlayedAt = state.lastPlayedAt,
-            played = state.played,
-            transcript = download.transcript?.let { files.file(it) }?.takeIf { it.isFile },
-            transcriptType = download.transcriptType,
+        val durationMs = state.durationMs.takeIf { it > 0 } ?: episode?.durationMs ?: 0
+        val download = state.download
+        val audio = download?.let { files.file(it.audio) }?.takeIf { it.isFile }
+        if (download != null && audio != null) {
+            val transcript = download.transcript?.let { files.file(it) }?.takeIf { it.isFile }
+            return@withContext EpisodeReady.Ready(
+                EpisodeToPlay(
+                    showId = showId,
+                    episodeId = episodeId,
+                    title = episode?.title ?: "Episode",
+                    showTitle = showTitle,
+                    audio = audio,
+                    durationMs = durationMs,
+                    chapters = download.chapters?.let { readChapters(files.file(it)) }.orEmpty(),
+                    positionMs = state.positionMs,
+                    lastPlayedAt = state.lastPlayedAt,
+                    played = state.played,
+                    transcript = transcript,
+                    transcriptType = download.transcriptType,
+                    hasTranscript = transcript != null || episode?.hasTranscript == true,
+                ),
+            )
+        }
+        if (!allowStream) return@withContext EpisodeReady.Failed("This episode isn't downloaded.")
+        if (episode == null) return@withContext EpisodeReady.Failed("This episode isn't in the feed any more. Refresh the show and try again.")
+        val streamUrl = try {
+            fetcher.resolveStreamUrl(episode.enclosureUrl)
+        } catch (e: NetError.NoConnection) {
+            Log.w(TAG, "Stream: couldn't connect to ${episode.enclosureUrl}", e)
+            return@withContext EpisodeReady.Failed(noConnectionText(streaming = true))
+        } catch (e: Exception) {
+            return@withContext EpisodeReady.Failed(failure(e, episode.enclosureUrl))
+        }
+        EpisodeReady.Ready(
+            EpisodeToPlay(
+                showId = showId,
+                episodeId = episodeId,
+                title = episode.title,
+                showTitle = showTitle,
+                audio = files.file("$episodeId.stream"),
+                durationMs = durationMs,
+                chapters = streamChapters(episode),
+                positionMs = state.positionMs,
+                lastPlayedAt = state.lastPlayedAt,
+                played = state.played,
+                transcript = null,
+                transcriptType = null,
+                streamUrl = streamUrl,
+                hasTranscript = episode.hasTranscript,
+            ),
         )
+    }
+
+    /** For restoring the player: the episode, streamed if need be; null when it can't be had right now. */
+    suspend fun episodeToPlay(showId: String, episodeId: String): EpisodeToPlay? =
+        (prepareEpisode(showId, episodeId, allowStream = true) as? EpisodeReady.Ready)?.episode
+
+    /** A streamed episode's chapters: the feed's chapters file, else the feed's own list (best effort). */
+    private fun streamChapters(episode: Episode): List<ChapterMark> {
+        val list = try {
+            episode.chaptersUrl?.let { fetcher.fetchChapters(it) }
+        } catch (e: Exception) {
+            null
+        } ?: pscChapters(episode.pscChapters)
+        return list?.chapters?.map { ChapterMark(it.title, it.startMs) }.orEmpty()
     }
 
     private val chaptersJson = Json { ignoreUnknownKeys = true }
@@ -385,18 +443,21 @@ object Podcasts {
     }
 
     /**
-     * Plays a downloaded episode, then calls [onStarted] on the main thread (to open Now
-     * Playing). Says so in [status] if it isn't downloaded after all.
+     * Plays an episode (its download, or streamed over Wi-Fi or mobile data), then calls
+     * [onStarted] on the main thread (to open Now Playing). Problems show in [status].
      */
     fun play(showId: String, episodeId: String, onStarted: () -> Unit) {
+        val streaming = state(showId, episodeId).download == null
+        if (streaming) _status.value = PodcastStatus("Starting the stream…", working = true)
         mainScope.launch {
-            val e = episodeToPlay(showId, episodeId)
-            if (e == null) {
-                _status.value = PodcastStatus("This episode isn't downloaded.", working = false)
-                return@launch
+            when (val ready = prepareEpisode(showId, episodeId, allowStream = true)) {
+                is EpisodeReady.Failed -> _status.value = PodcastStatus(ready.message, working = false)
+                is EpisodeReady.Ready -> {
+                    if (_status.value?.working == true) _status.value = null
+                    PlaybackHub.playEpisode(ready.episode)
+                    onStarted()
+                }
             }
-            PlaybackHub.playEpisode(e)
-            onStarted()
         }
     }
 
@@ -464,6 +525,27 @@ object Podcasts {
         return shows.firstOrNull { n in it.knownUrls }
     }
 
+    // ---- Connection ----
+
+    @Volatile
+    private var network: LightNetwork? = null
+
+    /** Lets Listen ask Android whether the phone is online (set by every screen and the download job). */
+    fun useNetworkCheck(check: LightNetwork) {
+        network = check
+    }
+
+    /**
+     * What to say when a connection couldn't be made (even after a retry): "No connection"
+     * only when Android says the phone has no working internet at all, over Wi-Fi or mobile
+     * data. Otherwise the phone is online and it's the show's server that can't be reached.
+     */
+    fun noConnectionText(streaming: Boolean): String = when {
+        network?.isOnline != false -> "Couldn't reach the show's server. Try again in a moment."
+        streaming -> "No connection. Download the episode to listen offline."
+        else -> "No connection. Check Wi-Fi or mobile data."
+    }
+
     // ---- Files ----
 
     private fun saveArt(url: String, file: File) {
@@ -490,7 +572,10 @@ object Podcasts {
     }
 
     private fun failure(e: Exception, url: String): String = when (e) {
-        is NetError -> e.message ?: "Couldn't load that address."
+        is NetError -> {
+            Log.w(TAG, "Network problem with $url", e)
+            if (e is NetError.NoConnection) noConnectionText(streaming = false) else e.message ?: "Couldn't load that address."
+        }
         is NotAFeedException -> "That address isn't a podcast feed."
         is IOException -> {
             Log.w(TAG, "Couldn't load $url: $e")

@@ -108,8 +108,15 @@ private fun Map<String, String>.toData(): Data {
     return workDataOf(*pairs)
 }
 
-private fun Data.toStringMap(): Map<String, String> =
-    keyValueMap.mapValues { it.toString() }.toMap()
+private fun Data.toStringMap(): Map<String, String> = keyValueMap.toJobInput()
+
+/**
+ * A job's input as the handler gets it: each value as text, keyed as it was enqueued.
+ * (Values are read with `entry.value`; the whole entry would turn "id" -> "42" into
+ * "id" -> "id=42".) Missing values are left out.
+ */
+internal fun Map<String, Any?>.toJobInput(): Map<String, String> =
+    entries.mapNotNull { (key, value) -> value?.let { key to it.toString() } }.toMap()
 
 object LightWork {
     /**

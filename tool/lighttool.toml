@@ -1,8 +1,8 @@
 [tool]
 id = "com.thelightphone.listen"
 label = "Listen"
-versionCode = 15
-versionName = "1.7.1"
+versionCode = 16
+versionName = "1.8.0"
 # MANAGE_EXTERNAL_STORAGE: All files access, to read /sdcard/Listen (granted by
 # Listen-Phone-Sync.cmd option 9). WAKE_LOCK keeps music playing with the screen off.
 # INTERNET / ACCESS_NETWORK_STATE: Podcasts only (feeds, search, downloads, streaming), and

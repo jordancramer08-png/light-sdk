@@ -35,6 +35,7 @@ import com.thelightphone.listen.podcasts.store.EpisodeState
 import com.thelightphone.listen.podcasts.store.episodeKey
 import com.thelightphone.listen.ui.CenteredMessage
 import com.thelightphone.listen.ui.ChoiceScreen
+import com.thelightphone.listen.ui.ScrollingLine
 import com.thelightphone.listen.ui.ThemedScreen
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.ui.LightBarButton
@@ -145,9 +146,9 @@ private fun TitleLines(book: Book, loaded: LoadedEpisode) {
     val chapters by PlaybackHub.chapters.collectAsState()
     val chapter by PlaybackHub.chapter.collectAsState()
     val message by PlaybackHub.message.collectAsState()
-    CenteredLine(book.title, LightTextVariant.Heading)
+    ScrollingLine(book.title, LightTextVariant.Heading)
     val second = message ?: (if (loaded.hasChapters) chapters.getOrNull(chapter)?.title else null) ?: book.author
-    CenteredLine(second, LightTextVariant.Copy, lighten = message == null)
+    ScrollingLine(second, LightTextVariant.Copy, lighten = message == null)
     if (loaded.hasChapters && chapter >= 0) {
         CenteredLine("${book.author} · Chapter ${chapter + 1} of ${chapters.size}", LightTextVariant.Detail, lighten = true)
     }

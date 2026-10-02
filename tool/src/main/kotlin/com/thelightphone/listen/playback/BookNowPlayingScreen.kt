@@ -28,6 +28,7 @@ import com.thelightphone.listen.artwork.artSource
 import com.thelightphone.listen.books.bookPositionMs
 import com.thelightphone.listen.ui.CenteredMessage
 import com.thelightphone.listen.ui.ChoiceScreen
+import com.thelightphone.listen.ui.ScrollingLine
 import com.thelightphone.listen.ui.ThemedScreen
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.ui.LightBarButton
@@ -133,8 +134,8 @@ private fun TitleLines(book: Book) {
     val chapters by PlaybackHub.chapters.collectAsState()
     val chapter by PlaybackHub.chapter.collectAsState()
     val message by PlaybackHub.message.collectAsState()
-    CenteredLine(book.title, LightTextVariant.Heading)
-    CenteredLine(message ?: chapters.getOrNull(chapter)?.title ?: book.author, LightTextVariant.Copy, lighten = message == null)
+    ScrollingLine(book.title, LightTextVariant.Heading)
+    ScrollingLine(message ?: chapters.getOrNull(chapter)?.title ?: book.author, LightTextVariant.Copy, lighten = message == null)
 }
 
 /** The seek bar covers the current chapter only; its times are inside the chapter. */

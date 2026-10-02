@@ -70,12 +70,12 @@ fun NowPlayingBar(onOpen: () -> Unit) {
             }
             Column(modifier = Modifier.padding(start = 0.75f.gridUnitsAsDp())) {
                 if (loadedBook != null) {
-                    OneLine(text = loadedBook.title, variant = LightTextVariant.Copy)
+                    ScrollingLine(loadedBook.title, LightTextVariant.Copy, centered = false)
                     val line = chapters.getOrNull(chapter)?.title ?: loadedBook.author
-                    OneLine(text = line, variant = LightTextVariant.Detail, lighten = true)
+                    ScrollingLine(line, LightTextVariant.Detail, lighten = true, centered = false)
                 } else if (current != null) {
-                    OneLine(text = current.title, variant = LightTextVariant.Copy)
-                    OneLine(text = current.artist, variant = LightTextVariant.Detail, lighten = true)
+                    ScrollingLine(current.title, LightTextVariant.Copy, centered = false)
+                    ScrollingLine(current.artist, LightTextVariant.Detail, lighten = true, centered = false)
                 }
             }
         }

@@ -55,6 +55,17 @@ import java.util.concurrent.atomic.AtomicInteger
 /** What the Podcasts screens say under their lists: work going on, or how the last job went. */
 data class PodcastStatus(val text: String, val working: Boolean)
 
+/** One downloaded episode, for the Downloads screen. */
+data class DownloadedEpisode(
+    val showId: String,
+    val episodeId: String,
+    val title: String,
+    val showTitle: String,
+    val bytes: Long,
+    val played: Boolean,
+    val downloadedAt: Long,
+)
+
 /** An episode made ready to play, or why it couldn't be. */
 sealed interface EpisodeReady {
     data class Ready(val episode: EpisodeToPlay) : EpisodeReady
@@ -335,6 +346,54 @@ object Podcasts {
                 e.clearDownload(showId, episodeId)
             } catch (e: Exception) {
                 Log.w(TAG, "Couldn't remove download $showId/$episodeId", e)
+            }
+        }
+    }
+
+    /**
+     * Every downloaded episode across all shows, newest download first, with the titles
+     * from each show's saved feed. Off the main thread.
+     */
+    suspend fun downloadedEpisodes(states: Map<String, EpisodeState>): List<DownloadedEpisode> = withContext(Dispatchers.IO) {
+        val byShow = states.entries
+            .mapNotNull { (key, state) -> state.download?.let { key to state } }
+            .groupBy { it.first.substringBefore('/') }
+        byShow.flatMap { (showId, entries) ->
+            val snapshot = showFiles(showId).loadSnapshot()
+            val titles = snapshot?.episodes?.associate { it.id to it.title }.orEmpty()
+            val showTitle = _shows.value.firstOrNull { it.showId == showId }?.title?.ifEmpty { null } ?: snapshot?.show?.title.orEmpty()
+            entries.map { (key, state) ->
+                val episodeId = key.substringAfter('/')
+                DownloadedEpisode(
+                    showId = showId,
+                    episodeId = episodeId,
+                    title = titles[episodeId] ?: "Episode",
+                    showTitle = showTitle,
+                    bytes = state.download?.bytes ?: 0,
+                    played = state.played,
+                    downloadedAt = state.download?.downloadedAt ?: 0,
+                )
+            }
+        }.sortedByDescending { it.downloadedAt }
+    }
+
+    /** Removes every downloaded episode that's been played (audio, chapters and transcript); the episodes stay listed. */
+    fun removeAllPlayedDownloads() {
+        scope.launch {
+            try {
+                val e = openEpisodeStore()
+                for ((key, state) in e.states.value) {
+                    val download = state.download ?: continue
+                    if (!state.played) continue
+                    val showId = key.substringBefore('/')
+                    val episodeId = key.substringAfter('/')
+                    val files = showFiles(showId)
+                    download.allFiles.forEach { files.file(it).delete() }
+                    deleteParts(files, episodeId)
+                    e.clearDownload(showId, episodeId)
+                }
+            } catch (ex: Exception) {
+                Log.w(TAG, "Couldn't remove played downloads", ex)
             }
         }
     }

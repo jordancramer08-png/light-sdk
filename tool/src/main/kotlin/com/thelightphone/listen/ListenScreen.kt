@@ -20,6 +20,7 @@ import com.thelightphone.listen.podcasts.PodcastNowPlayingScreen
 import com.thelightphone.listen.podcasts.Podcasts
 import com.thelightphone.listen.storage.Settings
 import com.thelightphone.listen.storage.StorageAccess
+import com.thelightphone.listen.ui.AppVisibility
 import com.thelightphone.listen.ui.VolumeKeyScreen
 import com.thelightphone.sdk.SealedLightActivity
 
@@ -33,6 +34,7 @@ abstract class ListenScreen(private val sealed: SealedLightActivity) : VolumeKey
 
     override fun willShow() {
         super.willShow()
+        AppVisibility.set(true)
         ArtworkCache.setFilesDir(lightContext.filesDir)
         Podcasts.useNetworkCheck(lightContext.network)
         if (StorageAccess.hasAllFilesAccess()) {
@@ -48,6 +50,7 @@ abstract class ListenScreen(private val sealed: SealedLightActivity) : VolumeKey
 
     override fun onAppPause() {
         super.onAppPause()
+        AppVisibility.set(false)
         PlaybackHub.saveNow()
     }
 

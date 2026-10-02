@@ -39,6 +39,7 @@ import com.thelightphone.listen.music.MusicLibrary
 import com.thelightphone.listen.music.Song
 import com.thelightphone.listen.ui.CenteredMessage
 import com.thelightphone.listen.ui.LocalListenAccent
+import com.thelightphone.listen.ui.ScrollingLine
 import com.thelightphone.listen.ui.ThemedScreen
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.audio.LightRepeatMode
@@ -132,8 +133,8 @@ fun FramedPlaceholder(letter: String, modifier: Modifier) {
 @Composable
 private fun SongLines(song: Song) {
     val message by PlaybackHub.message.collectAsState()
-    CenteredLine(song.title, LightTextVariant.Heading)
-    CenteredLine(song.artist, LightTextVariant.Copy, lighten = true)
+    ScrollingLine(song.title, LightTextVariant.Heading)
+    ScrollingLine(song.artist, LightTextVariant.Copy, lighten = true)
     // The album line doubles as the place for "Can't play this file".
     CenteredLine(message ?: song.album, LightTextVariant.Detail, lighten = message == null)
     QualityLine(fileName = song.path, fileBytes = song.size, durationMs = song.durationMs)

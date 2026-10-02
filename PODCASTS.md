@@ -35,6 +35,15 @@ change how they behave unless a session prompt says so.
    retry; "Remove download" keeps the episode in the list but frees the space. Show a
    podcasts storage total. The episode's chapter file and transcript (if the feed has
    them) download along with the audio, so both work offline.
+4a. **Streaming** (added 2026-10-01): an episode that isn't downloaded can be played
+   straight away with **Stream** (or "Resume (stream)"), over Wi-Fi or mobile data, with
+   the same resume position, speed, played marks and controls as a downloaded one.
+   Listen follows the enclosure's tracking redirects itself (each hop upgraded to https)
+   and hands the player the final address; the network is kept awake while a stream plays
+   with the screen off. Chapters come from the feed; the transcript is read online. Now
+   Playing says "Streaming". "No connection" is only shown when the phone really is
+   offline; if a server can't be reached, it says so instead. Streaming never saves
+   partial files.
 5. **No automatic background downloading.** Downloads only start when he taps one.
    (A download he started may keep running after he leaves the app; that's fine.)
 6. **After finishing an episode**: a setting, "Delete download" or "Keep download".
@@ -155,3 +164,4 @@ on the phone, anything left open.
 - 2026-10-01, P5 + P6 + P7 (downloaded episodes): podcast playback through the book path (separate place per episode in podcast_episodes.json, one global speed 1.0-2.0, -15/+30, rewind after a pause, auto-played at last 30 s / 95%, After finishing: Keep/Delete download), podcast Now Playing with channel art, chapters list with start times and prev/next chapter (hidden without chapters), transcript screen (timed: marks and follows the spoken line, tap to jump; untimed: plain text; lazy list). Bracketed speaker labels handled, machine labels hidden. v1.6.0. Jordan verified on the phone (Changelog: feed chapters + HTML transcript; Friends From Work: timed VTT). 167 tests pass. Streaming (decided yes) is not built yet.
 - 2026-10-01, streaming (v1.7.0, NOT committed; work in progress on the podcasts branch): built Stream for episodes that aren't downloaded, plus an SDK change (keep the network awake while a stream plays). Jordan's test: steps 1, 2 and 4-7 not finished yet. Step 3 FAILED: on mobile data (Wi-Fi off), both Stream and Download show "No connection. Download the episode to listen offline." To look at next session: read the phone's log (adb logcat) while reproducing on mobile data. Note: that exact message comes from the stream path; a failed download normally says "Can't connect. Check Wi-Fi or mobile data.", so check which screen and button showed it.
 - 2026-10-02, streaming finished (v1.7.1): Stream for episodes that aren't downloaded (redirects resolved to https first; feed chapters; transcript online; "Streaming" line on Now Playing), on Wi-Fi or mobile data. Last night's mobile-data failure couldn't be reproduced (Refresh, Stream and Download all worked on data only); the real flaw was that any failed connection said "No connection". Now: one retry after 2 s (covers the Wi-Fi to data switch), and "No connection" only when Android says the phone is offline (new SDK helper), otherwise "Couldn't reach the show's server". Causes are logged. Two SDK commits (stream wake mode, online check). Jordan re-ran streaming tests 1-7 on the phone: all passed. 168 app + 5 SDK tests pass.
+- 2026-10-02, Part 0 + Part 1: streaming added to the features list (4a). Scrolling title and second line on Now Playing (music, books, podcasts) and the now-playing bar, only when the text doesn't fit, paused when Listen isn't on screen. Downloads screen (all downloaded episodes with art, title, show, size; total at the top; remove each; REMOVE ALL PLAYED after confirming), reached from a New Episodes | Downloads row on the Podcasts screen. Refresh moved to a top-bar icon next to search (faded while it works); storage line and REFRESH button removed. v1.8.0. Jordan checked it on the phone. 168 tests pass.

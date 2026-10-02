@@ -7,8 +7,6 @@ import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
-import com.thelightphone.listen.podcasts.download.PodcastDownloads
 import com.thelightphone.listen.podcasts.download.sizeText
 import androidx.compose.ui.Modifier
 import com.thelightphone.listen.ListenScreen
@@ -17,10 +15,12 @@ import com.thelightphone.listen.artwork.ArtSize
 import com.thelightphone.listen.artwork.artLetter
 import com.thelightphone.listen.music.ALBUM_ROW_GRID_UNITS
 import com.thelightphone.listen.music.ArtAndText
-import com.thelightphone.listen.music.ListTopBar
 import com.thelightphone.listen.music.MusicLazyList
 import com.thelightphone.listen.ui.CenteredMessage
-import com.thelightphone.listen.ui.MenuRow
+import com.thelightphone.listen.ui.IconTopBar
+import com.thelightphone.listen.ui.TopBarIcon
+import com.thelightphone.listen.ui.MenuHalf
+import com.thelightphone.listen.ui.SplitMenuRow
 import com.thelightphone.listen.ui.NowPlayingBar
 import com.thelightphone.listen.ui.OneLine
 import com.thelightphone.listen.ui.StatusLine
@@ -30,8 +30,6 @@ import com.thelightphone.listen.ui.VolumeKeyScreen
 import com.thelightphone.listen.ui.tapOrHold
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.rememberKeyboardOptions
-import com.thelightphone.sdk.ui.LightBarButton
-import com.thelightphone.sdk.ui.LightBottomBar
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightTextInputEditor
 import com.thelightphone.sdk.ui.LightTextVariant
@@ -41,9 +39,10 @@ import com.thelightphone.sdk.ui.LightThemeTokens
 const val SHOW_ART_GRID_UNITS = 5.6f
 
 /**
- * Podcasts: New Episodes at the top, then the shows Jordan follows, A–Z, with their channel
- * art. The magnifier searches for shows (and adds one by its feed address); REFRESH checks
- * every feed for new episodes.
+ * Podcasts: New Episodes and Downloads at the top, then the shows Jordan follows, A–Z, with
+ * their channel art. In the top bar, the refresh icon checks every feed for new episodes
+ * (faded while it works, with progress at the bottom) and the magnifier searches for shows
+ * (and adds one by its feed address).
  */
 class PodcastsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedActivity) {
 
@@ -60,21 +59,26 @@ class PodcastsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedA
         val newEpisodes by Podcasts.newEpisodes.collectAsState()
         val errors by Podcasts.feedErrors.collectAsState()
         val states by Podcasts.states.collectAsState()
-        val downloads by PodcastDownloads.status.collectAsState()
-        // Worked out again whenever a download finishes or is removed.
-        val storage by produceState<Long?>(null, states, downloads.size) { value = Podcasts.storageBytes() }
+        val downloaded = states.values.mapNotNull { it.download }
         ThemedScreen {
-            ListTopBar(
+            IconTopBar(
                 title = "Podcasts",
                 onBack = { goBack() },
-                rightButton = LightBarButton.LightIcon(icon = LightIcons.SEARCH, onClick = ::openSearch, contentDescription = "Search"),
+                icons = listOf(
+                    // Faded while a refresh is running; the line at the bottom counts the shows.
+                    TopBarIcon(LightIcons.REFRESH, "Refresh", enabled = loaded && shows.isNotEmpty() && !refreshing, onClick = Podcasts::refreshAll),
+                    TopBarIcon(LightIcons.SEARCH, "Search", onClick = ::openSearch),
+                ),
             )
             val listArea = Modifier.weight(1f)
             when {
                 !loaded -> Box(modifier = listArea)
                 shows.isEmpty() -> CenteredMessage(NO_SHOWS, modifier = listArea)
                 else -> {
-                    MenuRow(title = "New Episodes", detail = newCount(newEpisodes.size), onClick = ::openNewEpisodes)
+                    SplitMenuRow(
+                        left = MenuHalf("New Episodes", newCount(newEpisodes.size), ::openNewEpisodes),
+                        right = MenuHalf("Downloads", downloadsDetail(downloaded.size, downloaded.sumOf { it.bytes }), ::openDownloads),
+                    )
                     Box(modifier = listArea) {
                         MusicLazyList(tag = "shows", rowGridUnits = ALBUM_ROW_GRID_UNITS) {
                             itemsIndexed(shows, key = { _, show -> show.showId }) { index, show ->
@@ -97,10 +101,7 @@ class PodcastsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedA
                     }
                 }
             }
-            StatusLine(status?.text ?: storage?.takeIf { loaded && shows.isNotEmpty() }?.let { "Podcasts use ${sizeText(it)} on the phone" })
-            if (loaded && shows.isNotEmpty() && !refreshing) {
-                LightBottomBar(items = listOf(LightBarButton.Text(text = "REFRESH", onClick = Podcasts::refreshAll)))
-            }
+            StatusLine(status?.text)
             NowPlayingBar(onOpen = ::openNowPlaying)
         }
     }
@@ -109,6 +110,8 @@ class PodcastsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedA
 
     private fun openNewEpisodes() = navigateTo(screenFactory = { NewEpisodesScreen(it) })
 
+    private fun openDownloads() = navigateTo(screenFactory = { DownloadsScreen(it) })
+
     private fun openShow(showId: String) = navigateTo(screenFactory = { ShowScreen(it, showId) })
 
     private companion object {
@@ -116,8 +119,12 @@ class PodcastsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedA
     }
 }
 
-/** "3 new", "None right now". */
-fun newCount(count: Int): String = if (count == 0) "None right now" else "$count new"
+/** "3 · 412 MB" (episodes and their size), "None yet". */
+fun downloadsDetail(count: Int, bytes: Long): String =
+    if (count == 0) "None yet" else "$count · ${sizeText(bytes)}"
+
+/** "3 new", "None". */
+fun newCount(count: Int): String = if (count == 0) "None" else "$count new"
 
 /**
  * Types a show's feed address with the phone's keyboard. Hands back what was typed; back,

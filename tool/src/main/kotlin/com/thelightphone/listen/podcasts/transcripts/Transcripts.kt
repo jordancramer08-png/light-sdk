@@ -29,7 +29,8 @@ data class TranscriptLine(
 @Serializable
 data class Transcript(val lines: List<TranscriptLine>) {
     /** True when the lines have start times, so the screen can follow along and jump. */
-    val timed: Boolean get() = lines.isNotEmpty() && lines.count { it.startMs != null } * 2 >= lines.size
+    // Worked out once: lineAt runs four times a second while the transcript is open.
+    val timed: Boolean by lazy { lines.isNotEmpty() && lines.count { it.startMs != null } * 2 >= lines.size }
 
     /**
      * The index of the line playing at [positionMs] (the last line starting at or before it),
@@ -117,22 +118,38 @@ object Transcripts {
     private val CUE_TIME_RE = Regex("""^\s*([\d:.,]+)\s+-->\s+([\d:.,]+)""")
     private val VOICE_RE = Regex("""<v(?:\.[^\s>]*)?\s+([^>]+)>""")
 
+    /**
+     * One pass over the lines: a line with "-->" starts a cue, the lines after it up to a
+     * blank line are its text. Headers, NOTE, STYLE and REGION blocks have no "-->" and are
+     * skipped. A three-hour transcript is thousands of cues, so the heavier clean-up only
+     * runs on cues that need it.
+     */
     private fun parseVtt(text: String): List<TranscriptLine> {
-        val out = mutableListOf<TranscriptLine>()
-        for (block in text.split(BLANK_LINES_RE)) {
-            val rows = block.split('\n').filter { it.isNotBlank() }
-            val timeRow = rows.indexOfFirst { CUE_TIME_RE.containsMatchIn(it) }
-            if (timeRow < 0) continue // WEBVTT header, NOTE, STYLE, REGION
-            val m = CUE_TIME_RE.find(rows[timeRow])!!
-            val body = rows.drop(timeRow + 1).joinToString(" ")
-            var speaker = VOICE_RE.find(body)?.groupValues?.get(1)?.trim()
-            var text = cueText(body)
-            BRACKET_SPEAKER_RE.find(text)?.let {
-                if (speaker == null) speaker = realSpeaker(it.groupValues[1])
-                text = text.substring(it.range.last + 1).trim()
+        val out = ArrayList<TranscriptLine>()
+        val lines = text.split('\n')
+        var i = 0
+        while (i < lines.size) {
+            val row = lines[i]
+            i++
+            if ("-->" !in row) continue
+            val m = CUE_TIME_RE.find(row) ?: continue
+            val body = StringBuilder()
+            while (i < lines.size && lines[i].isNotBlank()) {
+                if (body.isNotEmpty()) body.append(' ')
+                body.append(lines[i].trim())
+                i++
+            }
+            val raw = body.toString()
+            var speaker = if ("<v" in raw) VOICE_RE.find(raw)?.groupValues?.get(1)?.trim() else null
+            var cue = cueText(raw)
+            if (cue.startsWith('[')) {
+                BRACKET_SPEAKER_RE.find(cue)?.let {
+                    if (speaker == null) speaker = realSpeaker(it.groupValues[1])
+                    cue = cue.substring(it.range.last + 1).trim()
+                }
             }
             out += TranscriptLine(
-                text = text,
+                text = cue,
                 startMs = FeedTime.parseClock(m.groupValues[1]),
                 endMs = FeedTime.parseClock(m.groupValues[2]),
                 speaker = speaker,
@@ -166,8 +183,11 @@ object Transcripts {
     }
 
     /** Cue text without markup ("<i>", "<v Bob>", "<00:01.000>") and with entities decoded. */
-    private fun cueText(body: String): String =
-        decodeEntities(body.replace(CUE_TAG_RE, "")).replace(SPACES_RE, " ").trim()
+    private fun cueText(body: String): String {
+        var s = if ('<' in body) body.replace(CUE_TAG_RE, "") else body
+        s = decodeEntities(s)
+        return if ("  " in s || '\t' in s) s.replace(SPACES_RE, " ").trim() else s.trim()
+    }
 
     // ---- Podcasting 2.0 JSON ----
 

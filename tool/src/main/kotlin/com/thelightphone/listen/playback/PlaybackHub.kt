@@ -25,6 +25,7 @@ import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.audio.DefaultLightAudio
 import com.thelightphone.sdk.audio.LightAudio
 import com.thelightphone.sdk.audio.LightAudioError
+import com.thelightphone.sdk.audio.LightAudioErrorKind
 import com.thelightphone.sdk.audio.LightAudioException
 import com.thelightphone.sdk.audio.LightAudioFormat
 import com.thelightphone.sdk.audio.LightAudioItem
@@ -803,6 +804,15 @@ object PlaybackHub {
             turnOffloadOffAfterError(player)
             return
         }
+        // A stream that lost its connection (no signal, or Wi-Fi to mobile data took too long):
+        // stay on it, keep the place, and say so; Play carries on from there.
+        if (_episode.value?.streaming == true && error.kind == LightAudioErrorKind.Source) {
+            wantsToPlay = false
+            saveSoon()
+            // Stays until playing again (the isPlaying follower clears it), so it isn't missed.
+            _message.value = if (Podcasts.isOnline()) STREAM_LOST else STREAM_OFFLINE
+            return
+        }
         showMessage(CANT_PLAY)
         val isBook = _book.value != null
         val size = _queue.value?.songs?.size ?: _book.value?.files?.size ?: return
@@ -986,6 +996,8 @@ object PlaybackHub {
     private const val LIBRARY_WAIT_MS = 5_000L
     private const val MESSAGE_MS = 4_000L
     private const val CANT_PLAY = "Can't play this file"
+    private const val STREAM_LOST = "Lost the stream. Tap play to carry on"
+    private const val STREAM_OFFLINE = "No connection. Tap play when you're back online"
 
     /** An episode stopped this close to its end has finished playing. */
     private const val ENDED_WITHIN_MS = 3_000L

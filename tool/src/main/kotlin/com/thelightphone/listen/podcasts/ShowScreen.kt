@@ -1,5 +1,6 @@
 package com.thelightphone.listen.podcasts
 
+import com.thelightphone.listen.ListenScreen
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,7 +20,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
-import com.thelightphone.listen.ListenScreen
 import com.thelightphone.listen.artwork.ArtImage
 import com.thelightphone.listen.artwork.ArtSize
 import com.thelightphone.listen.artwork.artLetter

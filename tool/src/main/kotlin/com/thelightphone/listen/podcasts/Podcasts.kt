@@ -144,7 +144,10 @@ object Podcasts {
                 if (ListenPaths.podcastSubscriptions.lastModified() != knownModified) s.reload()
                 val fromPc = s.mergeInbox()
                 publish(s)
-                if (firstTime) loadRecent(s.shows.value)
+                if (firstTime) {
+                    loadRecent(s.shows.value)
+                    deleteAbandonedParts()
+                }
                 if (fromPc) fetchNewShows(s)
             } catch (e: Exception) {
                 Log.w(TAG, "Couldn't read podcasts", e)
@@ -274,6 +277,7 @@ object Podcasts {
                 val newCount = newEpisodes.value.size
                 _status.value = PodcastStatus(
                     when {
+                        failed == shows.size && !isOnline() -> "No connection. Check Wi-Fi or mobile data."
                         failed > 0 -> "$failed of ${shows.size} couldn't be checked. Open the show to see why."
                         newCount == 0 -> "Up to date. No new episodes."
                         newCount == 1 -> "Up to date. 1 new episode."
@@ -421,6 +425,23 @@ object Podcasts {
     fun deletePartialDownload(showId: String, episodeId: String) {
         scope.launch { deleteParts(showFiles(showId), episodeId) }
     }
+
+    /**
+     * A download that was interrupted and never retried leaves its `.part` file behind.
+     * One untouched for [ABANDONED_PART_MS] is deleted, so it doesn't sit taking up space.
+     * (Streaming never writes files.)
+     */
+    private fun deleteAbandonedParts() {
+        val cutoff = System.currentTimeMillis() - ABANDONED_PART_MS
+        ListenPaths.podcasts.listFiles()?.forEach { show ->
+            show.listFiles { f -> f.name.endsWith(".part") && f.lastModified() < cutoff }?.forEach {
+                Log.i(TAG, "Deleting an abandoned partial download: ${it.name}")
+                it.delete()
+            }
+        }
+    }
+
+    private const val ABANDONED_PART_MS = 3L * 24 * 60 * 60 * 1000
 
     private fun deleteParts(files: ShowFiles, episodeId: String) {
         files.dir.listFiles { f -> f.name.startsWith("$episodeId.") && f.name.endsWith(".part") }?.forEach { it.delete() }
@@ -618,6 +639,9 @@ object Podcasts {
      * only when Android says the phone has no working internet at all, over Wi-Fi or mobile
      * data. Otherwise the phone is online and it's the show's server that can't be reached.
      */
+    /** Whether Android says the phone is online (true when it can't be asked). */
+    fun isOnline(): Boolean = network?.isOnline != false
+
     fun noConnectionText(streaming: Boolean): String = when {
         network?.isOnline != false -> "Couldn't reach the show's server. Try again in a moment."
         streaming -> "No connection. Download the episode to listen offline."

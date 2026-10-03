@@ -109,6 +109,9 @@ My PC script `Listen-Phone-Sync.cmd` copies files onto the phone like this:
   2 seconds (LightOS may not show its own).
 - If the Light SDK blocks catching the volume keys or setting the volume, change the SDK
   fork in a separate "SDK: ..." commit. If LightOS itself blocks it, stop and tell me.
+- The other hardware keys (added 2026-10-02): while Listen is open, pressing the scroll wheel
+  and the camera button do nothing (they never reach LightOS, so no flashlight or camera).
+  Turning the scroll wheel still goes to LightOS: it stays the brightness control.
 
 ## Playlists
 

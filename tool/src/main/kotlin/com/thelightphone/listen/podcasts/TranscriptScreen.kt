@@ -1,5 +1,6 @@
 package com.thelightphone.listen.podcasts
 
+import com.thelightphone.listen.ListenScreen
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Box
@@ -22,7 +23,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.height
-import com.thelightphone.listen.ListenScreen
 import com.thelightphone.listen.music.ListTopBar
 import com.thelightphone.listen.playback.PlaybackHub
 import com.thelightphone.listen.playback.formatTime

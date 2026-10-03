@@ -32,11 +32,17 @@ import kotlinx.coroutines.CompletableDeferred
 /**
  * What every Listen screen extends (through [com.thelightphone.listen.ListenScreen] or
  * directly): the volume buttons always change the media volume, never the ringer (which is
- * what LightOS does with them otherwise), and show [VolumeBar] for 2 s.
+ * what LightOS does with them otherwise), and show [VolumeBar] for 2 s. The scroll-wheel
+ * press and the camera button do nothing while Listen is open (LightOS would otherwise switch
+ * the flashlight or open the camera). Turning the wheel still goes to LightOS: it's the
+ * brightness control.
  */
 abstract class VolumeKeyScreen<T>(sealedActivity: SealedLightActivity) : SimpleLightScreen<T>(sealedActivity) {
 
+    private fun kept(keyCode: Int) = keyCode in IGNORED_KEYS
+
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (kept(keyCode)) return true
         val volume = lightContext.mediaVolume
         val level = when (keyCode) {
             KeyEvent.KEYCODE_VOLUME_UP -> volume.raise()
@@ -49,7 +55,21 @@ abstract class VolumeKeyScreen<T>(sealedActivity: SealedLightActivity) : SimpleL
 
     /** The key-up halves are kept from LightOS too, so it never sees half a press. */
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean =
-        keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+        keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || kept(keyCode)
+
+    /** Repeats of a held key go the same way as the press. */
+    override fun onKeyMultiple(keyCode: Int, repeatCount: Int, event: KeyEvent): Boolean =
+        keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || kept(keyCode)
+
+    private companion object {
+        /**
+         * The LP3 keys Listen keeps from LightOS and ignores (codes from the Light keyboard
+         * library's LightDeviceKeys): camera button full press (27) and half press (80), and
+         * the scroll-wheel press (319). The wheel's turns (317, 318) are not here: they still
+         * reach LightOS, which uses them for brightness.
+         */
+        val IGNORED_KEYS = setOf(KeyEvent.KEYCODE_CAMERA, KeyEvent.KEYCODE_FOCUS, 319)
+    }
 }
 
 /**

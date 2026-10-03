@@ -4,6 +4,99 @@ Session-by-session notes for the Listen tool. `CLAUDE.md` says what the app does
 `PLAN.md` says how it's built. The older SDK recon below the line is still accurate
 reference for the SDK's UI kit, screens and sandbox rules.
 
+## Podcasts final summary (2026-10-02): Listen 1.9.2 — works on the phone
+
+Built on the `podcasts` branch (sessions P0–P9 of `PODCAST_PLAN.md`), tested by Jordan on
+the phone after every step, and fast-forward merged into `listen` at `633c886`. The spec is
+`PODCASTS.md` (with its session log); the design is `PODCAST_PLAN.md`.
+
+### What it does
+
+- **Podcasts** on Home ("5 shows · 3 new"). The Podcasts screen has New Episodes and
+  Downloads side by side, then the followed shows A–Z with channel art. Top bar: a refresh
+  icon (faded while it works, progress at the bottom) and a magnifier for search.
+- **Finding shows:** search Apple's directory on the phone (search runs on DONE, at most
+  20 a minute), or add a feed address. On the PC, `Podcasts.cmd` (below).
+- **Show page:** art, title, author, description (More/Less), every episode in the feed,
+  newest or oldest first (remembered per show), Unfollow (asks about downloads).
+- **Episode page:** title, show, date, length, full show notes as clean text, "Has
+  chapters" / "Has transcript", Stream or Play/Resume, Download (progress, Cancel, Retry,
+  Remove download), Transcript, Mark played / unplayed.
+- **New Episodes:** unplayed episodes from the last 30 days and after the show was
+  followed, newest first; Mark all played.
+- **Downloads screen:** every downloaded episode with art, title, show and size, the space
+  podcasts use at the top, a bin per episode, REMOVE ALL PLAYED (asks first).
+- **Downloads** stream to disk in chunks, resume where they stopped, and keep going after
+  leaving Listen (one LightWork job per episode). Chapters and the transcript are saved
+  with the audio; ID3 chapters are read from the MP3 when the feed has none. Nothing ever
+  downloads unless Jordan taps Download.
+- **Streaming** for episodes that aren't downloaded, over Wi-Fi or mobile data. Listen
+  follows the tracking redirects itself (each hop upgraded to https), keeps the network
+  awake with the screen off, writes no files, and when the signal is lost keeps its place
+  and says so. "No connection" is only shown when Android says the phone is offline.
+- **Playback** goes through the audiobook path as a one-file book, so music and audiobooks
+  are unchanged: its own resume point per episode, rewind after a pause (Settings),
+  −15 / +30, one podcast speed 1.0–2.0× (pitch natural), played at the last 30 s or 95%,
+  Settings → Podcasts → After finishing: Keep (default) or Delete download.
+- **Podcast Now Playing:** channel art, title and current chapter (scrolling when too long),
+  seek bar, chapter buttons and Chapters list with start times (hidden without chapters),
+  speed, Transcript, Played. **Transcript screen:** timed transcripts mark and follow the
+  spoken line and jump on tap; untimed ones are plain text; lazy list, fast on 3-hour ones.
+- **Every Listen screen** (added during podcasts): the scroll-wheel press and camera button
+  do nothing; turning the wheel still changes brightness; the volume keys work as before.
+  Now Playing (music, books, podcasts) and the now-playing bar scroll a long title back and
+  forth, only while Listen is on screen.
+
+### Where podcast data is stored
+
+| What | Where |
+|---|---|
+| Followed shows (with "unfollowed" marks so merges can't bring a show back) | `/sdcard/Listen/.state/podcasts.json` |
+| Positions, played marks, which episodes are downloaded | `/sdcard/Listen/.state/podcast_episodes.json` |
+| Podcast speed, After finishing | `/sdcard/Listen/.state/settings.json` |
+| A sync from the PC, waiting to be merged | `/sdcard/Listen/.state/podcasts_from_pc.json` (deleted once merged) |
+| Feed copy, show notes, channel art, downloads | `/sdcard/Listen/Podcasts/<showId>/` (rebuildable; `.nomedia` keeps it out of other apps) |
+| The PC's copy of the follow list | `D:\Music\_Listen Podcasts\podcasts.json` |
+| PC backups | `D:\Music\_Listen Backups\Podcasts <date>\` |
+
+The precious files are in `.state/`, so an uninstall can't lose them and option 7 of
+`Listen-Phone-Sync.cmd` backs them up with everything else. `showId` is the first 12 hex
+characters of SHA-1 of the normalized feed address (the PC computes the same);
+`episodeId` is the same hash of the guid, else the enclosure address.
+
+### Podcasts.cmd (on the PC)
+
+`D:\Music\Podcasts.cmd` (source: `scripts/Podcasts.cmd`). Plug in the phone, double-click.
+
+| Type | What it does |
+|---|---|
+| **1** | Search Apple Podcasts by name, pick from a numbered list, follow |
+| **2** | Import an OPML file from another podcast app |
+| **3** | Add a feed address (private or Patreon feeds; plain http is fine on the PC) |
+| **4** | List followed shows, unfollow |
+| **5** | Sync with the phone: reads the phone's list first, merges, shows the changes, then sends them to Listen's inbox (never overwrites the phone's list) |
+| **6** | Back up (B) or restore (R) follows, positions, played marks and the podcast settings |
+
+When Listen opens after a sync it merges the inbox and fetches the new shows' episodes.
+
+### SDK changes made for podcasts (each its own "SDK: ..." commit)
+
+- `3f27532` LightWork passed job input as `"key=value"` text: fixed (affected every tool).
+- `41f861f` The audio service keeps the network awake while a stream plays.
+- `39dae4a` `SealedLightContext.network.isOnline`: whether the phone really is online.
+
+### Tests and known limits
+
+- 172 app tests (feeds, HTML to text, http→https and redirects, chapters from all three
+  sources, five transcript formats, stores and merging, downloads, polish cases) and 5 SDK
+  tests: `.\gradlew.bat :tool:testDebugUnitTest`. Rebuild and reinstall exactly as in the
+  final summary below.
+- Not covered: Atom feeds ("This address isn't a podcast feed"), chapters inside m4a files,
+  feeds that only offer plain http on the phone ("needs a secure link"; follow them from
+  the PC, but their episodes may still not play on the phone).
+- A test on 2026-10-02 sent the camera key to LightOS and left its camera open, which
+  blocks the flashlight until the camera is opened and closed again or the phone restarts.
+
 ## Session 8 Part B (2026-10-01): volume buttons — works on the phone
 
 Jordan tested it on the phone (checks 1–5 passed). Committed as "SDK: let a tool change the media volume" and "Session 8B - volume buttons". Version 1.2.0 (9).

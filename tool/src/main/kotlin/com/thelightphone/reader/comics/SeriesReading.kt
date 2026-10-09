@@ -114,3 +114,43 @@ data class PageOverrides(
         }
     }
 }
+
+/** What the PC's remove script asked to forget: comics (paths) and folders (paths). */
+data class ForgetRequests(val comics: List<String>, val folders: List<String>)
+
+/**
+ * Reads the remove script's note: one line each, "comic<TAB><path>" or "folder<TAB><path>".
+ * Anything else is ignored, and so is a folder "" (the whole comics folder).
+ */
+fun forgetRequests(text: String): ForgetRequests {
+    val comics = mutableListOf<String>()
+    val folders = mutableListOf<String>()
+    for (line in text.lines()) {
+        val kind = line.substringBefore('\t', "")
+        val path = line.substringAfter('\t', "").trim().trim('/')
+        if (path.isEmpty()) continue
+        when (kind.trim()) {
+            "comic" -> comics += path
+            "folder" -> folders += path
+        }
+    }
+    return ForgetRequests(comics.distinct(), folders.distinct())
+}
+
+/**
+ * True when the DataStore key [keyName] holds a series setting of [folder] or of a folder under
+ * it: `comic_series:<folder>:…` or `comic_clean_up:<folder>`. Never for the top folder "".
+ */
+fun isSeriesKeyOf(keyName: String, folder: String): Boolean {
+    if (folder.isEmpty()) return false
+    fun under(prefix: String, rest: String): Boolean =
+        rest == folder || rest.startsWith("$folder/") || rest.startsWith("$folder:")
+    return when {
+        keyName.startsWith(SERIES_KEY_PREFIX) -> under(SERIES_KEY_PREFIX, keyName.removePrefix(SERIES_KEY_PREFIX))
+        keyName.startsWith(CLEAN_UP_KEY_PREFIX) -> under(CLEAN_UP_KEY_PREFIX, keyName.removePrefix(CLEAN_UP_KEY_PREFIX))
+        else -> false
+    }
+}
+
+private const val SERIES_KEY_PREFIX = "comic_series:"
+private const val CLEAN_UP_KEY_PREFIX = "comic_clean_up:"

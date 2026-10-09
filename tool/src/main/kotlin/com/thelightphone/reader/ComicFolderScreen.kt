@@ -6,6 +6,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewModelScope
+import com.thelightphone.reader.data.ComicForgetting
 import com.thelightphone.reader.data.ComicMeta
 import com.thelightphone.reader.data.ComicPositionRepository
 import com.thelightphone.reader.data.ComicStore
@@ -78,6 +79,12 @@ class ComicFolderScreen(
         )
     }
 
+    private fun comicForgetting() = ComicForgetting(
+        lightContext.dataStore,
+        ComicPositionRepository.getInstance { lightContext.readerDatabase() },
+        lightContext.filesDir,
+    )
+
     private fun openRemove() {
         navigateTo(
             screenFactory = {
@@ -85,7 +92,13 @@ class ComicFolderScreen(
                     it,
                     name = title,
                     measure = { folderRemovalQuestion(store.removal(folder)) },
-                    remove = { store.remove(folder) },
+                    offerForget = true,
+                    remove = { forget ->
+                        val comics = store.comicsAt(folder)
+                        val removed = store.remove(folder)
+                        if (removed && forget) comicForgetting().forget(comics, folders = listOf(folder))
+                        removed
+                    },
                 )
             },
             resultCallback = { removed -> if (removed) goBack() },

@@ -122,6 +122,8 @@ class ComicScreen(
                 if (state.overlayShown) Overlay(state)
                 if (state.ended) EndCard(state)
             }
+            // Auto-advance: the next comic opens in place of this one, as NEXT IN FOLDER does.
+            LaunchedEffect(state.advanceTo) { state.advanceTo?.let { goBack(it) } }
         }
     }
 

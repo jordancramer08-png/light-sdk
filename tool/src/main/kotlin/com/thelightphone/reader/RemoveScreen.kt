@@ -41,11 +41,19 @@ sealed interface RemoveState {
 
 class RemoveViewModel(
     private val measure: () -> String,
-    private val remove: () -> Boolean,
+    private val remove: suspend (forget: Boolean) -> Boolean,
 ) : LightViewModel<Boolean>() {
 
     private val _state = MutableStateFlow<RemoveState>(RemoveState.Measuring)
     val state: StateFlow<RemoveState> = _state.asStateFlow()
+
+    /** "Also forget my place and settings": off until the reader turns it on. */
+    private val _forget = MutableStateFlow(false)
+    val forget: StateFlow<Boolean> = _forget.asStateFlow()
+
+    fun toggleForget() {
+        _forget.value = !_forget.value
+    }
 
     init {
         viewModelScope.launch {
@@ -58,7 +66,8 @@ class RemoveViewModel(
         if (_state.value !is RemoveState.Asking) return
         _state.value = RemoveState.Removing
         viewModelScope.launch {
-            val removed = withContext(Dispatchers.IO) { remove() }
+            val forget = _forget.value
+            val removed = withContext(Dispatchers.IO) { remove(forget) }
             if (removed) onRemoved() else _state.value = RemoveState.Failed
         }
     }
@@ -68,13 +77,16 @@ class RemoveViewModel(
  * "Remove from phone" (CLAUDE.md 9, 12): names what will go and the space it frees, e.g.
  * "Remove 12 comics (1.4 GB)?", with a REMOVE button. [measure] gives that question and
  * [remove] deletes the files (both run off the main thread; [remove] is false if it
- * couldn't). Hands back true once removed; back hands back nothing.
+ * couldn't). With [offerForget] (comics), an "Also forget my place and settings" row (off at
+ * first) is shown above REMOVE, and [remove] is told whether it was on. Hands back true once
+ * removed; back hands back nothing.
  */
 class RemoveScreen(
     sealedActivity: SealedLightActivity,
     private val name: String,
     private val measure: () -> String,
-    private val remove: () -> Boolean,
+    private val offerForget: Boolean = false,
+    private val remove: suspend (forget: Boolean) -> Boolean,
 ) : LightScreen<Boolean, RemoveViewModel>(sealedActivity) {
 
     override val viewModelClass: Class<RemoveViewModel>
@@ -85,6 +97,7 @@ class RemoveScreen(
     @Composable
     override fun Content() {
         val state by viewModel.state.collectAsState()
+        val forget by viewModel.forget.collectAsState()
 
         ThemedScreen {
             LightTopBar(
@@ -99,11 +112,15 @@ class RemoveScreen(
                 contentAlignment = Alignment.Center,
             ) {
                 LightText(
-                    text = messageFor(state),
+                    text = messageFor(state, forget),
                     variant = LightTextVariant.Copy,
                     align = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
                 )
+            }
+            if (state is RemoveState.Asking && offerForget) {
+                HairlineDivider()
+                OnOffRow(label = "Also forget my place and settings", isOn = forget, onClick = viewModel::toggleForget)
             }
             if (state is RemoveState.Asking) {
                 LightBottomBar(
@@ -114,9 +131,9 @@ class RemoveScreen(
     }
 }
 
-private fun messageFor(state: RemoveState): String = when (state) {
+private fun messageFor(state: RemoveState, forget: Boolean): String = when (state) {
     RemoveState.Measuring -> ""
-    is RemoveState.Asking -> "${state.question}\n\n$REMOVAL_KEEPS"
+    is RemoveState.Asking -> "${state.question}\n\n${if (forget) REMOVAL_FORGETS else REMOVAL_KEEPS}"
     RemoveState.Removing -> "Removing…"
     RemoveState.Failed -> "Couldn't remove it."
 }

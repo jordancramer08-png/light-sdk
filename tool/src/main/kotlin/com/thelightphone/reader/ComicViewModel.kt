@@ -464,6 +464,7 @@ class ComicViewModel(
             if (onPanel && !wholePageHeld && !endOfComicHeld && advanceJob?.isActive != true) showPanel(current.panel, animated = false)
         }
         if (settings.rotateSpreads != old.rotateSpreads) relayoutPictures()
+        if (settings.autoAdvance && !old.autoAdvance && _state.value.ended) advanceIfAsked()
         if (settings.margin != old.margin) {
             forgetAhead()
             // The panel shown is zoomed again with the new margin.
@@ -814,12 +815,26 @@ class ComicViewModel(
 
     // --- the end ---------------------------------------------------------------------
 
-    /** Past the last page: the comic is Finished, and the end card offers the next thing in the folder. */
+    /**
+     * Past the last page: the comic is Finished, and the end card offers the next thing in the
+     * folder. With Auto-advance on, a next comic opens by itself as soon as it's found (the card
+     * shows meanwhile); a note, or nothing after this one, leaves the card up.
+     */
     private fun showEnd() {
         advanceJob?.cancel()
         DatabaseQueue.write { statusRepository.markFinished(slug) }
         _state.update { it.copy(ended = true, overlayShown = false) }
         findNextInFolder()
+        if (_state.value.settings.autoAdvance) advanceIfAsked()
+    }
+
+    /** Auto-advance: once the next thing in the folder is known, a comic is handed to the screen to open. */
+    private fun advanceIfAsked() {
+        viewModelScope.launch {
+            nextJob?.join()
+            val next = _state.value.next
+            if (_state.value.ended && next is NextInFolder.Comic) _state.update { it.copy(advanceTo = next) }
+        }
     }
 
     /** Looks (once) for the next comic or note in this comic's folder, in the order the folder shows. */

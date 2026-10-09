@@ -158,6 +158,10 @@ class ComicStore(
         items.none { fileOf(it).exists() }
     }
 
+    /** The comics (not notes) at or under [path], as paths: what "forget my place" forgets. */
+    fun comicsAt(path: String): List<String> =
+        removablePaths(path).filter { comicItemKind(it.substringAfterLast('/'), false) == ComicItemKind.COMIC }
+
     /** The comics and notes at or under [path], as paths. Hidden folders and `__MACOSX` are left alone. */
     private fun removablePaths(path: String): List<String> {
         if (path.isEmpty()) return emptyList() // never the whole comics folder

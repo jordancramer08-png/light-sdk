@@ -11,6 +11,9 @@ data class RemovalSummary(val comics: Int = 0, val notes: Int = 0, val bytes: Lo
 /** Said under every question: removing never forgets where you were. */
 const val REMOVAL_KEEPS = "Places, status and lists are kept, so anything sent again picks up where you left off."
 
+/** With "Also forget my place and settings" on (comics only). */
+const val REMOVAL_FORGETS = "Its saved place and settings will be forgotten too. Status and lists are kept."
+
 /** One book or comic: "Remove “Action Comics #1” (45 MB)?" */
 fun itemRemovalQuestion(title: String, bytes: Long): String = "Remove “$title” (${fileSizeText(bytes)})?"
 

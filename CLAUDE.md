@@ -823,6 +823,17 @@ waits a moment to be sure it isn't a double-tap.
 - The overlay groups its rows: "This page", "This series", "All comics".
 - **Reading ahead**: two pages ahead (pictures and page analysis) while the app has room for
   three more screen-sized pictures plus 64 MB (`pagesAhead`, checked at each turn), else one.
+- **Auto-advance** (overlay, "All comics", default Off): at the end card, as soon as the next
+  comic in the folder is known it opens by itself (`advanceTo`, handed back like NEXT IN
+  FOLDER). A note next, or nothing after this comic ("Last in this folder."), leaves the card up.
+- **Forget my place and settings** (phase 2): `RemoveScreen(offerForget = true)` for comics and
+  comics folders shows an "Also forget my place and settings" row (off at first). On, the
+  removed comics' `comic_position` rows and `comic_pages:<path>` go, and for a folder its series
+  settings and those of every folder under it (`isSeriesKeyOf`; `ComicForgetting`). Status and
+  lists are kept. The PC's remove script asks the same (Y/N, Enter = No) and, on Yes, appends
+  "comic<TAB><path>" / "folder<TAB><path>" lines (folders it removed because they were left empty)
+  to `files/shared/comics-forget.txt`, which the Library forgets and deletes on its next launch
+  (`forgetPending`). The script also deletes a comic's `.details.json` and `.panels.json`.
 
 **Page analysis** (part 6; `comics/PageAnalysis.kt`, `analysePage`, plain Kotlin, run on the
 phone by `ComicPageImages.findPanels` and on the PC by the report). A page is decoded small

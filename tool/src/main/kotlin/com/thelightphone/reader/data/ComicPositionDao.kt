@@ -16,4 +16,8 @@ interface ComicPositionDao {
     /** For the comics list's "Page 12 of 30" on every comic at once. */
     @Query("SELECT * FROM comic_position")
     fun getAll(): List<ComicPosition>
+
+    /** Forgets a comic's saved place ("Also forget my place and settings"). */
+    @Query("DELETE FROM comic_position WHERE slug = :slug")
+    fun delete(slug: String)
 }

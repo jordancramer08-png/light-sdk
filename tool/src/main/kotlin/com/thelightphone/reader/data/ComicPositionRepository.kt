@@ -17,6 +17,9 @@ class ComicPositionRepository private constructor(database: ReaderDatabase) {
         dao.upsert(ComicPosition(slug, page, panel, System.currentTimeMillis()))
     }
 
+    /** Forgets the comic's saved place. */
+    fun delete(slug: String) = dao.delete(slug)
+
     /** The comic was opened: its place is kept (page 1 the first time) and its time is now. */
     fun markOpened(slug: String) {
         val current = dao.get(slug)

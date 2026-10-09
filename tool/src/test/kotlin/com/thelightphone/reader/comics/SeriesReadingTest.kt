@@ -104,4 +104,29 @@ class SeriesReadingTest {
         assertEquals(2, pagesAhead(freeBytes = 200_000_000, roomNeeded = 100_000_000))
         assertEquals(1, pagesAhead(freeBytes = 50_000_000, roomNeeded = 100_000_000))
     }
+
+    @Test
+    fun theRemoveScriptsNoteIsRead() {
+        val tab = '\t'
+        val note = listOf(
+            "comic${tab}Marvel/X-Men/01.cbz",
+            "folder${tab}Marvel/X-Men",
+            "",
+            "nonsense",
+            "folder$tab",
+            "comic${tab}Marvel/X-Men/01.cbz",
+        ).joinToString("\n")
+        assertEquals(ForgetRequests(listOf("Marvel/X-Men/01.cbz"), listOf("Marvel/X-Men")), forgetRequests(note))
+    }
+
+    @Test
+    fun seriesKeysOfAFolderAndTheFoldersUnderIt() {
+        assertTrue(isSeriesKeyOf("comic_series:Marvel/X-Men:mode", "Marvel/X-Men"))
+        assertTrue(isSeriesKeyOf("comic_series:Marvel/X-Men/Annuals:direction", "Marvel/X-Men"))
+        assertTrue(isSeriesKeyOf("comic_clean_up:Marvel/X-Men", "Marvel/X-Men"))
+        assertFalse(isSeriesKeyOf("comic_series:Marvel/X-Men 2:mode", "Marvel/X-Men"))
+        assertFalse(isSeriesKeyOf("comic_clean_up:Marvel", "Marvel/X-Men"))
+        assertFalse(isSeriesKeyOf("comic_reading_mode", "Marvel/X-Men"))
+        assertFalse(isSeriesKeyOf("comic_series::mode", ""))
+    }
 }

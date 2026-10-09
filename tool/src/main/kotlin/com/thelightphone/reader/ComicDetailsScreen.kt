@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewModelScope
 import com.thelightphone.reader.comics.ComicDetails
 import com.thelightphone.reader.comics.comicSlug
+import com.thelightphone.reader.data.ComicForgetting
 import com.thelightphone.reader.data.ComicMeta
 import com.thelightphone.reader.data.ComicPosition
 import com.thelightphone.reader.data.ComicPositionRepository
@@ -128,6 +129,12 @@ class ComicDetailsScreen(
         }
     }
 
+    private fun comicForgetting() = ComicForgetting(
+        lightContext.dataStore,
+        ComicPositionRepository.getInstance { lightContext.readerDatabase() },
+        lightContext.filesDir,
+    )
+
     private fun openRemove() {
         val heading = viewModel.state.value?.details?.let { comicHeading(it, title) } ?: title
         navigateTo(
@@ -136,7 +143,12 @@ class ComicDetailsScreen(
                     it,
                     name = heading,
                     measure = { itemRemovalQuestion(heading, store.removal(meta.path).bytes) },
-                    remove = { store.remove(meta.path) },
+                    offerForget = true,
+                    remove = { forget ->
+                        val removed = store.remove(meta.path)
+                        if (removed && forget) comicForgetting().forget(comics = listOf(meta.path), folders = emptyList())
+                        removed
+                    },
                 )
             },
             resultCallback = { removed -> if (removed) goBack(true) },

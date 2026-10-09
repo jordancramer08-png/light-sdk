@@ -2,7 +2,8 @@
 # private folders on the Light Phone.
 # Called by "Remove Books from Phone.cmd". Nothing on the PC is changed.
 # Saved places, reading lists and reading status are kept, so anything sent again opens
-# where you stopped.
+# where you stopped - unless you answer Yes to "forget my place and settings" for comics:
+# then the app forgets those comics' places and their folders' settings on its next launch.
 
 $ErrorActionPreference = 'Stop'
 $Package   = 'com.thelightphone.reader'
@@ -82,6 +83,13 @@ Write-Host 'Saved places, reading lists and reading status are kept. Send someth
 $answer = Read-Host "Remove these $(Describe $picked)? (Y/N)"
 if ($answer.Trim() -notmatch '^(y|yes)$') { Write-Host 'Nothing was removed.'; exit 0 }
 
+$pickedComics = @($picked | Where-Object { $_.Type -eq 'Comic' })
+$forget = $false
+if ($pickedComics.Count -gt 0) {
+    $answer = Read-Host 'Also forget my place and settings for these comics? (Y/N, Enter = No)'
+    $forget = $answer.Trim() -match '^(y|yes)$'
+}
+
 # --- remove ---
 $removed = 0
 $emptied = @{}
@@ -90,6 +98,11 @@ foreach ($p in $picked) {
     & $adb shell "run-as $Package rm $(Quote $p.Path)"
     if ($LASTEXITCODE -ne 0) { Write-Host '   remove failed'; continue }
     $removed++
+    if ($p.Type -eq 'Comic') {
+        # The comic's details and panel files sit beside it (the app removes them too).
+        $base = $p.Path.Substring(0, $p.Path.Length - 4)
+        & $adb shell "run-as $Package rm -f $(Quote "$base.details.json") $(Quote "$base.panels.json")"
+    }
     # Remember every comics folder above it, so folders left empty can go too.
     $folder = $p.Path.Substring(0, $p.Path.LastIndexOf('/'))
     while ($p.Type -ne 'Book' -and $folder.Length -gt $ComicsDir.Length) {
@@ -99,8 +112,28 @@ foreach ($p in $picked) {
 }
 
 # Deepest first; rmdir only removes a folder that is empty, so folders still holding comics stay.
+$goneFolders = @()
 foreach ($folder in ($emptied.Keys | Sort-Object { $_.Split('/').Count } -Descending)) {
     & $adb shell "run-as $Package rmdir $(Quote $folder) 2>/dev/null"
+    if ($LASTEXITCODE -eq 0) { $goneFolders += $folder }
+}
+
+# "Forget my place and settings": a note the app reads (and deletes) on its next launch.
+# One line each: "comic<TAB><path>" for each comic removed, "folder<TAB><path>" for each
+# comics folder that went because it was left empty (its settings go too).
+if ($forget) {
+    $lines = @()
+    foreach ($p in $pickedComics) { $lines += "comic`t" + $p.Path.Substring($ComicsDir.Length + 1) }
+    foreach ($folder in $goneFolders) { $lines += "folder`t" + $folder.Substring($ComicsDir.Length + 1) }
+    $note = Join-Path $env:TEMP 'reader-comics-forget.txt'
+    [IO.File]::WriteAllText($note, (($lines -join "`n") + "`n"), (New-Object Text.UTF8Encoding($false)))
+    $tmp = '/data/local/tmp/reader-comics-forget.txt'
+    & $adb push $note $tmp | Out-Null
+    # Added to any note the app hasn't read yet, then the copy on the phone is removed.
+    & $adb shell "run-as $Package sh -c 'cat $tmp >> files/shared/comics-forget.txt' && rm $tmp"
+    Remove-Item -LiteralPath $note -ErrorAction SilentlyContinue
+    if ($LASTEXITCODE -eq 0) { Write-Host 'The app will forget their places and settings the next time it opens.' }
+    else { Write-Host "Couldn't pass on 'forget my place' - their places are kept." }
 }
 
 Write-Host ''

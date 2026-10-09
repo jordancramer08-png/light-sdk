@@ -16,6 +16,7 @@ import androidx.lifecycle.viewModelScope
 import com.thelightphone.reader.comics.cleanComicTitle
 import com.thelightphone.reader.comics.parentPath
 import com.thelightphone.reader.data.BookMeta
+import com.thelightphone.reader.data.ComicForgetting
 import com.thelightphone.reader.data.ComicPositionRepository
 import com.thelightphone.reader.data.ComicStore
 import com.thelightphone.reader.data.CoverSize
@@ -87,6 +88,7 @@ class LibraryScreenViewModel(
     private val sectionPreference: LibrarySectionPreference,
     private val comicStore: ComicStore,
     comicPositionRepository: ComicPositionRepository,
+    comicForgetting: ComicForgetting,
 ) : LightViewModel<Unit>() {
 
     private val _state = MutableStateFlow<LibraryScreenState>(LibraryScreenState.Loading)
@@ -127,6 +129,10 @@ class LibraryScreenViewModel(
         viewModelScope.launch { ReaderThemeController.loadOnce(themePreference) }
         // Cached covers of comics taken off the phone since last time are cleared away.
         viewModelScope.launch(Dispatchers.IO) { comicStore.removeOrphans() }
+        // Places and settings the PC's remove script asked to forget, then the list shows without them.
+        viewModelScope.launch(Dispatchers.IO) {
+            if (comicForgetting.forgetPending()) withContext(Dispatchers.Main) { refresh() }
+        }
     }
 
     /** Runs every time the library comes to the front, so new books and new progress show up. */
@@ -287,6 +293,11 @@ class LibraryScreen(sealedActivity: SealedLightActivity) :
         LibrarySectionPreference(lightContext.dataStore),
         comicStore,
         ComicPositionRepository.getInstance { lightContext.readerDatabase() },
+        ComicForgetting(
+            lightContext.dataStore,
+            ComicPositionRepository.getInstance { lightContext.readerDatabase() },
+            lightContext.filesDir,
+        ),
     )
 
     @Composable

@@ -615,19 +615,90 @@ Ctrl+A picks it all). Drop files or folders (subfolders included) to send those;
 under `D:\Comics` keeps its path from there, a folder from elsewhere keeps its own name, a
 loose file from elsewhere goes at the top. Every `.txt` note in the same folders as the
 picked comics goes too. Then:
-- "Shrink pages to phone size? (Y/N)" (Enter = yes). Yes: each page whose longer side is over
-  2000 px is resized (System.Drawing, high-quality bicubic) and saved as JPEG quality 85;
-  smaller pages, and pictures System.Drawing can't read (WebP), stay as they are.
-- `.cbr` is repacked to `.cbz` with its pictures unchanged: 7-Zip (`C:\Program
-  Files\7-Zip\7z.exe` or `7z` on PATH), else Windows `tar.exe`; if neither opens it, that
-  comic is skipped and the reason printed. A `.cbz` that needs shrinking is unpacked with .NET
-  (7-Zip / tar if that fails). Repacked CBZs store entries uncompressed.
+- Questions (Enter takes the capital): "Shrink pages to phone size? (Y/n)", then with the PC
+  comic tool (below) "Crop blank margins off scanned pages? (y/N)", "Clean up scans
+  (straighten, whiten yellowed paper, deeper blacks)? (y/N)", and when either is on "Save
+  before/after pictures of a few pages to look at on the PC? (Y/n)". When some picked comics
+  were looked at before with the same choices: "Find their panels again? (y/N)".
+- **Pipeline, one comic at a time**: convert (`.cbr` repacked to `.cbz` with its pictures
+  unchanged: 7-Zip (`C:\Program Files\7-Zip\7z.exe` or `7z` on PATH), else Windows `tar.exe`;
+  if neither opens it, that comic is skipped and the reason printed), then the PC comic tool:
+  crop, clean up, shrink, find panels. A progress bar shows the page being done. Repacked CBZs
+  store entries uncompressed.
+- Without Java or the tool's jar (the script says so), it works as before: shrinking with
+  System.Drawing (each page over 2000 px resized, JPEG 85; WebP left), no panels file, no
+  crop or clean-up, and the phone finds panels itself.
 - All work is on copies in `%TEMP%\reader-comics-*`, deleted at the end. **Nothing in
   `D:\Comics` is ever changed.**
-- Before sending: "Picked N comic(s) and M note(s): X MB. After shrinking: Y MB." then
-  "Send these? (Y/N)". At the end, the before / after sizes again.
+- Before sending: "Picked N comic(s) and M note(s): X MB. After preparing: Y MB.", "Panels
+  found on the PC for N of M comic(s).", then "Send these? (Y/N)". The before/after pictures
+  (when asked for) open in the browser first: `Documents\Reader comic samples\<date
+  time>\index.html`. At the end, the before / after sizes again.
+- Each comic goes with its panels file (`<name>.panels.json`, same folder); a comic sent
+  without one has any old one deleted on the phone (it would no longer fit).
+- Test mode (no phone): `READER_COMICS_DRY_RUN=<folder>` keeps the prepared comics and panels
+  files there and sends nothing; `READER_COMICS_ANSWERS=y,y,n,n` answers the questions.
 - Phone path: `files/shared/comics/<relative folders>/<name>.cbz`, every folder and file name
   flattened to plain ASCII as the book script does (same `adb push` + `run-as cp` approach).
+
+**PC comic tool** (comics upgrade, phases 3–4). `comic-tools/` is a plain Kotlin JVM module
+(`include(":comic-tools")`) built into one jar, `scripts/comic-tools/comic-tools.jar`
+(**checked in**, so the send script needs only Java; rebuild with `.\gradlew.bat
+:comic-tools:installComicTools` after changing it or the shared code, and commit the jar). It
+compiles the app's own `tool/.../comics/*.kt` (all but ComicDetails.kt; `ComicInfoName.kt`
+stands in for the one function ComicPages.kt needs from it), so the page analysis is the same
+code as on the phone. Run with Java (`JAVA_HOME`, Android Studio's `jbr`, or PATH) with
+`-Xmx1200m -XX:+UseSerialGC`, one comic per run:
+`java -jar comic-tools.jar process <in.cbz> <out.cbz|-> <out.panels.json> [--crop] [--clean]
+[--shrink 2000] [--quality 85] [--samples <folder>] [--known-panels <json>]` (`Main.kt`).
+- Pages in the CBZ's order (`comicPages`), each read with ImageIO (JPEG, PNG, GIF, BMP; a
+  picture it can't read, e.g. WebP or CMYK JPEG, is kept byte for byte and gets no entry, so
+  the phone shows it whole), then: **crop** (`cropped`: `findCrop` on the page shrunk to 800
+  px, exactly the phone's Crop margins rule: only paper or scanner edges, never more than 15% a
+  side, 1% given back; a spread is one picture, so its halves stay aligned), **clean up**
+  (`cleanedUp`, `ScanFixes`: straighten when the ink lines up clearly better at a tilt of
+  0.2°–2° (5% better, else none), corners filled with the paper's color; even out the paper:
+  25-px patches of the small page whose brightest tenth is ≥ 140 and not strongly colored (≤ 80
+  apart) are paper, at least 20% of patches must be, the rest take the page's median paper;
+  smoothed; each pixel brightened toward paper 245 (×1 to ×1.5, never darkened) and each
+  channel scaled so the paper is neutral (×0.85 to ×1.3); then a gray black (darkest 0.5%
+  lighter than 16) is moved toward black by at most 40 levels), **shrink** (`PageImages.shrink`:
+  longer side to 2000, halved bilinear then bicubic), a changed page saved as JPEG 85 under its
+  own name; everything else in the CBZ copied as it was; entries stored. Then **panels** on the
+  final page (`PanelFinder`, below).
+- `--samples`: for 3 pages spread through the comic (`samplePageNumbers`: 2nd, middle, 80%),
+  `<folder>/<comic>/<page>-1-before.jpg`, `-2-after.jpg`, `-3-panels.jpg` (boxes numbered).
+- Output `<name>.panels.json` (`PanelsFile`): `version` 1, `tool` (`TOOL_VERSION`, now 1: bump
+  when what the tool does changes), `fileSize` (of the CBZ sent), `cropped`, `cleaned`, `pages`
+  keyed by entry name → `pageWidth`, `pageHeight`, `panels` (left to right, as found), `crop`
+  (null = none), `levels` (null when cleaned on the PC, so the phone's Clean up does nothing).
+- **Cache**: the script keeps each comic's panels file in `%LOCALAPPDATA%\LightReader\
+  comic-panels\<sha1>.panels.json`, the key being the comic's full path, size, modified time,
+  the choices and `TOOL_VERSION`; a cached comic is run with `--known-panels` (pages are still
+  cropped / cleaned / shrunk, panels aren't looked for; only `fileSize` changes) unless asked
+  to find them again.
+- **PanelFinder**: the phone's `analysePage` first. When it finds nothing, and only on a page
+  with a light (≥ 160) gutter that isn't the comic's first page: three looser settings
+  (`gutterShare` 0.9; `gutterTolerance` 80; `gutterShare` 0.9 + `minPanelFill` 0.7), then a
+  spread (wider than 1.15 × tall) half by half (a half with none is one panel). What these find
+  must have ≥ 3 panels with a light gutter, and every panel's edge (2 px inside its box) must
+  be at least half non-gutter (`isFramed`, `MIN_FRAMED_SHARE` 0.5, `-Dpanels.framed=` to try
+  others). Checked by eye on real pages: without these limits the looser settings split covers,
+  title lettering, text pages and borderless modern art badly. Last check (Earth-One, 45 comics
+  × 6 pages): 201 pages with panels against 200 for the phone's analysis; Earth-One 15 × 10: 116
+  → 118; New 52 8 × 10: 36 → 36; Phoenix Rising 8 × 10: 62 → 62. The gain is small; the rule is
+  that a page never gets a bad split. Clean up (straightening, whiter paper) runs before it.
+- `report <folder> <out> [comics] [pages]`: the phone's analysis against `PanelFinder` on pages
+  spread through each CBZ; `summary.txt` and the gained pages drawn in `gained/`.
+- Tests: `.\gradlew.bat :comic-tools:test` (`ComicToolTest`: tilt found and undone, paper
+  evened without darkening ink, a page without paper left alone, crop limits, shrink, the
+  panels file, a whole comic processed and processed again with known panels).
+- **On the phone**: `ComicStore.pcPanels` reads `<name>.panels.json` beside the comic
+  (`ComicPanelsSidecar`, kept in memory) when its `version` is 1 and `fileSize` matches the CBZ;
+  then `panels` answers from it and never looks itself (a page left out = shown whole). A file
+  that doesn't fit is ignored and the phone looks as before. Panels are ordered for the
+  series' direction when shown (`orderPanels`). Cleaned on the PC: the overlay's Clean up
+  scans row reads "Done on PC". Remove from phone deletes the panels file too.
 
 **Phone storage.** `ComicStore` reads `File(filesDir, "shared/comics")`. A comic's path is
 relative to it with "/" between parts, and its key everywhere (status, lists, saved place) is

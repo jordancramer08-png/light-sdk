@@ -10,6 +10,7 @@ import com.thelightphone.reader.comics.comicDetails
 import com.thelightphone.reader.comics.comicItemKind
 import com.thelightphone.reader.comics.decodeNoteText
 import com.thelightphone.reader.comics.detailsSidecarName
+import com.thelightphone.reader.comics.panelsSidecarName
 import com.thelightphone.reader.comics.folderItems
 import com.thelightphone.reader.comics.readComicEntry
 import com.thelightphone.reader.comics.readComicInfo
@@ -51,6 +52,9 @@ class ComicStore(
      * every page. Only this ComicStore writes it while the comic is open. Guarded by [LOCK].
      */
     private var panelsInMemory: Pair<ComicMeta, ComicPanels>? = null
+
+    /** The last comic's panels file from the PC (null: it has none that fits), kept in memory as panels.json is. Guarded by [LOCK]. */
+    private var pcPanelsInMemory: Pair<ComicMeta, ComicPanelsSidecar?>? = null
 
     /** One folder's subfolders, comics and notes, in the order shown. [folder] "" is the top. */
     fun list(folder: String): List<ComicFolderItem> {
@@ -95,6 +99,8 @@ class ComicStore(
         page: String,
         readPage: () -> ByteArray? = { readComicEntry(fileOf(meta.path), page, MAX_PAGE_BYTES) },
     ): PagePanels? {
+        // Looked at on the PC: the phone never looks itself (a page left out is shown whole).
+        pcPanels(meta)?.let { return it.pages[page] }
         cachedPanels(meta, page)?.let { return it }
         val found = try {
             readPage()?.let(findPanels)
@@ -110,6 +116,21 @@ class ComicStore(
     /** The page's panels if they were looked for before (by this version of the detector). */
     fun cachedPanels(meta: ComicMeta, page: String): PagePanels? =
         synchronized(LOCK) { readPanels(meta)?.pages?.get(page) }
+
+    /**
+     * The comic's panels file from the PC (`<name>.panels.json` beside it), when it has one that
+     * fits this very file; else null. Read once, then from memory.
+     */
+    fun pcPanels(meta: ComicMeta): ComicPanelsSidecar? = synchronized(LOCK) {
+        pcPanelsInMemory?.let { (forMeta, found) -> if (forMeta == meta) return found }
+        val comic = fileOf(meta.path)
+        val found = orNull {
+            panelsSidecarFile(meta.path).takeIf { it.isFile }
+                ?.let { json.decodeFromString(ComicPanelsSidecar.serializer(), it.readText()) }
+        }?.takeIf { it.version == ComicPanelsSidecar.VERSION && it.fileSize == comic.length() }
+        pcPanelsInMemory = meta to found
+        found
+    }
 
     /**
      * What Comic Details shows: the comic's details file (`<name>.details.json` beside it),
@@ -134,7 +155,7 @@ class ComicStore(
         val paths = removablePaths(path)
         val comics = paths.filter { comicItemKind(it.substringAfterLast('/'), false) == ComicItemKind.COMIC }
         val bytes = paths.sumOf { bytesUnder(fileOf(it)) } +
-            comics.sumOf { bytesUnder(sidecarFile(it)) + bytesUnder(cacheFolder(it)) }
+            comics.sumOf { bytesUnder(sidecarFile(it)) + bytesUnder(panelsSidecarFile(it)) + bytesUnder(cacheFolder(it)) }
         return RemovalSummary(comics = comics.size, notes = paths.size - comics.size, bytes = bytes)
     }
 
@@ -151,9 +172,11 @@ class ComicStore(
         for (item in items) {
             fileOf(item).delete()
             sidecarFile(item).delete()
+            panelsSidecarFile(item).delete()
             cacheFolder(item).deleteRecursively()
         }
         panelsInMemory = null
+        pcPanelsInMemory = null
         removeEmptyFolders(fileOf(path))
         items.none { fileOf(it).exists() }
     }
@@ -273,6 +296,9 @@ class ComicStore(
 
     /** The details file beside a comic: "Name.cbz" -> "Name.details.json". */
     private fun sidecarFile(path: String): File = File(fileOf(path).parentFile, detailsSidecarName(fileOf(path).name))
+
+    /** The panels file from the PC beside a comic: "Name.cbz" -> "Name.panels.json". */
+    private fun panelsSidecarFile(path: String): File = File(fileOf(path).parentFile, panelsSidecarName(fileOf(path).name))
 
     /** A file that can't be read gives null, not a crash. */
     private fun <T> orNull(read: () -> T?): T? = try {

@@ -1,8 +1,15 @@
 # Copies comics (.cbz, and .cbr repacked as .cbz) into the Reader app's private comics folder
 # on the Light Phone, keeping each comic's folder path under D:\Comics. Note files (.txt)
 # sitting in the same folders as the comics go too.
-# Called by "Send Comics to Phone.cmd". Nothing in D:\Comics is ever changed: repacking and
-# shrinking happen on copies in %TEMP%, which are deleted at the end.
+# Called by "Send Comics to Phone.cmd". Nothing in D:\Comics is ever changed: repacking,
+# cropping, cleaning up and shrinking happen on copies in %TEMP%, which are deleted at the end.
+#
+# Each comic goes through, one at a time: convert (.cbr -> .cbz), crop margins, clean up scans,
+# shrink, then find the panels. Cropping, cleaning up, shrinking and finding panels are done by
+# the PC comic tool (scripts\comic-tools\comic-tools.jar, run with Java), which writes a
+# "<comic>.panels.json" sent beside the comic, so the phone never has to look for panels.
+# A comic already looked at with the same choices isn't looked at again (unless you ask):
+# its panels are kept in %LOCALAPPDATA%\LightReader\comic-panels.
 
 $ErrorActionPreference = 'Stop'
 $Package    = 'com.thelightphone.reader'
@@ -11,6 +18,17 @@ $TempDir    = '/data/local/tmp'
 $ComicsRoot = 'D:\Comics'   # your whole comics library (subfolders included)
 $MaxSide    = 2000          # shrinking: longest side of a page, in pixels
 $JpegQuality = 85           # shrinking: JPEG quality of a shrunk page
+$ToolJar    = Join-Path $PSScriptRoot 'comic-tools\comic-tools.jar'
+$PanelsCache = Join-Path $env:LOCALAPPDATA 'LightReader\comic-panels'
+$SamplesRoot = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Reader comic samples'
+$JavaMemory = '-Xmx1200m'   # the most memory the comic tool may use (the laptop has about 8 GB)
+
+# For testing on the PC without the phone: READER_COMICS_DRY_RUN = a folder. Nothing is sent;
+# the prepared comics and panels files are left in that folder, and the questions are answered
+# from READER_COMICS_ANSWERS (e.g. "y,y,n,n": shrink, crop, clean up, samples, find again).
+$DryRun = $env:READER_COMICS_DRY_RUN
+$DryAnswers = [Collections.Generic.Queue[string]]::new()
+if ($DryRun -and $env:READER_COMICS_ANSWERS) { $env:READER_COMICS_ANSWERS.Split(',') | ForEach-Object { $DryAnswers.Enqueue($_) } }
 
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -107,15 +125,61 @@ foreach ($c in $folders) {
 $notes = @($notes | Sort-Object { $_.File.FullName } -Unique)
 
 # --- phone connected and app installed? ---
+if (-not $DryRun) {
 $devices = & $adb devices | Select-String "`tdevice$"
 if (-not $devices) { Write-Host 'No phone found. Plug it in, unlock it, and allow USB debugging.'; exit 1 }
 $installed = & $adb shell pm list packages $Package | Select-String -SimpleMatch "package:$Package"
 if (-not $installed) { Write-Host 'The Reader app is not installed yet. Run "Build and Install Reader.cmd" first.'; exit 1 }
+}
 
-# --- shrink? ---
-$answer = Read-Host 'Shrink pages to phone size? (Y/N)'
-$shrink = $answer.Trim() -notmatch '^(n|no)$'
-if ($shrink) { Write-Host "Pages wider or taller than $MaxSide px will be resized and saved as JPEG (quality $JpegQuality)." }
+# --- the PC comic tool (needs Java: the one inside Android Studio is fine) ---
+function Find-Java {
+    $candidates = @()
+    if ($env:JAVA_HOME) { $candidates += Join-Path $env:JAVA_HOME 'bin\java.exe' }
+    $candidates += 'C:\Program Files\Android\Android Studio\jbr\bin\java.exe'
+    $onPath = (Get-Command java -ErrorAction SilentlyContinue).Source
+    if ($onPath) { $candidates += $onPath }
+    foreach ($c in $candidates) { if ($c -and (Test-Path -LiteralPath $c)) { return $c } }
+    return $null
+}
+$Java = Find-Java
+$ToolVersion = $null
+if ($Java -and (Test-Path -LiteralPath $ToolJar)) {
+    $old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    $ToolVersion = (& $Java -jar $ToolJar version 2>$null | Select-Object -First 1)
+    $ErrorActionPreference = $old
+}
+$useTool = [bool]$ToolVersion
+if (-not $useTool) {
+    Write-Host ''
+    Write-Host "Can't run the comic tool (Java or $ToolJar not found)."
+    Write-Host 'Comics are still sent, and shrinking still works, but the phone will find the panels itself'
+    Write-Host 'and Crop margins / Clean up scans are not available.'
+}
+
+# --- choices (Enter takes the one in capitals) ---
+function Ask-YesNo([string]$question, [bool]$default) {
+    $answer = if ($DryRun) { if ($DryAnswers.Count -gt 0) { $DryAnswers.Dequeue() } else { '' } } else { Read-Host $question }
+    $answer = $answer.Trim()
+    if ($answer -eq '') { return $default }
+    return $answer -match '^(y|yes)$'
+}
+
+Write-Host ''
+$shrink = Ask-YesNo 'Shrink pages to phone size? (Y/n)' $true
+if ($shrink) { Write-Host "   Pages wider or taller than $MaxSide px will be resized and saved as JPEG (quality $JpegQuality)." }
+$crop = $false
+$clean = $false
+$samples = $false
+if ($useTool) {
+    $crop = Ask-YesNo 'Crop blank margins off scanned pages? (y/N)' $false
+    if ($crop) { Write-Host '   Only plain paper or scanner edges are cut, never more than 15% of a side.' }
+    $clean = Ask-YesNo 'Clean up scans (straighten, whiten yellowed paper, deeper blacks)? (y/N)' $false
+    if ($crop -or $clean) {
+        $samples = Ask-YesNo 'Save before/after pictures of a few pages to look at on the PC? (Y/n)' $true
+    }
+}
+$SamplesDir = Join-Path $SamplesRoot (Get-Date -Format 'yyyy-MM-dd HH.mm')
 
 # --- repacking and shrinking (on copies in %TEMP%) ---
 $Work = Join-Path $env:TEMP ('reader-comics-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -194,32 +258,131 @@ function Pack-Comic([string]$dir, [string]$dest) {
     }
 }
 
-# Works out what to send for each comic: the original .cbz, or a repacked / shrunk copy.
-# Sets .Send (the local file to send) or .Problem (why it's skipped).
-function Prepare-Comic($pick, [int]$number) {
+# Step 1, convert: a .cbr is unpacked and packed again as a .cbz, pictures unchanged (and,
+# without the comic tool, shrunk here as before). Returns the .cbz to use, or sets .Problem.
+function Convert-Comic($pick, [int]$number) {
     $file = $pick.File
-    $pick | Add-Member -NotePropertyName Send -NotePropertyValue $null -Force
-    $pick | Add-Member -NotePropertyName Problem -NotePropertyValue $null -Force
-    if ($file.Extension -eq '.cbz' -and -not $shrink) { $pick.Send = $file.FullName; return }
+    $toShrinkHere = $shrink -and -not $useTool
+    if ($file.Extension -eq '.cbz' -and -not $toShrinkHere) { return $file.FullName }
 
     $unpacked = Join-Path $Work "unpacked-$number"
     New-Item -ItemType Directory -Path $unpacked | Out-Null
     try {
         $why = Expand-Comic $file $unpacked
-        if ($why) { $pick.Problem = $why; return }
-        if ($shrink) {
+        if ($why) { $pick.Problem = $why; return $null }
+        if ($toShrinkHere) {
             Get-ChildItem -LiteralPath $unpacked -File -Recurse |
                 Where-Object { $PageExtensions -contains $_.Extension.ToLower() } |
                 ForEach-Object { Shrink-Page $_.FullName }
         }
-        $dest = Join-Path $Work "comic-$number.cbz"
+        $dest = Join-Path $Work "converted-$number.cbz"
         Pack-Comic $unpacked $dest
-        $pick.Send = $dest
+        return $dest
     } catch {
         $pick.Problem = "couldn't repack it ($($_.Exception.Message))"
+        return $null
     } finally {
         Remove-Item -LiteralPath $unpacked -Recurse -Force -ErrorAction SilentlyContinue
     }
+}
+
+# Where a comic's panels are kept once found: named after the comic file (path, size, date),
+# the choices and the tool's version, so any change means a fresh look.
+function Get-CacheFile($file) {
+    $key = "$($file.FullName)|$($file.Length)|$($file.LastWriteTimeUtc.Ticks)|crop=$crop|clean=$clean|shrink=$shrink|$MaxSide|$JpegQuality|tool=$ToolVersion"
+    $sha = [Security.Cryptography.SHA1]::Create()
+    $hash = -join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($key)) | ForEach-Object { $_.ToString('x2') })
+    return Join-Path $PanelsCache "$hash.panels.json"
+}
+
+# Steps 2 to 5 with the comic tool: crop, clean up, shrink, find panels. Shows a progress bar.
+# Returns $true when it worked (then .Send and .Panels are set).
+function Run-ComicTool($pick, [int]$number, [string]$source) {
+    $changes = $crop -or $clean -or $shrink
+    $out = if ($changes) { Join-Path $Work "comic-$number.cbz" } else { '-' }
+    $panels = Join-Path $Work "comic-$number.panels.json"
+    $cache = Get-CacheFile $pick.File
+    $toolArgs = @($JavaMemory, '-XX:+UseSerialGC', '-jar', $ToolJar, 'process', $source, $out, $panels)
+    if ($crop) { $toolArgs += '--crop' }
+    if ($clean) { $toolArgs += '--clean' }
+    if ($shrink) { $toolArgs += @('--shrink', "$MaxSide", '--quality', "$JpegQuality") }
+    if ($samples) { $toolArgs += @('--samples', $SamplesDir) }
+    $reuse = (Test-Path -LiteralPath $cache) -and -not $redoPanels
+    if ($reuse) { $toolArgs += @('--known-panels', $cache) }
+
+    $activity = "Comic $number of $($comics.Count): $($pick.File.Name)"
+    $script:toolError = ''
+    $script:toolDone = ''
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & $Java @toolArgs 2>&1 | ForEach-Object {
+        $line = "$_"
+        if ($line -match '^PAGE (\d+) (\d+)$') {
+            $done = [int]$Matches[1]; $all = [int]$Matches[2]
+            Write-Progress -Activity $activity -Status "Page $done of $all" -PercentComplete ([int](100 * $done / [Math]::Max(1, $all)))
+        } elseif ($line -match '^DONE') {
+            $script:toolDone = $line
+        } elseif ($line -match '^ERROR (.*)$') {
+            $script:toolError = $Matches[1]
+        } elseif ($line.Trim()) {
+            $script:toolError = $line
+        }
+    }
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $old
+    Write-Progress -Activity $activity -Completed
+    if ($code -ne 0 -or -not (Test-Path -LiteralPath $panels)) {
+        $why = if ($script:toolError) { $script:toolError } else { "exit code $code" }
+        Write-Host "   The comic tool couldn't read it ($why). It is sent as it is; the phone will find its panels."
+        return $false
+    }
+    New-Item -ItemType Directory -Path $PanelsCache -Force | Out-Null
+    if (-not $reuse) { Copy-Item -LiteralPath $panels -Destination $cache -Force }
+    if ($script:toolDone -match 'pages=(\d+) withPanels=(\d+)') {
+        if ($reuse) { Write-Host "   $($Matches[1]) pages (panels found before, reused)" }
+        else { Write-Host "   $($Matches[1]) pages, panels on $($Matches[2])" }
+    }
+    $pick.Send = if ($changes) { $out } else { $source }
+    $pick.Panels = $panels
+    return $true
+}
+
+# Works out what to send for each comic: the original .cbz, or a converted / cleaned / shrunk
+# copy, plus its panels file. Sets .Send and .Panels (null: none), or .Problem (why it's skipped).
+function Prepare-Comic($pick, [int]$number) {
+    $pick | Add-Member -NotePropertyName Send -NotePropertyValue $null -Force
+    $pick | Add-Member -NotePropertyName Panels -NotePropertyValue $null -Force
+    $pick | Add-Member -NotePropertyName Problem -NotePropertyValue $null -Force
+    $source = Convert-Comic $pick $number
+    if (-not $source) { return }
+    if (-not $useTool) { $pick.Send = $source; return }
+    if (-not (Run-ComicTool $pick $number $source)) {
+        # The tool couldn't do it: the comic still goes, converted but otherwise as it was.
+        $pick.Send = $source
+        return
+    }
+    # The converted copy isn't needed once the tool has written its own.
+    if ($source -ne $pick.File.FullName -and $pick.Send -ne $source) { Remove-Item -LiteralPath $source -ErrorAction SilentlyContinue }
+}
+
+# The before / after pictures as one page to look at in a browser.
+function Write-SamplesIndex {
+    if (-not (Test-Path -LiteralPath $SamplesDir)) { return $null }
+    $html = @('<!doctype html><meta charset="utf-8"><title>Comic samples</title>',
+        '<style>body{font-family:sans-serif;background:#222;color:#eee;margin:16px}img{width:32%;margin:0.5%;vertical-align:top}h2{margin-top:32px}</style>',
+        '<h1>Before / after / panels</h1><p>Left: as it was. Middle: after cropping and clean-up. Right: the panels found (none = the page is shown whole).</p>')
+    foreach ($comic in Get-ChildItem -LiteralPath $SamplesDir -Directory | Sort-Object Name) {
+        $html += "<h2>$([Net.WebUtility]::HtmlEncode($comic.Name))</h2>"
+        foreach ($before in Get-ChildItem -LiteralPath $comic.FullName -Filter '*-1-before.jpg' | Sort-Object Name) {
+            $base = $before.Name.Substring(0, $before.Name.Length - '-1-before.jpg'.Length)
+            foreach ($kind in '1-before', '2-after', '3-panels') {
+                $html += "<img src=""$([Uri]::EscapeDataString($comic.Name))/$([Uri]::EscapeDataString("$base-$kind.jpg"))"" alt=""$kind"">"
+            }
+        }
+    }
+    $index = Join-Path $SamplesDir 'index.html'
+    [IO.File]::WriteAllLines($index, $html)
+    return $index
 }
 
 function Format-MB([double]$bytes) { '{0:N1} MB' -f ($bytes / 1MB) }
@@ -254,12 +417,28 @@ function PhoneFolder($pick) {
 function Quote([string]$s) { "'" + ($s -replace "'", "'\''") + "'" }
 
 try {
+    # Comics looked at before with the same choices keep their panels unless asked.
+    $redoPanels = $false
+    if ($useTool) {
+        $known = @($comics | Where-Object { Test-Path -LiteralPath (Get-CacheFile $_.File) }).Count
+        if ($known -gt 0) {
+            $redoPanels = Ask-YesNo "$known of these comic(s) were looked at before with these choices. Find their panels again? (y/N)" $false
+        }
+    }
     $i = 0
     foreach ($c in $comics) {
         $i++
-        if ($c.File.Extension -eq '.cbr' -or $shrink) { Write-Host "Preparing $i of $($comics.Count): $($c.File.Name)" }
+        if ($useTool -or $c.File.Extension -eq '.cbr' -or $shrink) { Write-Host "Preparing $i of $($comics.Count): $($c.File.Name)" }
         Prepare-Comic $c $i
         if ($c.Problem) { Write-Host "   Skipping $($c.File.Name): $($c.Problem)" }
+    }
+    if ($samples) {
+        $index = Write-SamplesIndex
+        if ($index) {
+            Write-Host ''
+            Write-Host "Before/after pictures: $index (opening it now)."
+            Start-Process -FilePath $index
+        }
     }
     $ready = @($comics | Where-Object { $_.Send })
     $notesSize = Sum-Bytes ($notes | ForEach-Object { $_.File.Length })
@@ -269,10 +448,24 @@ try {
     # --- confirm ---
     Write-Host ''
     Write-Host "Picked $($comics.Count) comic(s) and $($notes.Count) note(s): $(Format-MB $before)."
-    if ($shrink) { Write-Host "After shrinking: $(Format-MB $after)." }
+    if ($shrink -or $crop -or $clean) { Write-Host "After preparing: $(Format-MB $after)." }
+    if ($useTool) {
+        $withPanels = @($ready | Where-Object { $_.Panels }).Count
+        Write-Host "Panels found on the PC for $withPanels of $($ready.Count) comic(s)."
+    }
     $skipped = $comics.Count - $ready.Count
     if ($skipped -gt 0) { Write-Host "$skipped comic(s) can't be sent (see above)." }
     if ($ready.Count -eq 0) { Write-Host 'Nothing to send.'; exit 1 }
+    if ($DryRun) {
+        New-Item -ItemType Directory -Path $DryRun -Force | Out-Null
+        foreach ($c in $ready) {
+            $base = [IO.Path]::GetFileNameWithoutExtension($c.File.Name)
+            Copy-Item -LiteralPath $c.Send -Destination (Join-Path $DryRun "$base.cbz")
+            if ($c.Panels) { Copy-Item -LiteralPath $c.Panels -Destination (Join-Path $DryRun "$base.panels.json") }
+        }
+        Write-Host "Test run: nothing sent. Prepared comics are in $DryRun"
+        exit 0
+    }
     $answer = Read-Host 'Send these? (Y/N)'
     if ($answer.Trim() -notmatch '^(y|yes)$') { Write-Host 'Nothing was sent.'; exit 0 }
 
@@ -295,7 +488,15 @@ try {
     foreach ($c in $ready) {
         $name = PhoneName ([IO.Path]::ChangeExtension($c.File.Name, '.cbz'))
         Write-Host "Sending $($c.File.Name)"
-        if (Send-One $c.Send (PhoneFolder $c) $name) { $sentComics++ }
+        if (-not (Send-One $c.Send (PhoneFolder $c) $name)) { continue }
+        $sentComics++
+        $panelsName = $name.Substring(0, $name.Length - 4) + '.panels.json'
+        if ($c.Panels) {
+            if (-not (Send-One $c.Panels (PhoneFolder $c) $panelsName)) { Write-Host '   (its panels file did not go: the phone will find the panels itself)' }
+        } else {
+            # A panels file from an earlier send would no longer fit this comic.
+            & $adb shell "run-as $Package rm -f $(Quote "$(PhoneFolder $c)/$panelsName")" | Out-Null
+        }
     }
     $sentNotes = 0
     foreach ($n in $notes) {
@@ -305,7 +506,7 @@ try {
 
     Write-Host ''
     Write-Host "Sent $sentComics of $($comics.Count) comic(s) and $sentNotes of $($notes.Count) note(s)."
-    if ($shrink) { Write-Host "Size before shrinking: $(Format-MB $before). After: $(Format-MB $after)." }
+    if ($shrink -or $crop -or $clean) { Write-Host "Size before preparing: $(Format-MB $before). After: $(Format-MB $after)." }
     else { Write-Host "Size: $(Format-MB $after)." }
     Write-Host 'Open Reader on the phone and tap COMICS - new comics are prepared the first time their folder opens.'
 } finally {

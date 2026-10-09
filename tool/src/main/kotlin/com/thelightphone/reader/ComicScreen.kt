@@ -272,14 +272,19 @@ class ComicScreen(
             nextSymbol = "›",
         )
         HairlineDivider()
-        StepperRow(
-            label = "Clean up scans",
-            value = state.cleanUp.label,
-            onPrevious = state.cleanUp.previous?.let { { viewModel.setCleanUp(it) } },
-            onNext = state.cleanUp.next?.let { { viewModel.setCleanUp(it) } },
-            previousSymbol = "‹",
-            nextSymbol = "›",
-        )
+        if (state.cleanedOnPc) {
+            // Cleaned up when it was sent: the stepper would change nothing, so it says so instead.
+            StepperRow(label = "Clean up scans", value = "Done on PC", onPrevious = null, onNext = null, previousSymbol = "", nextSymbol = "")
+        } else {
+            StepperRow(
+                label = "Clean up scans",
+                value = state.cleanUp.label,
+                onPrevious = state.cleanUp.previous?.let { { viewModel.setCleanUp(it) } },
+                onNext = state.cleanUp.next?.let { { viewModel.setCleanUp(it) } },
+                previousSymbol = "‹",
+                nextSymbol = "›",
+            )
+        }
         HairlineDivider()
         SectionLabel("All comics")
         if (state.mode == ComicReadingMode.PANELS) {

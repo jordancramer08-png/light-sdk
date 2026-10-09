@@ -34,6 +34,28 @@ data class PagePanels(
     val rects: List<PixelRect> get() = panels.map { it.rect }
 }
 
+/**
+ * The panels file the PC's send script puts beside a comic (`<name>.panels.json`, CLAUDE.md 12,
+ * "PC comic tool"): every page already looked at on the PC, so the phone never looks itself.
+ * [fileSize] is the CBZ's size when it was written: a file that doesn't match the comic on the
+ * phone (or of another [version]) is ignored, and the phone looks at pages as before. A page
+ * missing from [pages] couldn't be read on the PC and is shown whole. [cropped] / [cleaned]:
+ * the PC already cropped / cleaned up the pages ([PagePanels.levels] are then left out, so the
+ * phone's Clean up scans does nothing on top).
+ */
+@Serializable
+data class ComicPanelsSidecar(
+    val version: Int,
+    val fileSize: Long,
+    val cropped: Boolean = false,
+    val cleaned: Boolean = false,
+    val pages: Map<String, PagePanels> = emptyMap(),
+) {
+    companion object {
+        const val VERSION = 1
+    }
+}
+
 /** A page's darkest and brightest level per channel, as cached (see [PageLevels]). */
 @Serializable
 data class LevelsBox(val black: List<Int>, val white: List<Int>) {

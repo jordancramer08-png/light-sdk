@@ -146,6 +146,8 @@ data class ComicViewState(
     val pageIsSpread: Boolean = false,
     /** Auto-advance found the next comic: the screen hands it to the opener. */
     val advanceTo: NextInFolder? = null,
+    /** The pages were cleaned up on the PC: the phone's Clean up scans has nothing to do. */
+    val cleanedOnPc: Boolean = false,
 ) {
     val isReady: Boolean get() = pageIndex >= 0
 
@@ -250,8 +252,9 @@ class ComicViewModel(
             val settings = settingsPreference.load(folder)
             val cleanUp = cleanUpPreference.load(folder)
             val overrides = pageOverridePreference.load(meta.path)
+            val cleanedOnPc = withContext(Dispatchers.IO) { comicStore.pcPanels(meta)?.cleaned == true }
             val saved = DatabaseQueue.read { positionRepository.get(slug) }
-            _state.update { it.copy(mode = mode, settings = settings, cleanUp = cleanUp, overrides = overrides) }
+            _state.update { it.copy(mode = mode, settings = settings, cleanUp = cleanUp, overrides = overrides, cleanedOnPc = cleanedOnPc) }
             val entry = PanelEntry(saved?.panel ?: 0) { count -> openingPanelIndex(saved?.panel, count) }
             showPage(openingPageIndex(saved?.page, pageCount), movedByReader = false, entry)
         }

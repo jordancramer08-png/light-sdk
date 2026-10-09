@@ -143,6 +143,12 @@ fun detailsSidecarName(comicFileName: String): String {
     return "$base.details.json"
 }
 
+/** The panels file's name for a comic file (written by the PC's send script): "Name.cbz" -> "Name.panels.json". */
+fun panelsSidecarName(comicFileName: String): String {
+    val base = if (comicFileName.endsWith(".cbz", ignoreCase = true)) comicFileName.dropLast(4) else comicFileName
+    return "$base.panels.json"
+}
+
 /** The details file's values, or null when it isn't readable JSON. Blank values count as missing. */
 fun parseDetailsSidecar(json: String): ComicDetails? {
     val sidecar = try {

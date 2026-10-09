@@ -160,6 +160,38 @@ class ComicStoreTest {
     }
 
     @Test
+    fun panelsFromThePcAreUsedAndThePhoneNeverLooks() {
+        addComic("x/a.cbz", "1.jpg" to byteArrayOf(2), "2.jpg" to byteArrayOf(3), "3.jpg" to byteArrayOf(4))
+        val size = File(comicsDir, "x/a.cbz").length()
+        File(comicsDir, "x/a.panels.json").writeText(
+            """{"version":1,"tool":1,"fileSize":$size,"cropped":true,"cleaned":true,"pages":{
+            "1.jpg":{"pageWidth":100,"pageHeight":200,"panels":[{"left":0,"top":0,"right":50,"bottom":90},{"left":50,"top":0,"right":100,"bottom":90}],"crop":null,"levels":null},
+            "2.jpg":{"pageWidth":100,"pageHeight":200,"panels":[],"crop":null,"levels":null}}}""",
+        )
+        val meta = assertNotNull(store.prepared("x/a.cbz"))
+        assertEquals(true, store.pcPanels(meta)?.cleaned)
+        assertEquals(2, store.panels(meta, "1.jpg")?.panels?.size)
+        assertEquals(0, store.panels(meta, "2.jpg")?.panels?.size)
+        assertNull(store.panels(meta, "3.jpg")) // left out on the PC: shown whole
+        assertEquals(emptyList(), pagesLookedAt)
+
+        // Removing the comic takes its panels file too.
+        assertTrue(store.removal("x/a.cbz").bytes > size)
+        store.remove("x/a.cbz")
+        assertFalse(File(comicsDir, "x/a.panels.json").exists())
+    }
+
+    @Test
+    fun aPanelsFileForAnotherVersionOfTheComicIsIgnored() {
+        addComic("a.cbz", "1.jpg" to byteArrayOf(2))
+        File(comicsDir, "a.panels.json").writeText("""{"version":1,"fileSize":1,"pages":{}}""")
+        val meta = assertNotNull(store.prepared("a.cbz"))
+        assertNull(store.pcPanels(meta))
+        assertEquals(2, store.panels(meta, "1.jpg")?.panels?.size)
+        assertEquals(listOf(2), pagesLookedAt) // looked at on the phone, as before
+    }
+
+    @Test
     fun aPagesCropAndLevelsAreCachedWithItsPanels() {
         addComic("a.cbz", "1.jpg" to byteArrayOf(2))
         val meta = assertNotNull(store.prepared("a.cbz"))

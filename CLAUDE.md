@@ -122,6 +122,8 @@ reader/
                         parseComicFileName, parseComicInfo, DetailsSidecar / parseDetailsSidecar,
                         combineDetails / comicDetails (the priority order), comicInfoEntry
     ComicSettings.kt    the viewer's settings (§12 part 5): PanelMargin, PanelTransition, ComicViewSettings
+    SeriesReading.kt    per series (§12 "Series reading"): ReadingDirection, SpreadSetting, isSpreadPage,
+                        orderPanels (right to left, a spread's pages one after the other), PageOverrides
     ComicView.kt        the viewer's arithmetic: pageTap (tap zones), fitScale, PageLayout / pageLayout
                         (spreads), PageZoom, PageGeometry (zoom at a spot, pan limits, double-tap,
                         startZoom, visibleRegion, regionSampleSize), rotatedRegionInPage, fittedSize,
@@ -797,6 +799,30 @@ waits a moment to be sure it isn't a double-tap.
   `DatabaseQueue`); leaving the screen or pausing the app saves it and waits
   (`DatabaseQueue.writeNow`). Reaching the last page by a turn or the slider makes it
   Finished; reopening it there does not (as books), but going on to the end card does.
+
+**Series reading** (the comics upgrade, phase 1). A comic's series is its folder.
+- **Kept per series** (DataStore keys `comic_series:<folder>:<setting>`): the mode (`mode`), the
+  Panel margin (`margin`, the "zoom level" of Panels mode), Rotate spreads (`rotate_spreads`),
+  Direction (`direction`, `ReadingDirection`: Left to right / Right to left) and Spreads
+  (`spreads`, `SpreadSetting`: Auto / Off), plus Clean up scans as before. A series with nothing
+  saved starts with the mode, margin and Rotate spreads used last (the old global keys, still
+  written on every change), left to right and spreads Auto. Panel transition, Crop margins and
+  Auto-advance (`comic_auto_advance`) stay one setting for every comic.
+- **Right to left** (manga): `pageTap(rightToLeft = true)` mirrors the tap zones (the right 30%
+  goes back); panels are read from the right in each row (`orderPanels` mirrors the page, runs
+  `readingOrder`, mirrors back; panels are stored left to right and ordered when shown, so a
+  change of direction needs no new detection); a height-fitted spread opens at its right edge.
+- **Spreads**: `isSpreadPage` = the page set by hand, else (Spreads Auto) wider than tall. In
+  Panels mode a spread's panels are read one page at a time (`orderPanels(spread = true)`: the
+  left half first, or the right half right to left), unless a panel runs across the middle, when
+  the spread is read as one page.
+- **This page** (overlay, top): "Panels on this page On/Off" (Panels mode; Off = this page is
+  always shown whole) and "Two-page spread On/Off" (flips the page from what its shape says;
+  set back, the choice is dropped). Kept per comic in `comic_pages:<path>` (a string set:
+  `spread:<page>`, `single:<page>`, `whole:<page>`; `PageOverrides`).
+- The overlay groups its rows: "This page", "This series", "All comics".
+- **Reading ahead**: two pages ahead (pictures and page analysis) while the app has room for
+  three more screen-sized pictures plus 64 MB (`pagesAhead`, checked at each turn), else one.
 
 **Page analysis** (part 6; `comics/PageAnalysis.kt`, `analysePage`, plain Kotlin, run on the
 phone by `ComicPageImages.findPanels` and on the PC by the report). A page is decoded small

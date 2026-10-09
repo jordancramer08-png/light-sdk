@@ -146,7 +146,7 @@ fun detailsSidecarName(comicFileName: String): String {
 /** The details file's values, or null when it isn't readable JSON. Blank values count as missing. */
 fun parseDetailsSidecar(json: String): ComicDetails? {
     val sidecar = try {
-        sidecarJson.decodeFromString(DetailsSidecar.serializer(), json.removePrefix("﻿"))
+        sidecarJson.decodeFromString(DetailsSidecar.serializer(), json.removePrefix("\uFEFF"))
     } catch (e: IllegalArgumentException) { // includes SerializationException
         return null
     }
@@ -176,7 +176,7 @@ fun parseDetailsSidecar(json: String): ComicDetails? {
  */
 fun parseComicInfo(xml: String): ComicDetails {
     // The markup reader lowercases tag names, so they are looked up that way.
-    val root = firstDescendant(parseXml(xml.removePrefix("﻿")), "comicinfo") ?: return ComicDetails()
+    val root = firstDescendant(parseXml(xml.removePrefix("\uFEFF")), "comicinfo") ?: return ComicDetails()
     fun text(tag: String): String? = firstChild(root, tag.lowercase())?.let { tidy(allText(it)) }
     fun number(tag: String): Int? = text(tag)?.toIntOrNull()
     val year = number("Year")?.takeIf(::isYear)

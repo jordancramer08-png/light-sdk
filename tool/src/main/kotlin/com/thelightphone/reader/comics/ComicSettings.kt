@@ -37,12 +37,19 @@ enum class PanelTransition(val label: String, val moveMs: Int) {
 
 /**
  * [rotateSpreads]: in Full page mode, a two-page spread is shown turned a quarter turn to fill
- * the screen. [cropMargins]: each page's blank border is cut off (both modes). Clean up scans
- * isn't here: it's remembered per folder ([CleanUp]).
+ * the screen. [cropMargins]: each page's blank border is cut off (both modes). [direction]:
+ * left to right, or right to left (manga). [spreads]: whether wide pages count as spreads.
+ * [autoAdvance]: at the end of a comic, the next one in the folder opens straight away.
+ *
+ * [margin], [rotateSpreads], [direction] and [spreads] are remembered per series (the comic's
+ * folder), the rest for every comic. Clean up scans isn't here: it's remembered per folder ([CleanUp]).
  */
 data class ComicViewSettings(
     val margin: PanelMargin = PanelMargin.DEFAULT,
     val transition: PanelTransition = PanelTransition.DEFAULT,
     val rotateSpreads: Boolean = false,
     val cropMargins: Boolean = true,
+    val direction: ReadingDirection = ReadingDirection.DEFAULT,
+    val spreads: SpreadSetting = SpreadSetting.DEFAULT,
+    val autoAdvance: Boolean = false,
 )

@@ -114,5 +114,5 @@ fun decodeNoteText(bytes: ByteArray): String {
     } catch (e: CharacterCodingException) {
         String(bytes, Charset.forName("windows-1252"))
     }
-    return text.removePrefix("﻿").replace("\r\n", "\n")
+    return text.removePrefix("\uFEFF").replace("\r\n", "\n")
 }

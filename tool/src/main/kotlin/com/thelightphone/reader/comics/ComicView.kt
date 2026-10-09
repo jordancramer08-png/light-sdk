@@ -30,12 +30,18 @@ private const val FITTED_ZOOM_SLACK = 0.01f
 /** What a single tap on the page does. */
 enum class PageTap { TOGGLE_OVERLAY, PREVIOUS, NEXT, NOTHING }
 
-/** Top 15%: the overlay (even while zoomed). Otherwise left 30% back, rest forward — or nothing while zoomed. */
-fun pageTap(x: Float, y: Float, screenWidth: Int, screenHeight: Int, zoomed: Boolean): PageTap = when {
-    y < screenHeight * OVERLAY_TAP_FRACTION -> PageTap.TOGGLE_OVERLAY
-    zoomed -> PageTap.NOTHING
-    x < screenWidth * PREVIOUS_PAGE_TAP_FRACTION -> PageTap.PREVIOUS
-    else -> PageTap.NEXT
+/**
+ * Top 15%: the overlay (even while zoomed). Otherwise left 30% back, rest forward — or nothing
+ * while zoomed. [rightToLeft] (manga) mirrors the sides: the right 30% goes back.
+ */
+fun pageTap(x: Float, y: Float, screenWidth: Int, screenHeight: Int, zoomed: Boolean, rightToLeft: Boolean = false): PageTap {
+    val fromBackSide = if (rightToLeft) screenWidth - x else x
+    return when {
+        y < screenHeight * OVERLAY_TAP_FRACTION -> PageTap.TOGGLE_OVERLAY
+        zoomed -> PageTap.NOTHING
+        fromBackSide < screenWidth * PREVIOUS_PAGE_TAP_FRACTION -> PageTap.PREVIOUS
+        else -> PageTap.NEXT
+    }
 }
 
 /** How much a page is scaled so it fits whole on the screen (below 1 shrinks it). */
@@ -53,8 +59,12 @@ enum class PageLayout { WHOLE, FIT_HEIGHT, ROTATED }
 fun isSpread(imageWidth: Int, imageHeight: Int): Boolean = imageWidth > imageHeight
 
 /** Spreads get their own layout in Full page mode only; in Panels mode every page is laid out whole. */
-fun pageLayout(imageWidth: Int, imageHeight: Int, mode: ComicReadingMode, rotateSpreads: Boolean): PageLayout = when {
-    mode == ComicReadingMode.PANELS || !isSpread(imageWidth, imageHeight) -> PageLayout.WHOLE
+fun pageLayout(imageWidth: Int, imageHeight: Int, mode: ComicReadingMode, rotateSpreads: Boolean): PageLayout =
+    pageLayout(isSpread(imageWidth, imageHeight), mode, rotateSpreads)
+
+/** The same, for a page already known to be a [spread] or not (see [isSpreadPage]). */
+fun pageLayout(spread: Boolean, mode: ComicReadingMode, rotateSpreads: Boolean): PageLayout = when {
+    mode == ComicReadingMode.PANELS || !spread -> PageLayout.WHOLE
     rotateSpreads -> PageLayout.ROTATED
     else -> PageLayout.FIT_HEIGHT
 }
@@ -196,13 +206,20 @@ fun openingPageIndex(savedPage: Int?, pageCount: Int): Int =
     ((savedPage ?: 1) - 1).coerceIn(0, max(0, pageCount - 1))
 
 /**
- * The pages whose pictures stay in memory: the one shown and the next one in the direction
- * of reading ([direction] +1 forward, -1 back), when there is one.
+ * The pages whose pictures stay in memory: the one shown and the next [ahead] in the direction
+ * of reading ([direction] +1 forward, -1 back), as far as there are pages.
  */
-fun pagesToKeep(current: Int, direction: Int, pageCount: Int): Set<Int> {
-    val neighbour = current + direction
-    return if (neighbour in 0 until pageCount) setOf(current, neighbour) else setOf(current)
-}
+fun pagesToKeep(current: Int, direction: Int, pageCount: Int, ahead: Int = 1): Set<Int> =
+    (0..ahead).map { current + it * direction }.filter { it in 0 until pageCount }.toSet()
+
+/** Pictures read ahead when memory is plentiful: two pages. */
+const val MAX_PAGES_AHEAD = 2
+
+/**
+ * How many pages to read ahead: two while at least [roomNeeded] bytes are free for this app
+ * after the pictures already kept, else one. Memory is checked at each turn.
+ */
+fun pagesAhead(freeBytes: Long, roomNeeded: Long): Int = if (freeBytes >= roomNeeded) MAX_PAGES_AHEAD else 1
 
 /** The page the slider points at: [fraction] 0 is the first page, 1 the last. */
 fun sliderPage(fraction: Float, pageCount: Int): Int =

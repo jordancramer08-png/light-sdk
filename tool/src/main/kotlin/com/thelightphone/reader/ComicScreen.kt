@@ -49,6 +49,7 @@ import com.thelightphone.reader.comics.comicSlug
 import com.thelightphone.reader.comics.sliderFraction
 import com.thelightphone.reader.data.ComicCleanUpPreference
 import com.thelightphone.reader.data.ComicMeta
+import com.thelightphone.reader.data.ComicPageOverridePreference
 import com.thelightphone.reader.data.ComicPositionRepository
 import com.thelightphone.reader.data.ComicReadingModePreference
 import com.thelightphone.reader.data.ComicStore
@@ -102,6 +103,7 @@ class ComicScreen(
         ComicReadingModePreference(lightContext.dataStore),
         ComicViewSettingsPreference(lightContext.dataStore),
         ComicCleanUpPreference(lightContext.dataStore),
+        ComicPageOverridePreference(lightContext.dataStore),
     )
 
     @Composable
@@ -209,27 +211,36 @@ class ComicScreen(
     }
 
     /**
-     * The settings of the mode in use (panel margin and transition in Panels, Rotate spreads in
-     * Full page), then the two for both modes: Crop margins and Clean up scans.
+     * "This page" first (in Panels its panels on or off; whether it's a spread), then the
+     * series' own settings (the mode's: panel margin in Panels, Rotate spreads in Full page;
+     * then Reading direction and Spreads), then those for every comic (Panel transition, Crop
+     * margins, Auto-advance) and Clean up scans (per folder).
      */
     @Composable
     private fun ModeSettings(state: ComicViewState) {
         val settings = state.settings
+        SectionLabel("This page")
+        if (state.mode == ComicReadingMode.PANELS) {
+            OnOffRow(
+                label = "Panels on this page",
+                isOn = !viewModel.pageShownWhole(state),
+                onClick = viewModel::togglePageWhole,
+            )
+            HairlineDivider()
+        }
+        OnOffRow(
+            label = "Two-page spread",
+            isOn = state.pageIsSpread,
+            onClick = viewModel::togglePageSpread,
+        )
+        HairlineDivider()
+        SectionLabel("This series")
         if (state.mode == ComicReadingMode.PANELS) {
             StepperRow(
                 label = "Panel margin",
                 value = settings.margin.label,
                 onPrevious = settings.margin.previous?.let { { viewModel.setPanelMargin(it) } },
                 onNext = settings.margin.next?.let { { viewModel.setPanelMargin(it) } },
-                previousSymbol = "‹",
-                nextSymbol = "›",
-            )
-            HairlineDivider()
-            StepperRow(
-                label = "Panel transition",
-                value = settings.transition.label,
-                onPrevious = settings.transition.previous?.let { { viewModel.setPanelTransition(it) } },
-                onNext = settings.transition.next?.let { { viewModel.setPanelTransition(it) } },
                 previousSymbol = "‹",
                 nextSymbol = "›",
             )
@@ -241,10 +252,22 @@ class ComicScreen(
             )
         }
         HairlineDivider()
-        OnOffRow(
-            label = "Crop margins",
-            isOn = settings.cropMargins,
-            onClick = { viewModel.setCropMargins(!settings.cropMargins) },
+        StepperRow(
+            label = "Direction",
+            value = settings.direction.label,
+            onPrevious = settings.direction.previous?.let { { viewModel.setDirection(it) } },
+            onNext = settings.direction.next?.let { { viewModel.setDirection(it) } },
+            previousSymbol = "‹",
+            nextSymbol = "›",
+        )
+        HairlineDivider()
+        StepperRow(
+            label = "Spreads",
+            value = settings.spreads.label,
+            onPrevious = settings.spreads.previous?.let { { viewModel.setSpreads(it) } },
+            onNext = settings.spreads.next?.let { { viewModel.setSpreads(it) } },
+            previousSymbol = "‹",
+            nextSymbol = "›",
         )
         HairlineDivider()
         StepperRow(
@@ -254,6 +277,30 @@ class ComicScreen(
             onNext = state.cleanUp.next?.let { { viewModel.setCleanUp(it) } },
             previousSymbol = "‹",
             nextSymbol = "›",
+        )
+        HairlineDivider()
+        SectionLabel("All comics")
+        if (state.mode == ComicReadingMode.PANELS) {
+            StepperRow(
+                label = "Panel transition",
+                value = settings.transition.label,
+                onPrevious = settings.transition.previous?.let { { viewModel.setPanelTransition(it) } },
+                onNext = settings.transition.next?.let { { viewModel.setPanelTransition(it) } },
+                previousSymbol = "‹",
+                nextSymbol = "›",
+            )
+            HairlineDivider()
+        }
+        OnOffRow(
+            label = "Crop margins",
+            isOn = settings.cropMargins,
+            onClick = { viewModel.setCropMargins(!settings.cropMargins) },
+        )
+        HairlineDivider()
+        OnOffRow(
+            label = "Auto-advance",
+            isOn = settings.autoAdvance,
+            onClick = { viewModel.setAutoAdvance(!settings.autoAdvance) },
         )
         HairlineDivider()
     }
@@ -350,6 +397,19 @@ private fun modeLabel(mode: ComicReadingMode): String = when (mode) {
 }
 
 private const val MODE_BAR_GRID_UNITS = 4f
+
+/** A small, lighter heading over a group of the overlay's settings ("This page", "This series", "All comics"). */
+@Composable
+private fun SectionLabel(text: String) {
+    LightText(
+        text = text,
+        variant = LightTextVariant.Detail,
+        lighten = true,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 1f.gridUnitsAsDp(), top = 0.75f.gridUnitsAsDp(), bottom = 0.25f.gridUnitsAsDp()),
+    )
+}
 
 /** "Next in folder" and its title, "Last in this folder.", or "Preparing…" while it's looked for. */
 @Composable

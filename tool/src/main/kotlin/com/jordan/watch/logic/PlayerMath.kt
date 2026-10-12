@@ -10,6 +10,9 @@ object PlayerMath {
     /** While scanning, one jump every this many ms. */
     const val SCAN_TICK_MS = 250L
 
+    /** The skip-ahead button (past intros and recaps). */
+    const val SKIP_AHEAD_MS = 90_000L
+
     /** 65_000 -> "1:05", 3_725_000 -> "1:02:05". */
     fun timeLabel(ms: Long): String {
         val total = ms.coerceAtLeast(0) / 1000

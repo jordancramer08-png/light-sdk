@@ -39,6 +39,12 @@ object StorageMath {
         else -> "0 KB"
     }
 
+    /** Settings line: "Watch uses 23.4 GB of its 50 GB · 12.1 GB free on the phone". */
+    fun usageLine(usedBytes: Long, freeBytes: Long?, capBytes: Long = CAP_BYTES): String {
+        val used = "Watch uses ${formatBytes(usedBytes)} of its ${formatBytes(capBytes)} (${percentUsed(usedBytes, capBytes)}%)"
+        return if (freeBytes == null || freeBytes < 0) used else "$used · ${formatBytes(freeBytes)} free on the phone"
+    }
+
     /** "1080p H.264 AAC · 2.1 GB"; unknown parts are left out. */
     fun qualityLine(height: Int?, videoCodec: String?, audioCodec: String?, bytes: Long?): String {
         val parts = listOfNotNull(

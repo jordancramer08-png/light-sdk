@@ -32,6 +32,12 @@ data class WatchSettings(
     val lastOrientation: String = "PORTRAIT",
     /** "SMALL", "MEDIUM", "LARGE" or "XLARGE". */
     val subtitleSize: String = "MEDIUM",
+    /** "BOTTOM", "HIGHER" or "TOP". */
+    val subtitlePosition: String = "BOTTOM",
+    /** Fit / Fill / Zoom per orientation ("PORTRAIT", "LANDSCAPE" -> [AspectMode] name). */
+    val aspects: Map<String, String> = emptyMap(),
+    /** Pinch zoom (1–4) per orientation. */
+    val pinches: Map<String, Float> = emptyMap(),
     /** Each tab's sort and filters, by [BrowseTab] name. */
     val tabViews: Map<String, TabView> = emptyMap(),
 ) {

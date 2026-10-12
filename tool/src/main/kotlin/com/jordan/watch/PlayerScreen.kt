@@ -1,26 +1,29 @@
 package com.jordan.watch
 
+import android.view.KeyEvent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -29,12 +32,20 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalDensity
+import com.jordan.watch.logic.Aspect
+import com.jordan.watch.logic.AspectMode
+import com.jordan.watch.logic.Cue
+import com.jordan.watch.logic.NextUp
+import com.jordan.watch.logic.NextUpCountdown
 import com.jordan.watch.logic.PlayerMath
 import com.jordan.watch.logic.Resume
+import com.jordan.watch.logic.SleepTimer
 import com.jordan.watch.logic.Speed
+import com.jordan.watch.logic.Subtitles
 import com.jordan.watch.storage.WatchLibrary
 import com.jordan.watch.storage.WatchPaths
 import com.jordan.watch.ui.BackTopBar
@@ -57,45 +68,64 @@ import com.thelightphone.sdk.ui.lightClickable
 import com.thelightphone.sdk.video.DefaultLightVideo
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 
-/**
- * Full-screen player for one movie or episode. The app stays portrait; with
- * [FeatureFlags.ROTATED_PLAYER] on, the rotate button turns the whole player (picture,
- * controls and touches) 90 degrees without stopping it. Position and speed are saved every
- * 10 s while playing and at once on pause, seek, speed change and leaving.
- */
-class PlayerScreen(sealedActivity: SealedLightActivity, private val id: String) : VolumeKeyScreen<Unit>(sealedActivity) {
+/** Which panel is open over the player (only one at a time). */
+enum class PlayerPanel { NONE, SPEED, AUDIO, SUBTITLES, SLEEP, DETAILS }
 
-    private val player = DefaultLightVideo(sealedActivity).newPlayer()
-    private val playback = WatchLibrary.repositories.playback
-    private val settings = WatchLibrary.repositories.settings
+/** Off, a track inside the video file, or a sidecar .srt (by its place in the list). */
+sealed interface SubtitleChoice {
+    data object Off : SubtitleChoice
+    data class Embedded(val trackId: String) : SubtitleChoice
+    data class Sidecar(val index: Int) : SubtitleChoice
+}
+
+/** A sidecar .srt file, already read. */
+data class SidecarTrack(val name: String, val cues: List<Cue>)
+
+/**
+ * Full-screen player for one movie or episode, and the next ones after it. The app stays
+ * portrait; with [FeatureFlags.ROTATED_PLAYER] on, the rotate button turns the whole player
+ * (picture, controls and touches) 90 degrees without stopping it. Position and speed are
+ * saved every 10 s while playing and at once on pause, seek, speed change and leaving.
+ * The panels (speed, audio, subtitles, sleep, details) are in PlayerPanels.kt.
+ */
+class PlayerScreen(sealedActivity: SealedLightActivity, startId: String) : VolumeKeyScreen<Unit>(sealedActivity) {
+
+    internal val player = DefaultLightVideo(sealedActivity).newPlayer()
+    internal val playback = WatchLibrary.repositories.playback
+    internal val settings = WatchLibrary.repositories.settings
+    internal var id by mutableStateOf(startId)
     private var started = false
     private var cantPlay by mutableStateOf(false)
     private var turns by mutableIntStateOf(0)
     private var controlsShown by mutableStateOf(true)
     private var lastTouchMs by mutableLongStateOf(0L)
-    private var speedPanel by mutableStateOf(false)
+    internal var panel by mutableStateOf(PlayerPanel.NONE)
     private var dragFraction by mutableStateOf<Float?>(null)
+    private var locked by mutableStateOf(false)
+    private var lockHintShown by mutableStateOf(false)
+    private var aspect by mutableStateOf(AspectMode.FIT)
+    private var pinch by mutableFloatStateOf(1f)
+    internal var subtitleChoice by mutableStateOf<SubtitleChoice>(SubtitleChoice.Off)
+    internal var subtitleOffsetMs by mutableLongStateOf(0L)
+    internal val sidecars = MutableStateFlow<List<SidecarTrack>>(emptyList())
+    internal var sleepChoice by mutableStateOf<Int?>(null)
+    internal var sleepEndsAt by mutableStateOf<Long?>(null)
+    internal var nowMs by mutableLongStateOf(System.currentTimeMillis())
+    private var nextUpStartedAt by mutableStateOf<Long?>(null)
+    internal var fileBytes = 0L
 
     override fun willShow() {
         if (started) return
         started = true
         val s = settings.settings.value
         turns = PlayerMath.startTurns(s.startIn, s.lastOrientation, FeatureFlags.ROTATED_PLAYER)
-        val found = videoFile()
-        if (found == null || !found.first.isFile) {
-            cantPlay = true
-            return
-        }
-        val (file, runtimeMin) = found
-        val saved = playback.position(id)
-        val start = if (playback.isWatched(id)) 0L else Resume.startPosition(saved?.positionMs ?: 0, (runtimeMin ?: 0) * 60_000L)
-        player.setSpeed(Speed.snap(saved?.speed ?: 1f))
-        player.setSource(file, start)
-        player.play()
+        loadAspect()
+        openCurrent()
     }
 
     override fun willHide() = saveAndPause()
@@ -105,6 +135,19 @@ class PlayerScreen(sealedActivity: SealedLightActivity, private val id: String) 
     override fun onScreenDestroy() {
         save()
         player.release()
+    }
+
+    /** Headset and Bluetooth buttons: play/pause, and next/previous skip. Volume keys as everywhere. */
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        when (keyCode) {
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_HEADSETHOOK -> togglePlay()
+            KeyEvent.KEYCODE_MEDIA_PLAY -> player.play()
+            KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_MEDIA_STOP -> saveAndPause()
+            KeyEvent.KEYCODE_MEDIA_NEXT, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> skipBy(1)
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS, KeyEvent.KEYCODE_MEDIA_REWIND -> skipBy(-1)
+            else -> return super.onKeyDown(keyCode, event)
+        }
+        return true
     }
 
     @Composable
@@ -120,51 +163,120 @@ class PlayerScreen(sealedActivity: SealedLightActivity, private val id: String) 
         val isPlaying by player.isPlaying.collectAsState()
         val ended by player.ended.collectAsState()
         AutoSave(isPlaying, ended)
-        LaunchedEffect(controlsShown, lastTouchMs, isPlaying, speedPanel, dragFraction) {
-            if (controlsShown && isPlaying && !speedPanel && dragFraction == null) {
-                delay(PlayerMath.CONTROLS_HIDE_MS)
-                controlsShown = false
-            }
-        }
+        Clock()
+        AutoHide(isPlaying)
         LightTheme(colors = LightThemeColors.Dark) {
             Box(Modifier.fillMaxSize().background(Color.Black)) {
                 Box(Modifier.fillMaxSize().quarterTurned(turns), contentAlignment = Alignment.Center) {
                     Picture()
-                    TouchLayer()
-                    AnimatedVisibility(visible = controlsShown, enter = fadeIn(), exit = fadeOut()) {
+                    SubtitleLayer()
+                    if (locked) LockLayer() else TouchLayer()
+                    AnimatedVisibility(visible = controlsShown && !locked, enter = fadeIn(), exit = fadeOut()) {
                         Controls(isPlaying, ended)
                     }
+                    if (nextUpStartedAt != null) NextUpOverlay()
                 }
             }
         }
     }
 
-    /** The video, as big as fits without cropping (aspect choices come in Session 7). */
+    @Composable
+    private fun AutoHide(isPlaying: Boolean) {
+        LaunchedEffect(controlsShown, lastTouchMs, isPlaying, panel, dragFraction) {
+            if (controlsShown && isPlaying && panel == PlayerPanel.NONE && dragFraction == null) {
+                delay(PlayerMath.CONTROLS_HIDE_MS)
+                controlsShown = false
+            }
+        }
+        LaunchedEffect(lockHintShown, lastTouchMs) {
+            if (lockHintShown) {
+                delay(PlayerMath.CONTROLS_HIDE_MS)
+                lockHintShown = false
+            }
+        }
+    }
+
+    /** Ticks once a second for the sleep timer and the next-up countdown. */
+    @Composable
+    private fun Clock() {
+        LaunchedEffect(Unit) {
+            while (true) {
+                nowMs = System.currentTimeMillis()
+                if (SleepTimer.isDue(sleepEndsAt, nowMs)) sleepNow()
+                val started = nextUpStartedAt
+                if (started != null && NextUpCountdown.secondsLeft(started, nowMs) == 0) playNext()
+                delay(CLOCK_TICK_MS)
+            }
+        }
+    }
+
+    /** The video, sized by Fit / Fill / Zoom and the pinch, cropped to the screen. */
     @Composable
     private fun Picture() {
         val (w, h) = player.videoSize.collectAsState().value
-        val modifier = if (w > 0 && h > 0) Modifier.aspectRatio(w.toFloat() / h) else Modifier.fillMaxSize()
-        player.Surface(modifier)
+        BoxWithConstraints(Modifier.fillMaxSize().clipToBounds(), contentAlignment = Alignment.Center) {
+            val boxW = constraints.maxWidth.toFloat()
+            val boxH = constraints.maxHeight.toFloat()
+            val (pw, ph) = Aspect.pictureSize(boxW, boxH, w, h, aspect, pinch)
+            val modifier = with(LocalDensity.current) { Modifier.requiredSize(pw.toDp(), ph.toDp()) }
+            player.Surface(modifier)
+        }
     }
 
-    /** Tap shows or hides the controls; double tap on the left/right half skips. */
+    /** Tap shows or hides the controls; double tap on the left/right half skips; pinch zooms. */
     @Composable
     private fun TouchLayer() {
         Box(
-            Modifier.fillMaxSize().pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = {
-                        val show = !controlsShown
-                        speedPanel = false
-                        poke()
-                        controlsShown = show
-                    },
-                    onDoubleTap = { offset ->
-                        skipBy(PlayerMath.doubleTapDirection(offset.x, size.width.toFloat()))
-                    },
-                )
-            },
+            Modifier.fillMaxSize()
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = {
+                            val show = !controlsShown
+                            panel = PlayerPanel.NONE
+                            poke()
+                            controlsShown = show
+                        },
+                        onDoubleTap = { offset ->
+                            skipBy(PlayerMath.doubleTapDirection(offset.x, size.width.toFloat()))
+                        },
+                    )
+                }
+                .pointerInput(Unit) {
+                    detectTransformGestures { _, _, zoom, _ -> if (zoom != 1f) pinch = Aspect.clampPinch(pinch * zoom) }
+                },
         )
+        LaunchedEffect(pinch) {
+            delay(PINCH_SAVE_DELAY_MS)
+            saveAspect()
+        }
+    }
+
+    /** While locked, touches do nothing except show the Unlock button for 3 s. */
+    @Composable
+    private fun LockLayer() {
+        Box(
+            Modifier.fillMaxSize().pointerInput(Unit) {
+                detectTapGestures(onTap = {
+                    lockHintShown = true
+                    lastTouchMs = System.currentTimeMillis()
+                })
+            },
+            contentAlignment = Alignment.BottomCenter,
+        ) {
+            if (lockHintShown) {
+                Column(
+                    Modifier.padding(bottom = 3f.gridUnitsAsDp()).background(Color.Black.copy(alpha = 0.7f)).padding(1f.gridUnitsAsDp()),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    LightText(text = "Controls are locked", variant = LightTextVariant.Detail, lighten = true)
+                    PlayerTextButton("Unlock", underline = true) {
+                        locked = false
+                        lockHintShown = false
+                        poke()
+                    }
+                }
+            }
+        }
     }
 
     @Composable
@@ -172,11 +284,16 @@ class PlayerScreen(sealedActivity: SealedLightActivity, private val id: String) 
         Column(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f))) {
             TopRow()
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                CenterButtons(isPlaying, ended)
+                if (panel == PlayerPanel.NONE) CenterButtons(isPlaying, ended) else PanelArea()
             }
-            if (speedPanel) SpeedPanel()
             SeekRow()
+            ButtonRow(
+                "Speed ${Speed.label(player.speed.collectAsState().value)}" to PlayerPanel.SPEED,
+                "Audio" to PlayerPanel.AUDIO,
+                "Subtitles" to PlayerPanel.SUBTITLES,
+            )
             BottomRow()
+            Spacer(Modifier.height(0.5f.gridUnitsAsDp()))
         }
     }
 
@@ -186,25 +303,28 @@ class PlayerScreen(sealedActivity: SealedLightActivity, private val id: String) 
         Row(Modifier.fillMaxWidth().padding(horizontal = 0.5f.gridUnitsAsDp()), verticalAlignment = Alignment.CenterVertically) {
             IconButton(LightIcons.BACK) { goBack() }
             OneLine(title, LightTextVariant.Detail, Modifier.weight(1f))
+            PlayerTextButton("Details", underline = panel == PlayerPanel.DETAILS) { togglePanel(PlayerPanel.DETAILS) }
             if (FeatureFlags.ROTATED_PLAYER) IconButton(LightIcons.ROTATE, onClick = ::rotate)
         }
     }
 
     @Composable
     private fun CenterButtons(isPlaying: Boolean, ended: Boolean) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2f.gridUnitsAsDp())) {
-            SkipButton(-1)
-            IconButton(if (isPlaying) LightIcons.PAUSE else LightIcons.PLAY, size = 4f) {
-                when {
-                    isPlaying -> player.pause()
-                    ended -> {
-                        player.seekTo(0)
-                        player.play()
-                    }
-                    else -> player.play()
+        val (previous, next) = remember(id) { neighbours() }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2f.gridUnitsAsDp())) {
+                SkipButton(-1)
+                IconButton(if (isPlaying) LightIcons.PAUSE else LightIcons.PLAY, size = 4f) {
+                    if (ended) restart() else togglePlay()
                 }
+                SkipButton(1)
             }
-            SkipButton(1)
+            Spacer(Modifier.height(1f.gridUnitsAsDp()))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(1.5f.gridUnitsAsDp())) {
+                PlayerTextButton("‹ Previous", enabled = previous != null) { previous?.let(::playId) }
+                PlayerTextButton("+90s") { skipAhead() }
+                PlayerTextButton("Next ›", enabled = next != null) { next?.let(::playId) }
+            }
         }
     }
 
@@ -283,35 +403,52 @@ class PlayerScreen(sealedActivity: SealedLightActivity, private val id: String) 
         }
     }
 
+    /** A row of panel buttons; the open panel's button is underlined. */
     @Composable
-    private fun BottomRow() {
-        val speed by player.speed.collectAsState()
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 1f.gridUnitsAsDp(), vertical = 0.5f.gridUnitsAsDp()),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton("Speed ${Speed.label(speed)}", underline = speedPanel) { speedPanel = !speedPanel }
+    private fun ButtonRow(vararg buttons: Pair<String, PlayerPanel>) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 1f.gridUnitsAsDp()), horizontalArrangement = Arrangement.SpaceBetween) {
+            buttons.forEach { (label, which) -> PlayerTextButton(label, underline = panel == which) { togglePanel(which) } }
         }
     }
 
-    /** − and + in 0.25 steps, and the quick speeds. The chosen one is underlined. */
     @Composable
-    private fun SpeedPanel() {
-        val speed = Speed.snap(player.speed.collectAsState().value)
-        Column(Modifier.fillMaxWidth().padding(horizontal = 1f.gridUnitsAsDp())) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton("−") { changeSpeed(Speed.slower(speed)) }
-                LightText(
-                    text = Speed.label(speed),
-                    variant = LightTextVariant.Subheading,
-                    modifier = Modifier.width(5f.gridUnitsAsDp()),
-                )
-                TextButton("+") { changeSpeed(Speed.faster(speed)) }
+    private fun BottomRow() {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 1f.gridUnitsAsDp()), horizontalArrangement = Arrangement.SpaceBetween) {
+            PlayerTextButton(Aspect.label(aspect)) { changeAspect(Aspect.next(aspect)) }
+            PlayerTextButton(SleepTimer.buttonText(sleepChoice, sleepEndsAt, nowMs), underline = panel == PlayerPanel.SLEEP) {
+                togglePanel(PlayerPanel.SLEEP)
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Speed.quick.forEach { q -> TextButton(Speed.label(q), underline = Speed.snap(q) == speed) { changeSpeed(q) } }
+            PlayerTextButton("Lock") {
+                locked = true
+                panel = PlayerPanel.NONE
+                lockHintShown = true
+                lastTouchMs = System.currentTimeMillis()
             }
+        }
+    }
+
+    /** "Up next" with a 10-second countdown; Cancel stays on this one. */
+    @Composable
+    private fun NextUpOverlay() {
+        val started = nextUpStartedAt ?: return
+        val next = remember(id) { neighbours().second } ?: return
+        Column(
+            Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f)).padding(2f.gridUnitsAsDp()),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            LightText(text = "Up next", variant = LightTextVariant.Detail, lighten = true)
+            OneLine(titleText(next), LightTextVariant.Subheading)
             Spacer(Modifier.height(0.5f.gridUnitsAsDp()))
+            LightText(text = "Starts in ${NextUpCountdown.secondsLeft(started, nowMs)} s", variant = LightTextVariant.Copy)
+            Spacer(Modifier.height(1.5f.gridUnitsAsDp()))
+            Row(horizontalArrangement = Arrangement.spacedBy(2f.gridUnitsAsDp())) {
+                PlayerTextButton("Play now", underline = true) { playNext() }
+                PlayerTextButton("Cancel", underline = true) {
+                    nextUpStartedAt = null
+                    poke()
+                }
+            }
         }
     }
 
@@ -326,20 +463,7 @@ class PlayerScreen(sealedActivity: SealedLightActivity, private val id: String) 
         ) { LightIcon(icon, size = size) }
     }
 
-    @Composable
-    private fun TextButton(text: String, underline: Boolean = false, onClick: () -> Unit) {
-        Box(
-            Modifier.height(3f.gridUnitsAsDp()).lightClickable(onClick = {
-                onClick()
-                poke()
-            }).padding(horizontal = 0.5f.gridUnitsAsDp()),
-            contentAlignment = Alignment.Center,
-        ) {
-            LightText(text = text, variant = LightTextVariant.Detail, underline = underline, maxLines = 1, overflow = TextOverflow.Clip)
-        }
-    }
-
-    /** Saves every 10 s while playing, at once when it pauses, and marks it watched at the end. */
+    /** Saves every 10 s while playing, at once when it pauses; at the end marks it watched. */
     @Composable
     private fun AutoSave(isPlaying: Boolean, ended: Boolean) {
         LaunchedEffect(isPlaying) {
@@ -353,12 +477,86 @@ class PlayerScreen(sealedActivity: SealedLightActivity, private val id: String) 
                 save()
             }
         }
-        LaunchedEffect(ended) {
-            if (ended) {
-                save()
-                WatchLibrary.inBackground { playback.markWatched(id, System.currentTimeMillis()) }
-            }
+        LaunchedEffect(ended, id) {
+            if (ended) onEnded()
         }
+    }
+
+    private fun onEnded() {
+        save()
+        val finished = id
+        WatchLibrary.inBackground { playback.markWatched(finished, System.currentTimeMillis()) }
+        val wantsNext = NextUpCountdown.shouldOffer(neighbours().second != null, sleepChoice)
+        if (sleepChoice == SleepTimer.END_OF_TITLE) setSleep(null)
+        if (wantsNext) nextUpStartedAt = System.currentTimeMillis()
+    }
+
+    /** Opens [id]'s file at its saved place. Anything wrong shows "Can't play this file". */
+    private fun openCurrent() {
+        val found = videoFile()
+        if (found == null || !found.first.isFile) {
+            cantPlay = true
+            return
+        }
+        val (file, runtimeMin) = found
+        fileBytes = file.length()
+        val saved = playback.position(id)
+        val start = if (playback.isWatched(id)) 0L else Resume.startPosition(saved?.positionMs ?: 0, (runtimeMin ?: 0) * 60_000L)
+        try {
+            player.setSpeed(Speed.snap(saved?.speed ?: 1f))
+            player.setSource(file, start)
+            player.selectSubtitleTrack(null)
+            player.play()
+        } catch (e: Exception) {
+            cantPlay = true
+            return
+        }
+        loadSidecars(file)
+    }
+
+    /** Reads the .srt files next to the video, off the main thread. A broken one is skipped. */
+    private fun loadSidecars(video: File) {
+        sidecars.value = emptyList()
+        val forId = id
+        WatchLibrary.inBackground {
+            val names = video.parentFile?.list()?.toList().orEmpty()
+            val tracks = Subtitles.findSidecars(video.name, names).mapNotNull { side ->
+                val cues = runCatching { Subtitles.parseSrt(File(video.parentFile, side.fileName).readText()) }.getOrNull()
+                cues?.takeIf { it.isNotEmpty() }?.let { SidecarTrack(Subtitles.languageName(side.language) ?: "Subtitles", it) }
+            }
+            if (forId == id) sidecars.value = tracks
+        }
+    }
+
+    /** Switches to another title in the same player: saves this one, resets per-title choices. */
+    internal fun playId(nextId: String) {
+        save()
+        nextUpStartedAt = null
+        subtitleChoice = SubtitleChoice.Off
+        subtitleOffsetMs = 0L
+        panel = PlayerPanel.NONE
+        id = nextId
+        openCurrent()
+        poke()
+    }
+
+    private fun playNext() {
+        nextUpStartedAt = null
+        neighbours().second?.let(::playId)
+    }
+
+    private fun restart() {
+        nextUpStartedAt = null
+        player.seekTo(0)
+        player.play()
+    }
+
+    internal fun togglePlay() {
+        if (player.isPlaying.value) saveAndPause() else player.play()
+    }
+
+    internal fun togglePanel(which: PlayerPanel) {
+        panel = if (panel == which) PlayerPanel.NONE else which
     }
 
     private fun skipBy(direction: Int) {
@@ -367,19 +565,57 @@ class PlayerScreen(sealedActivity: SealedLightActivity, private val id: String) 
         save()
     }
 
-    private fun changeSpeed(speed: Float) {
+    private fun skipAhead() {
+        player.seekTo(PlayerMath.skip(player.positionMs.value, PlayerMath.SKIP_AHEAD_MS, player.durationMs.value))
+        save()
+    }
+
+    internal fun changeSpeed(speed: Float) {
         player.setSpeed(Speed.snap(speed))
         save()
+    }
+
+    internal fun setSleep(choice: Int?) {
+        sleepChoice = choice
+        sleepEndsAt = SleepTimer.endsAt(choice, System.currentTimeMillis())
+    }
+
+    private fun sleepNow() {
+        setSleep(null)
+        saveAndPause()
+        controlsShown = true
+    }
+
+    private fun changeAspect(mode: AspectMode) {
+        aspect = mode
+        pinch = 1f
+        saveAspect()
+    }
+
+    private fun orientation() = PlayerMath.orientationName(turns)
+
+    private fun loadAspect() {
+        val s = settings.settings.value
+        aspect = Aspect.fromName(s.aspects[orientation()])
+        pinch = Aspect.clampPinch(s.pinches[orientation()] ?: 1f)
+    }
+
+    private fun saveAspect() {
+        val key = orientation()
+        val mode = aspect.name
+        val zoom = pinch
+        WatchLibrary.inBackground { settings.update { it.copy(aspects = it.aspects + (key to mode), pinches = it.pinches + (key to zoom)) } }
     }
 
     private fun rotate() {
         turns = (turns + 1) % 2
         val name = PlayerMath.orientationName(turns)
+        loadAspect()
         WatchLibrary.inBackground { settings.update { it.copy(lastOrientation = name) } }
     }
 
     /** Any touch keeps the controls up for another 3 s. */
-    private fun poke() {
+    internal fun poke() {
         controlsShown = true
         lastTouchMs = System.currentTimeMillis()
     }
@@ -392,11 +628,12 @@ class PlayerScreen(sealedActivity: SealedLightActivity, private val id: String) 
     /** Saves position and speed, once the player knows how long the file is. */
     private fun save() {
         if (!started || cantPlay) return
+        val forId = id
         val position = player.positionMs.value
         val duration = player.durationMs.value
         if (duration <= 0) return
         val speed = Speed.snap(player.speed.value)
-        WatchLibrary.inBackground { playback.savePosition(id, position, duration, speed, System.currentTimeMillis()) }
+        WatchLibrary.inBackground { playback.savePosition(forId, position, duration, speed, System.currentTimeMillis()) }
     }
 
     /** The video file and the json runtime (for the 5 s rewind on reopen), or null. */
@@ -407,14 +644,30 @@ class PlayerScreen(sealedActivity: SealedLightActivity, private val id: String) 
         return null
     }
 
-    private fun titleText(): String {
+    /** The previous and next film in the collection, or episode in the show (ids, or null). */
+    private fun neighbours(): Pair<String?, String?> {
         val library = WatchLibrary.state.value.library
-        library.movie(id)?.let { return it.movie.title }
-        library.episode(id)?.let { (show, e) -> return "${show.show.title} · S${e.episode.season} E${e.episode.episode} · ${e.episode.title}" }
+        library.movie(id)?.let { entry ->
+            val all = library.movies.map { it.movie }
+            return NextUp.previousMovie(entry.movie, all)?.id to NextUp.nextMovie(entry.movie, all)?.id
+        }
+        library.episode(id)?.let { (show, entry) ->
+            val all = show.episodes.map { it.episode }
+            return NextUp.previousEpisode(entry.episode, all)?.id to NextUp.nextEpisode(entry.episode, all)?.id
+        }
+        return null to null
+    }
+
+    private fun titleText(forId: String = id): String {
+        val library = WatchLibrary.state.value.library
+        library.movie(forId)?.let { return it.movie.title }
+        library.episode(forId)?.let { (show, e) -> return "${show.show.title} · S${e.episode.season} E${e.episode.episode} · ${e.episode.title}" }
         return ""
     }
 
     private companion object {
         const val SEEK_SETTLE_MS = 300L
+        const val CLOCK_TICK_MS = 1_000L
+        const val PINCH_SAVE_DELAY_MS = 600L
     }
 }

@@ -201,6 +201,52 @@ tool code BEFORE any build is installed.
   subtitles, lock button, 90 s skip-ahead, previous/next, sleep timer, next-up countdown,
   Details overlay, sync nudges.
 
+## Session 7 — Player extras (2026-10-12) ✅
+
+- **Layout:** top row back · title · **Details** · rotate; middle play/pause with skip
+  buttons, then **‹ Previous · +90s · Next ›** (previous/next film in the collection or
+  episode in the show, lighter when there is none); seek bar; **Speed · Audio · Subtitles**;
+  **Fit/Fill/Zoom · Sleep · Lock**. A panel opens in the middle area (scrolls if tall);
+  its button is underlined. Code: `PlayerScreen.kt` (state + actions) and `PlayerPanels.kt`.
+- **Aspect:** button cycles Fit → Fill → Zoom (Zoom = Fill × 1.33); pinch zooms 1–4× on top.
+  Both saved per orientation (`aspects`, `pinches` in settings.json). Changing the mode
+  resets the pinch. `logic/Aspect`.
+- **Subtitles:** Off / tracks inside the file ("(in file)") / `movie*.srt` next to the video
+  ("English (.srt)"). The app reads .srt itself (`logic/Subtitles`), so their **sync nudge**
+  (100 ms steps, ±10 s) moves lines earlier or later. Tracks inside the file come from
+  ExoPlayer as they play, so they can only be held **later** (`DelayedText`); the panel says
+  so. Size (S/M/L/XL) and Position (Bottom / Raised / Top) in the panel and in Settings.
+  Drawn white on a dark box. Subtitles start Off for every title.
+- **Audio track picker** (name or language + codec).
+- **Audio/video sync nudge: skipped.** The SDK player has no audio-offset control and
+  ExoPlayer has no simple public one; it would need an SDK change. Say if wanted.
+- **Lock:** hides the controls; a tap shows "Controls are locked" + Unlock for 3 s. Volume
+  keys and headset buttons still work.
+- **Sleep timer:** Off / 15 / 30 / 45 / 60 min / End of this one. The button shows "Sleep
+  12m". When it runs out: save + pause. "End of this one" also stops next-up.
+- **Next up:** at the end of a collection film or episode: "Up next · title · Starts in 10 s"
+  with Play now / Cancel. It plays in the same player (no new screen), saving the old one
+  first and marking it watched.
+- **Details panel:** video codec, picture size (1080p), frame rate, video bitrate when the
+  file says, file average bitrate, audio codec, file size. `logic/TechDetails`.
+- **Headphones/Bluetooth:** pause on disconnect is the SDK player's
+  `setHandleAudioBecomingNoisy(true)` (already on). Headset/Bluetooth buttons: play/pause,
+  hook, next/previous (= skip forward/back), fast-forward/rewind handled in
+  `PlayerScreen.onKeyDown`. **Phone Day check:** without a MediaSession Android may not
+  deliver these keys to the app; if not, propose an SDK change (media session in the SDK player).
+- **Can't play:** missing file, player error, or an exception while opening → "Can't play
+  this file." with a back button. A broken .srt is skipped.
+- **Settings:** new "Subtitle position" and **Storage**: "Watch uses 23.4 GB of its 50.0 GB
+  (47%) · 12.1 GB free on the phone" (adds up every file under /sdcard/Watch, off the main
+  thread; `storage/StorageUsage`).
+- Polish: player text buttons are 48 dp+ tall, panels use the Reader rows, spacing evenned
+  out in the player. Library screens were not re-spaced (no phone to judge on).
+- Tests: 98 passing (9 new in PlayerExtrasTest). Lint: 0 errors, 5 warnings (4 old +
+  `UsableSpace` hint, harmless). Build log: `logs/session7-build.log`.
+- **Phone Day checks:** pinch feel; Zoom amount; subtitle sizes readable; headset/BT buttons
+  reach the app; pause on unplugging headphones and on Bluetooth off; next-up countdown;
+  Details numbers; storage line speed with 50 GB of files.
+
 ## Session plan
 
 | # | Session | Done when |

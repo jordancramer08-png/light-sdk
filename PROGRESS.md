@@ -42,6 +42,21 @@ tool code BEFORE any build is installed.
 
 **Decisions (Jordan, 2026-10-12):** (a) Way 1 — SDK video player. (c) Way 1 — rotated player in a portrait app.
 
+## Session 1 — Clean slate and foundations (2026-10-12) ✅
+
+- Bible code removed from `tool/` (still in git history). `tool/lighttool.toml` is now
+  `com.jordan.watch` / `Watch`, portrait, permission MANAGE_EXTERNAL_STORAGE only.
+  Checked in the built manifest: `package="com.jordan.watch"`, `label="Watch"`.
+- SDK commit "SDK: allow MANAGE_EXTERNAL_STORAGE in lighttool.toml" (same as Listen's f91a373).
+- `com.jordan.watch`: `HomeScreen` (placeholder + "run Watch-Phone-Sync.cmd" screen when
+  there's no file access, re-checked on every return), `FeatureFlags.ROTATED_PLAYER = false`,
+  `storage/WatchPaths.kt` + `StorageAccess`.
+- `logic/`: `AtomicFile` (tmp + rename), `StateStore` (positions, watched, watchlist,
+  settings in `.state/`), `MediaJson` (Movie / Show / Episode + folder-name fallback).
+- Tests: 12 passing (StateStoreTest 5, MediaJsonTest 7). Build log: `logs/session1-build.log`.
+- **Moved to Session 2:** the "SDK: let a tool play video" player (decision a) wasn't in
+  this session's prompt.
+
 ## Session plan
 
 | # | Session | Done when |

@@ -1,10 +1,10 @@
 [tool]
-id = "com.thelightphone.bible"
-label = "Bible"
+id = "com.jordan.watch"
+label = "Watch"
 versionCode = 1
-versionName = "1.0.0"
-permissions = []
+versionName = "0.1.0"
+permissions = ["android.permission.MANAGE_EXTERNAL_STORAGE"]
 capabilities = []
+orientation = "portrait"
 # com.lightos = LightOS system host on real LP3 hardware (verified via `pm query-services`)
-# com.thelightphone.sdk.emulator = the desktop emulator's host
 serverPackage = "com.lightos"

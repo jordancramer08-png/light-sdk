@@ -400,3 +400,34 @@ tool code BEFORE any build is installed.
   E-AC3 episode) → all five Watch-safe, srt sidecar made. Build log `logs/session11-build.log`.
 - **Not done here:** the new source folders (`D:\Marvel Entertainment`, duplicates) Jordan
   added to CLAUDE.md §8 — that's part B. Real send of a converted title to the phone.
+
+## Session 10b — More source folders (2026-10-12) ✅
+
+- **Sources:** `Watch-Phone-Sync.ps1` scans `$SourceRoots` (top of the script):
+  `D:\Movies`, `D:\Marvel Entertainment`, `D:\TV`; missing ones are skipped.
+  `WATCH_SOURCES=a;b` replaces the list for tests (old `WATCH_MOVIES_ROOT` / `WATCH_TV_ROOT` removed).
+- **Rules:** `SxxExx` in the name = TV episode, grouped by show + season. Show = the
+  `Show (Year) - Season N` folder, else the folder above `Season N`, else the show folder
+  (Agents of S.H.I.E.L.D. Slingshot has no season folder), else the file name. The year keeps
+  Fantastic Four (1978) and (1994) apart; Loki S1 (Phase Four) and S2 (Phase Five) join one show.
+  Everything else = movie. A per-title folder (`01 - Iron Man (2008)\Iron Man (2008).mp4`)
+  gives the story number. Collection = nearest folder that isn't a plain sorter (Films,
+  Series & Specials, Duology...), with its parent added below the top level
+  ("Spider-Man (Sony) - Tobey").
+- **Looked inside first:** Marvel Studios Assembled = `NN - Assembled - The Making of X.mp4`
+  (numbered, no year); Marvel Studios Legends = `Thor.mp4` etc. (no number, no year). Both
+  become movies in their own collection. Titles with no year skip TMDB (a test matched
+  Legends "Apocalypse" to an unrelated 2026 film).
+- **Duplicates:** same title + year (or show + season) in two places is listed at start
+  ("also elsewhere" in the menu); the menu refuses to pick the second copy. 7 found today
+  (6 Spider-Man films, The Incredible Hulk).
+- **Speed:** 478 movies + 109 seasons from ~1,880 files. First scan 7 s; after that the
+  saved scan (`private\scan-cache`, reused until any folder's time changes) loads in 2 s;
+  menu draw 1.5 s.
+- **Fix found in the dry run:** an MKV with picture subtitles was refused ("1,314.8 s vs
+  1,319.4 s") because its subtitle tracks run past the picture. The length check now falls
+  back to the original's picture/sound end (last packets, read with ffprobe).
+- **Dry run** (copies of Marvel Studios Legends\Apocalypse.mp4 and Iron Man (1994) S01E01.mkv
+  in their Marvel folder layout): both sent, Watch-safe, json + TMDB show/still. Source files
+  checked unchanged (MD5 and size/time of all 1,555 Marvel files).
+- Tests: Test-WatchSafe 53/53; Gradle build + unit tests pass (`logs/session10b-build.log`).

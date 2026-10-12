@@ -1,11 +1,17 @@
 #===========================================================================
 #  Watch - Phone Sync (PC side)
-#  Pick movies from D:\Movies and TV seasons from D:\TV, check that the
+#  Pick movies and TV seasons from the source folders (D:\Movies,
+#  D:\Marvel Entertainment, D:\TV - see $SourceRoots below), check that the
 #  Light Phone III can play them, fix the ones it can't (on copies only),
 #  and send them to /sdcard/Watch in the layout the Watch app reads
 #  (CLAUDE.md section 4).
 #
-#  Nothing in D:\Movies or D:\TV is ever changed. All work happens in
+#  Files with SxxExx in the name are TV episodes (grouped by show and
+#  season); everything else is a movie. Folder names become collections
+#  ("Phase One (2008-2012)", "01 - Iron Man (2008)" = story order 1).
+#  The scan is saved in private\scan-cache and reused until a folder changes.
+#
+#  Nothing in the source folders is ever changed. All work happens in
 #  %TEMP%\watch-<time>, which is deleted at the end.
 #
 #  Test mode (no phone): set WATCH_DRY_RUN=<folder> and the finished
@@ -13,7 +19,7 @@
 #
 #  Other switches (for testing):
 #    -Check <file> <file> ...   only run the library check on these files
-#    WATCH_MOVIES_ROOT / WATCH_TV_ROOT   use other library folders
+#    WATCH_SOURCES=<folder>;<folder>     use other source folders
 #    WATCH_BACKUP_DIR                    keep .state backups somewhere else
 #
 #  TMDB: details and posters come from TMDB using the key in
@@ -33,16 +39,17 @@ $OutputEncoding = [Text.Encoding]::UTF8
 #---------------------------------------------------------------------------
 # region  SETTINGS
 #---------------------------------------------------------------------------
-$MoviesRoot = 'D:\Movies'
-$TvRoot     = 'D:\TV'
+# Source folders, scanned in this order. Missing ones are skipped. Add a folder here.
+$SourceRoots = @('D:\Movies', 'D:\Marvel Entertainment', 'D:\TV')
+# Folders that only sort things; never used as a collection or show name
+$PlainFolders = @('films', 'movies', 'tv', 'series', 'series & specials', 'specials', 'duology', 'trilogy')
 $PhoneRoot  = '/sdcard/Watch'
 $PhoneTmp   = '/data/local/tmp/watch-xfer'
 $AppPackage = 'com.jordan.watch'
 $CapBytes   = 50GB
 $AdbPath    = ''          # leave blank to find adb.exe automatically
 
-if ($env:WATCH_MOVIES_ROOT) { $MoviesRoot = $env:WATCH_MOVIES_ROOT }
-if ($env:WATCH_TV_ROOT)     { $TvRoot = $env:WATCH_TV_ROOT }
+if ($env:WATCH_SOURCES) { $SourceRoots = @($env:WATCH_SOURCES -split ';' | Where-Object { $_ }) }
 if ($env:WATCH_ADB)         { $AdbPath = $env:WATCH_ADB }
 $DryRoot = $null
 if ($env:WATCH_DRY_RUN) { $DryRoot = Join-Path $env:WATCH_DRY_RUN 'Watch' }
@@ -52,6 +59,7 @@ $LogDir   = Join-Path $RepoRoot 'logs'
 $Stamp    = Get-Date -Format 'yyyyMMdd-HHmmss'
 $TmdbKeyFile = Join-Path $RepoRoot 'private\tmdb-key.txt'
 $TmdbCache   = Join-Path $RepoRoot 'private\tmdb-cache'
+$ScanCache   = Join-Path $RepoRoot 'private\scan-cache'
 $BackupRoot  = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Watch-Backups'
 if ($env:WATCH_BACKUP_DIR) { $BackupRoot = $env:WATCH_BACKUP_DIR }
 $WorkDir  = Join-Path ([IO.Path]::GetTempPath()) "watch-$Stamp"
@@ -130,7 +138,7 @@ function Write-Utf8([string]$path, [string]$text) {
 # Every file this script writes goes through here: never inside the PC library.
 function Assert-SafeTarget([string]$path) {
     $full = [IO.Path]::GetFullPath($path)
-    foreach ($root in @($MoviesRoot, $TvRoot)) {
+    foreach ($root in $SourceRoots) {
         $r = [IO.Path]::GetFullPath($root).TrimEnd('\') + '\'
         if ($full.StartsWith($r, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Refusing to write inside the PC library: $full"
@@ -222,7 +230,7 @@ function Connect-Phone {
 #endregion
 
 #---------------------------------------------------------------------------
-# region  LIBRARY SCAN  (D:\Movies and D:\TV, read only)
+# region  LIBRARY SCAN  (the source folders, read only)
 #---------------------------------------------------------------------------
 
 # "Batman v Superman - Dawn of Justice (2016)" -> title "Batman v Superman: Dawn of Justice", year 2016
@@ -240,85 +248,224 @@ function Get-SafeName([string]$s) {
     return ($s -replace '\s+', ' ').Trim().TrimEnd('.')
 }
 
-function Get-Movies {
+# "03 - Thor (2011)" -> number 3, rest "Thor (2011)"
+function Split-Number([string]$name) {
+    if ($name -match '^(\d{1,3})\s*-\s*(.+)$') { return @{ Number = [int]$Matches[1]; Rest = $Matches[2].Trim() } }
+    return @{ Number = $null; Rest = $name.Trim() }
+}
+
+function Test-PlainFolder([string]$name) { return ($PlainFolders -contains $name.ToLowerInvariant()) }
+
+# Collection from the folders above a movie (title folder already removed):
+#   Phase One (2008-2012)              -> "Phase One (2008-2012)"
+#   X-Men (Fox)\Films                  -> "X-Men (Fox)"        (plain folders are skipped)
+#   Spider-Man (Sony)\Tobey            -> "Spider-Man (Sony) - Tobey"
+# The first folder under a source (e.g. "Marvel Cinematic Universe") is only
+# used when it is the only one, as in D:\Movies\Star Wars.
+function Get-FolderCollection([string[]]$dirs) {
+    $i = $dirs.Count - 1
+    while ($i -ge 0 -and (Test-PlainFolder $dirs[$i])) { $i-- }
+    if ($i -lt 0) { return $null }
+    $name = (Split-Number $dirs[$i]).Rest
+    $j = $i - 1
+    while ($j -ge 0 -and (Test-PlainFolder $dirs[$j])) { $j-- }
+    if ($j -ge 1) { $name = (Split-Number $dirs[$j]).Rest + ' - ' + $name }
+    return $name
+}
+
+# Show folder for an episode, e.g.
+#   ...\05 - Loki (2021) - Season 2\Loki - S02E01.mkv  -> "Loki (2021)"
+#   ...\Iron Man (1994)\Season 1\Iron Man - S01E01.mkv  -> "Iron Man (1994)"
+#   ...\Agents of S.H.I.E.L.D. Slingshot (2016)\...S01E01.mp4 -> that folder
+# Falls back to the start of the file name ("Loki - S02E01 - ...").
+function Get-ShowFolder([string[]]$dirs, [string]$fromFile) {
+    if ($dirs.Count -gt 0) {
+        $d = (Split-Number $dirs[-1]).Rest
+        if ($d -match '^(.+?)\s+-\s+Season\s*\d+$') { return $Matches[1] }
+        if ($d -match '^(Season|Series)\s*\d+$|^Specials$') {
+            if ($dirs.Count -gt 1 -and -not (Test-PlainFolder $dirs[-2])) { return (Split-Number $dirs[-2]).Rest }
+        } elseif (-not (Test-PlainFolder $d)) { return $d }
+    }
+    if ($fromFile) { return $fromFile }
+    return 'Unknown show'
+}
+
+# Every video file under one source folder, fast (no PowerShell provider).
+function Get-SourceFiles([string]$root) {
+    try {
+        $dir = New-Object IO.DirectoryInfo $root
+        return @($dir.EnumerateFiles('*', [IO.SearchOption]::AllDirectories) |
+            Where-Object { $VideoExts -contains $_.Extension.ToLowerInvariant() })
+    } catch {
+        return @(Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $VideoExts -contains $_.Extension.ToLowerInvariant() })
+    }
+}
+
+function New-MovieItem($f, [string]$root, [string[]]$dirs) {
+    $n = Split-Number ([IO.Path]::GetFileNameWithoutExtension($f.Name))
+    $number = $n.Number
+    # Per-title folder ("01 - Iron Man (2008)\Iron Man (2008).mp4"): its number counts, its name doesn't
+    if ($dirs.Count -gt 0) {
+        $last = Split-Number $dirs[-1]
+        if ((Get-MatchKey $last.Rest) -eq (Get-MatchKey $n.Rest)) {
+            if ($null -eq $number) { $number = $last.Number }
+            $dirs = @($dirs | Select-Object -First ($dirs.Count - 1))
+        }
+    }
+    $collection = Get-FolderCollection $dirs
+    $ty = Split-TitleYear $n.Rest
+    $folder = Get-SafeName $ty.Base
+    if ($ty.Year) { $folder = "$folder ($($ty.Year))" }
+    $group = '_Singles'
+    if ($collection) { $group = Get-SafeName $collection }
+    $label = $ty.Title
+    if ($ty.Year) { $label = "$label ($($ty.Year))" }
+    if ($collection) {
+        $c = $collection
+        if ($number) { $c = "$collection #$number" }
+        $label = "$label  [$c]"
+    }
+    return [pscustomobject]@{
+        Kind = 'Movie'; Label = $label; Search = (Fold "$label $($f.Name)")
+        Title = $ty.Title; Year = $ty.Year; Collection = $collection; Number = $number
+        Id = "$group/$folder"; PhoneDir = "Movies/$group/$folder"; Files = @($f); Bytes = [double]$f.Length
+        Source = $f.FullName; Root = $root; DupKey = "m|$(Get-MatchKey $ty.Title)|$($ty.Year)"
+        OnPhone = $false; Selected = $false
+    }
+}
+
+# One item per season, grouping the episodes found in one source folder.
+function New-SeasonItems($eps, [string]$root) {
     $items = New-Object System.Collections.Generic.List[object]
-    if (-not (Test-Path -LiteralPath $MoviesRoot)) { return $items }
-    $ids = @{}
-    $files = Get-ChildItem -LiteralPath $MoviesRoot -Recurse -File |
-        Where-Object { $VideoExts -contains $_.Extension.ToLowerInvariant() } | Sort-Object FullName
-    foreach ($f in $files) {
-        $collection = $null
-        if ($f.Directory.FullName.TrimEnd('\') -ne ([IO.Path]::GetFullPath($MoviesRoot)).TrimEnd('\')) {
-            $collection = $f.Directory.Name
-        }
-        $stem = [IO.Path]::GetFileNameWithoutExtension($f.Name)
-        $number = $null
-        if ($stem -match '^(\d{1,3})\s*-\s*(.+)$') { $number = [int]$Matches[1]; $stem = $Matches[2] }
-        $ty = Split-TitleYear $stem
-        $folder = Get-SafeName $ty.Base
-        if ($ty.Year) { $folder = "$folder ($($ty.Year))" }
-        $group = '_Singles'
-        if ($collection) { $group = Get-SafeName $collection }
-        $id = "$group/$folder"
-        if ($ids.ContainsKey($id)) { $k = 2; while ($ids.ContainsKey("$id $k")) { $k++ }; $folder = "$folder $k"; $id = "$group/$folder" }
-        $ids[$id] = $true
-        $label = $ty.Title
-        if ($ty.Year) { $label = "$label ($($ty.Year))" }
-        if ($collection) {
-            $c = $collection
-            if ($number) { $c = "$collection #$number" }
-            $label = "$label  [$c]"
-        }
+    foreach ($g in ($eps | Group-Object { "$($_.Show)|$($_.Season)" } | Sort-Object Name)) {
+        $first = $g.Group[0]
+        $list = @($g.Group | Sort-Object Episode)
+        $bytes = 0.0; foreach ($e in $list) { $bytes += $e.File.Length }
+        $ty = Split-TitleYear $first.Show
+        $showName = Get-SafeName $first.Show
+        $seasonDir = 'Season {0:D2}' -f $first.Season
+        $label = "$($ty.Title) - Season $($first.Season) ($($list.Count) episodes)  [TV]"
         $items.Add([pscustomobject]@{
-            Kind = 'Movie'; Label = $label; Search = (Fold "$label $($f.Name)")
-            Title = $ty.Title; Year = $ty.Year; Collection = $collection; Number = $number
-            Id = $id; PhoneDir = "Movies/$id"; Files = @($f); Bytes = [double]$f.Length
-            Source = $f.FullName.Substring($MoviesRoot.TrimEnd('\').Length + 1)
+            Kind = 'Season'; Label = $label; Search = (Fold $label)
+            Title = $ty.Title; Year = $ty.Year; ShowName = $showName; Season = $first.Season; Episodes = $list
+            Id = "$showName/$seasonDir"; PhoneDir = "TV/$showName/$seasonDir"
+            Files = @($list | ForEach-Object { $_.File }); Bytes = $bytes
+            Source = $first.File.DirectoryName; Root = $root
+            DupKey = "s|$(Get-MatchKey $ty.Title)|$($ty.Year)|$($first.Season)"
             OnPhone = $false; Selected = $false
         })
     }
     return $items
 }
 
-# One item per season: D:\TV\<Show>\Season 01\<Show> - S01E01 - <Title>.mp4
-function Get-Seasons {
-    $items = New-Object System.Collections.Generic.List[object]
-    if (-not (Test-Path -LiteralPath $TvRoot)) { return $items }
-    foreach ($show in (Get-ChildItem -LiteralPath $TvRoot -Directory | Sort-Object Name)) {
-        $files = @(Get-ChildItem -LiteralPath $show.FullName -Recurse -File |
-            Where-Object { $VideoExts -contains $_.Extension.ToLowerInvariant() })
-        $eps = @()
-        foreach ($f in $files) {
-            $stem = [IO.Path]::GetFileNameWithoutExtension($f.Name)
-            if ($stem -notmatch '[Ss](\d{1,3})[Ee](\d{1,4})') { continue }
-            $s = [int]$Matches[1]; $e = [int]$Matches[2]
+# Reads one source folder. Files with SxxExx in the name are TV episodes; the rest are movies.
+function Read-Source([string]$root) {
+    $rootFull = [IO.Path]::GetFullPath($root).TrimEnd('\')
+    $movies = New-Object System.Collections.Generic.List[object]
+    $eps = New-Object System.Collections.Generic.List[object]
+    foreach ($f in (Get-SourceFiles $rootFull | Sort-Object FullName)) {
+        $rel = $f.DirectoryName.Substring($rootFull.Length).Trim('\')
+        $dirs = @(); if ($rel) { $dirs = @($rel -split '\\') }
+        $stem = [IO.Path]::GetFileNameWithoutExtension($f.Name)
+        if ($stem -match '^(.*?)[\s\-_.]*[Ss](\d{1,3})[Ee](\d{1,4})') {
+            $fromFile = $Matches[1].Trim()
+            $s = [int]$Matches[2]; $e = [int]$Matches[3]
             $epTitle = "Episode $e"
             if ($stem -match '[Ss]\d{1,3}[Ee]\d{1,4}\s*-\s*(.+)$') { $epTitle = ($Matches[1] -replace ' - ', ': ').Trim() }
-            $eps += [pscustomobject]@{ Season = $s; Episode = $e; Title = $epTitle; File = $f }
-        }
-        $showName = Get-SafeName $show.Name
-        $ty = Split-TitleYear $show.Name
-        foreach ($g in ($eps | Group-Object Season | Sort-Object { [int]$_.Name })) {
-            $s = [int]$g.Name
-            $list = @($g.Group | Sort-Object Episode)
-            $bytes = 0.0; foreach ($e in $list) { $bytes += $e.File.Length }
-            $seasonDir = 'Season {0:D2}' -f $s
-            $label = "$($ty.Title) - Season $s ($($list.Count) episodes)  [TV]"
-            $items.Add([pscustomobject]@{
-                Kind = 'Season'; Label = $label; Search = (Fold $label)
-                Title = $ty.Title; Year = $ty.Year; ShowName = $showName; Season = $s; Episodes = $list
-                Id = "$showName/$seasonDir"; PhoneDir = "TV/$showName/$seasonDir"
-                Files = @($list | ForEach-Object { $_.File }); Bytes = $bytes
-                Source = "$($show.Name)\$seasonDir"
-                OnPhone = $false; Selected = $false
-            })
+            $eps.Add([pscustomobject]@{ Show = (Get-ShowFolder $dirs $fromFile); Season = $s; Episode = $e; Title = $epTitle; File = $f })
+        } else {
+            $movies.Add((New-MovieItem $f $rootFull $dirs))
         }
     }
-    return $items
+    foreach ($it in (New-SeasonItems $eps $rootFull)) { $movies.Add($it) }
+    return $movies.ToArray()
+}
+
+# Saved scan per source folder, reused while no folder in it has changed.
+# Keyed by every folder's last-write time (adding/removing/renaming a file changes it).
+function Get-SourceStamp([string]$root) {
+    $sb = New-Object Text.StringBuilder
+    $dir = New-Object IO.DirectoryInfo $root
+    [void]$sb.Append($dir.LastWriteTimeUtc.Ticks)
+    foreach ($d in $dir.EnumerateDirectories('*', [IO.SearchOption]::AllDirectories)) {
+        [void]$sb.Append("|$($d.FullName)=$($d.LastWriteTimeUtc.Ticks)")
+    }
+    return (Get-Hash $sb.ToString())
+}
+
+function Get-Library {
+    $all = New-Object System.Collections.Generic.List[object]
+    if (-not (Test-Path -LiteralPath $ScanCache)) { [void](New-Item -ItemType Directory -Path $ScanCache -Force) }
+    foreach ($root in $SourceRoots) {
+        if (-not (Test-Path -LiteralPath $root)) { Write-Note "  $root - not found, skipped."; continue }
+        $watch = [Diagnostics.Stopwatch]::StartNew()
+        $stamp = Get-SourceStamp $root
+        $cacheFile = Join-Path $ScanCache ((Get-Hash ([IO.Path]::GetFullPath($root).ToLowerInvariant())) + '.xml')
+        $items = $null
+        if (Test-Path -LiteralPath $cacheFile) {
+            try {
+                $saved = Import-Clixml -LiteralPath $cacheFile
+                if ($saved.Stamp -eq $stamp) { $items = @(Restore-Items $saved.Items) }
+            } catch { $items = $null }
+        }
+        $how = 'saved scan'
+        if ($null -eq $items) {
+            $how = 'scanned'
+            $items = @(Read-Source $root)
+            try { Export-Clixml -LiteralPath $cacheFile -InputObject @{ Stamp = $stamp; Items = @(Save-Items $items) } } catch {}
+        }
+        foreach ($it in $items) { $all.Add($it) }
+        Write-Note ("  {0} - {1} titles/seasons ({2}, {3:N1} s)" -f $root, $items.Count, $how, $watch.Elapsed.TotalSeconds)
+    }
+    Find-Duplicates $all
+    return $all
+}
+
+# The scan is saved as plain text values (file paths, not file objects), so it loads fast.
+function Save-Items($items) {
+    foreach ($it in $items) {
+        $o = @{}
+        foreach ($p in $it.PSObject.Properties) { $o[$p.Name] = $p.Value }
+        $o.Files = @($it.Files | ForEach-Object { $_.FullName })
+        if ($it.Kind -eq 'Season') {
+            $o.Episodes = @($it.Episodes | ForEach-Object {
+                @{ Show = $_.Show; Season = $_.Season; Episode = $_.Episode; Title = $_.Title; File = $_.File.FullName } })
+        }
+        $o
+    }
+}
+
+function Restore-Items($saved) {
+    foreach ($o in $saved) {
+        $h = @{}
+        foreach ($k in $o.Keys) { $h[$k] = $o[$k] }
+        $h.Files = @($o.Files | ForEach-Object { New-Object IO.FileInfo $_ })
+        if ($h.Kind -eq 'Season') {
+            $h.Episodes = @($o.Episodes | ForEach-Object {
+                [pscustomobject]@{ Show = $_.Show; Season = [int]$_.Season; Episode = [int]$_.Episode; Title = $_.Title
+                    File = (New-Object IO.FileInfo $_.File) } })
+        }
+        $h.Selected = $false; $h.OnPhone = $false
+        [pscustomobject]$h
+    }
+}
+
+# The same title in two places: warn once here; the menu won't let both be picked.
+function Find-Duplicates($items) {
+    $groups = @($items | Group-Object DupKey | Where-Object { $_.Count -gt 1 })
+    if ($groups.Count -eq 0) { return }
+    Write-Warn2 "  $($groups.Count) title(s) are in more than one place. Only one copy of each can be sent:"
+    foreach ($g in $groups) {
+        Write-Warn2 "    $($g.Group[0].Label)"
+        foreach ($it in $g.Group) { Write-Note "      $($it.Source)" }
+        foreach ($it in $g.Group) { $it.Label = "$($it.Label)  (also elsewhere)" }
+    }
 }
 
 function Ensure-TvFolder {
-    if ($env:WATCH_TV_ROOT -or (Test-Path -LiteralPath $TvRoot)) { return }
+    $TvRoot = @($SourceRoots | Where-Object { (Split-Path -Leaf $_) -eq 'TV' }) | Select-Object -First 1
+    if ($env:WATCH_SOURCES -or -not $TvRoot -or (Test-Path -LiteralPath $TvRoot)) { return }
     [void](New-Item -ItemType Directory -Path $TvRoot)
     $readme = @"
 Watch - TV shows for the Light Phone
@@ -517,11 +664,37 @@ function Save-Subtitles($r, [string]$outDir, [string]$baseName) {
 
 # Last check before sending: ffprobe the finished file. Throws a plain reason when it must not go.
 # On success, copies the real codec/size/length into $r (for the json).
+# How long the original's picture and sound last (end of the last packet),
+# not counting subtitle tracks. Reads only the last minute of the file.
+function Get-PlayLength([string]$path, [double]$formatDur) {
+    $inv = [Globalization.CultureInfo]::InvariantCulture
+    $from = [math]::Max(0, [math]::Floor($formatDur - 60))
+    $end = 0.0
+    foreach ($sel in @('v:0', 'a')) {
+        $out = & $script:Ffprobe -v error -read_intervals "$from%" -select_streams $sel `
+            -show_entries packet=pts_time,duration_time -of csv=p=0 $path 2>$null
+        foreach ($line in @($out)) {
+            $parts = "$line".Split(',')
+            $t = 0.0; $len = 0.0
+            if (-not [double]::TryParse($parts[0], [Globalization.NumberStyles]::Float, $inv, [ref]$t)) { continue }
+            if ($parts.Count -gt 1) { [void][double]::TryParse($parts[1], [Globalization.NumberStyles]::Float, $inv, [ref]$len) }
+            if ($t + $len -gt $end) { $end = $t + $len }
+        }
+    }
+    if ($end -gt 0) { return $end }
+    return $formatDur
+}
+
 function Confirm-WatchSafe([string]$path, $r) {
     $p = Get-Probe $path
     $ext = [IO.Path]::GetExtension($path).ToLowerInvariant()
     $boxes = @(); if ($p -and $ext -eq '.mp4') { $boxes = Get-Mp4BoxOrder $path }
     $why = Get-SendRefusal $p $boxes $ext $r.Duration
+    if ($why) {
+        # Subtitle tracks can run a few seconds past the picture; they are left out, so measure without them
+        $playLen = Get-PlayLength $r.Path $r.Duration
+        if ($playLen -ne $r.Duration) { $why = Get-SendRefusal $p $boxes $ext $playLen }
+    }
     if ($why) { throw "NOT SENT - $why." }
     $st = Split-Streams $p
     $v = $st.Videos[0]
@@ -702,6 +875,8 @@ function Get-TmdbRating($d) {
 # The movie's TMDB details, or $null when there's no match.
 function Get-MovieMeta($item) {
     if ($script:TmdbOff) { return $null }
+    # No year (Marvel Studios Legends "Thor", "Apocalypse"): a search would match the wrong film
+    if (-not $item.Year) { Write-Note '  TMDB: no year in the name, not looked up.'; return $null }
     $q = @{ query = $item.Title; include_adult = 'false' }
     if ($item.Year) { $q['year'] = $item.Year }
     $hit = Select-TmdbHit (Get-Tmdb 'search/movie' $q) $item.Title $item.Year 'title' 'release_date'
@@ -944,6 +1119,11 @@ function Select-Titles($items, $info, [string]$heading = 'Pick what goes to the 
         if ($null -eq $targets) { $filter = $ans; continue }
         foreach ($it in $targets) {
             if ($it.Selected -and $ans -ine 'A') { $it.Selected = $false; continue }
+            $twin = @($items | Where-Object { $_.Selected -and $_.DupKey -eq $it.DupKey -and $_ -ne $it }) | Select-Object -First 1
+            if ($useCap -and $twin) {
+                Write-Bad ("  Not picked: {0} - the same title is already picked from {1}." -f $it.Label, $twin.Source)
+                continue
+            }
             $after = $info.Used + (Get-SelectedBytes $items) + $it.Bytes
             if ($useCap -and $after -gt $CapBytes) {
                 Write-Bad ("  Not picked: {0} - it would go over the {1} cap." -f $it.Label, (Format-Size $CapBytes))
@@ -1128,7 +1308,8 @@ function Get-Estimate($picked, [string]$quality) {
 function Show-WhatItDoes {
     Write-Host ''
     Write-Host '  What this does when the phone is plugged in:'
-    Write-Host '    1. Send: lists D:\Movies and D:\TV, you pick titles (50 GB cap) and a'
+    Write-Host "    1. Send: lists $($SourceRoots -join ', '),"
+    Write-Host '       you pick titles (50 GB cap; one copy of a title found twice) and a'
     Write-Host '       quality; it fixes what the phone cannot play (on copies in TEMP),'
     Write-Host '       adds posters and details from TMDB, and copies them to /sdcard/Watch.'
     Write-Host '    2. Remove: deletes titles you pick from the phone. Watched marks and'
@@ -1136,7 +1317,7 @@ function Show-WhatItDoes {
     Write-Host '    3. Backup / 4. Restore: copies Watch''s saved places (.state) to and'
     Write-Host '       from Documents\Watch-Backups on this PC.'
     Write-Host '    5. Grant: lets Watch read its files on the phone.'
-    Write-Host '  D:\Movies and D:\TV are never changed.'
+    Write-Host '  The source folders are never changed.'
 }
 
 function Invoke-CheckOnly([string[]]$paths) {
@@ -1176,8 +1357,8 @@ function Invoke-Send {
         return
     }
     Ensure-TvFolder
-    Write-Step 'Reading D:\Movies and D:\TV (read only)'
-    $items = @(Get-Movies) + @(Get-Seasons)
+    Write-Step "Reading $($SourceRoots -join ', ') (read only)"
+    $items = @(Get-Library)
     Write-Host "  Found $(@($items | Where-Object Kind -eq 'Movie').Count) movies and $(@($items | Where-Object Kind -eq 'Season').Count) TV seasons."
     if ($items.Count -eq 0) { Write-Warn2 '  Nothing to send.'; return }
 

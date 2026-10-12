@@ -57,10 +57,7 @@ if ($env:WATCH_BACKUP_DIR) { $BackupRoot = $env:WATCH_BACKUP_DIR }
 $WorkDir  = Join-Path ([IO.Path]::GetTempPath()) "watch-$Stamp"
 
 $VideoExts   = @('.mp4', '.m4v', '.mkv', '.webm', '.mov', '.avi', '.wmv', '.mpg', '.mpeg', '.ts', '.flv')
-$GoodVideo   = @('h264', 'hevc', 'vp9')           # 8-bit only
-$GoodAudio   = @('aac', 'mp3', 'opus', 'vorbis', 'flac')
-$TextSubs    = @('subrip', 'ass', 'ssa', 'mov_text', 'webvtt', 'text')
-$CoverCodecs = @('mjpeg', 'png', 'bmp', 'gif')
+. (Join-Path $PSScriptRoot 'WatchSafe.ps1')     # the Watch-safe rules (CLAUDE.md section 8)
 # Bitrates for the smaller qualities (picture + sound, kbit/s)
 $Qualities = @{
     'Original' = $null
@@ -395,14 +392,14 @@ function Get-Prop($o, [string]$name) {
     return $null
 }
 
-# Looks at one file. $quality = 'Original' / '1080p' / '720p'.
+# Looks at one file against the Watch-safe rules (WatchSafe.ps1). $quality = 'Original' / '1080p' / '720p'.
 # Returns what's wrong (Problems), what will be done (Actions) and how (the plan fields).
 function Test-Media([string]$path, [string]$quality) {
     $r = [pscustomobject]@{
         Path = $path; Ok = $true; CantFix = $null; Problems = @(); Actions = @(); Notes = @()
         Duration = 0.0; Width = $null; Height = $null; VideoCodec = $null; AudioCodec = $null
         MainVideo = $null; Cover = $null; Audio = @(); BadAudio = @(); Subs = @()
-        EncodeVideo = $false; Shrink = $false; Remux = $false; OutExt = ''
+        EncodeVideo = $false; Shrink = $false; MaxHeight = $SafeMaxHeight; OutExt = '.mp4'
         NeedsWork = $false; Estimate = [double](Get-Item -LiteralPath $path).Length
     }
     $p = Get-Probe $path
@@ -410,51 +407,22 @@ function Test-Media([string]$path, [string]$quality) {
     $fmtDur = Get-Prop $p.format 'duration'
     if ($fmtDur) { $r.Duration = [double]$fmtDur }
     $ext = [IO.Path]::GetExtension($path).ToLowerInvariant()
-
-    foreach ($s in @($p.streams)) {
-        $type = Get-Prop $s 'codec_type'; $codec = Get-Prop $s 'codec_name'
-        $disp = Get-Prop $s 'disposition'
-        if ($type -eq 'video') {
-            $isCover = ((Get-Prop $disp 'attached_pic') -eq 1) -or ($CoverCodecs -contains $codec)
-            if ($isCover) { if ($null -eq $r.Cover) { $r.Cover = $s } }
-            elseif ($null -eq $r.MainVideo) { $r.MainVideo = $s }
-        } elseif ($type -eq 'audio') { $r.Audio += $s }
-        elseif ($type -eq 'subtitle') {
-            if ($TextSubs -contains $codec) { $r.Subs += $s }
-            else { $r.Notes += "picture subtitles ($codec) left out - the phone can't show them" }
-        }
-    }
-    if ($null -eq $r.MainVideo) { $r.Ok = $false; $r.CantFix = 'no picture track found'; return $r }
+    $st = Split-Streams $p
+    if ($st.Videos.Count -eq 0) { $r.Ok = $false; $r.CantFix = 'no picture track found'; return $r }
+    $r.MainVideo = $st.Videos[0]; $r.Audio = $st.Audio; $r.Subs = $st.TextSubs
+    if ($st.Covers.Count -gt 0) { $r.Cover = $st.Covers[0] }
+    foreach ($ps in $st.PictureSubs) { $r.Notes += "picture subtitles ($(Get-Prop $ps 'codec_name')) left out - the phone can't show them" }
+    if ($st.Videos.Count -gt 1) { $r.Notes += 'only the first picture track is kept' }
 
     $v = $r.MainVideo
     $r.VideoCodec = Get-Prop $v 'codec_name'
     $r.Width = Get-Prop $v 'width'; $r.Height = Get-Prop $v 'height'
-    $pix = [string](Get-Prop $v 'pix_fmt')
     if ($r.Audio.Count -gt 0) { $r.AudioCodec = Get-Prop $r.Audio[0] 'codec_name' } else { $r.Notes += 'no sound track' }
 
-    # Container
-    if (@('.mp4', '.m4v', '.mkv', '.webm', '.mov') -notcontains $ext) {
-        $r.Problems += "$($ext.TrimStart('.').ToUpper()) file (the phone can't open it)"
-        $r.Remux = $true
-    }
-    # Picture
-    $tenBit = $pix -match '10|12'
-    if ($GoodVideo -notcontains $r.VideoCodec) {
-        $r.Problems += "$($r.VideoCodec) picture (not playable on the phone)"; $r.EncodeVideo = $true
-    } elseif ($tenBit) {
-        $r.Problems += "10-bit $($r.VideoCodec.ToUpper()) picture (the phone can't decode 10-bit)"; $r.EncodeVideo = $true
-    }
-    # Sound
-    for ($i = 0; $i -lt $r.Audio.Count; $i++) {
-        $c = Get-Prop $r.Audio[$i] 'codec_name'
-        if ($GoodAudio -notcontains $c) { $r.BadAudio += $i }
-    }
-    if ($r.BadAudio.Count -gt 0) {
-        $names = @($r.BadAudio | ForEach-Object { (Get-Prop $r.Audio[$_] 'codec_name').ToUpper() }) | Select-Object -Unique
-        $r.Problems += (($names -join '/') + ' sound (the phone has no decoder)')
-    }
-    # Cover picture stored as a video track
-    if ($r.Cover) { $r.Problems += 'cover picture stored as a video track' }
+    $boxes = @(); if ($ext -eq '.mp4') { $boxes = Get-Mp4BoxOrder $path }
+    $r.Problems = @(Get-SafeProblems $p $boxes $ext)
+    if (Get-VideoProblem $v) { $r.EncodeVideo = $true }
+    for ($i = 0; $i -lt $r.Audio.Count; $i++) { if (Get-AudioProblem $r.Audio[$i]) { $r.BadAudio += $i } }
 
     # Quality: shrink only when the file is bigger than the chosen size
     $q = $Qualities[$quality]
@@ -462,20 +430,18 @@ function Test-Media([string]$path, [string]$quality) {
         $targetBytes = ($q.VideoK + $q.AudioK) * 1000 / 8 * $r.Duration
         $tooTall = $r.Height -and ($r.Height -gt $q.Height * 1.05)
         if ($tooTall -or $r.Estimate -gt $targetBytes * 1.2) {
-            $r.Shrink = $true; $r.EncodeVideo = $true; $r.Estimate = $targetBytes
+            $r.Shrink = $true; $r.EncodeVideo = $true; $r.Estimate = $targetBytes; $r.MaxHeight = $q.Height
         }
     }
 
-    # Output: MKV stays MKV, everything else becomes MP4
-    $r.OutExt = '.mp4'
-    if (@('.mkv', '.webm') -contains $ext) { $r.OutExt = '.mkv' }
-    if ($r.Remux -and -not $r.EncodeVideo) { $r.Actions += 'copy into an MP4 (no quality loss)' }
     if ($r.Shrink) { $r.Actions += "shrink to $quality (H.264)" }
-    elseif ($r.EncodeVideo) { $r.Actions += 're-encode picture to 8-bit H.264' }
-    if ($r.BadAudio.Count -gt 0) { $r.Actions += 'convert only the sound to AAC stereo' }
+    elseif ($r.EncodeVideo) { $r.Actions += 're-encode picture to 8-bit H.264 (1080p at most)' }
+    if ($r.BadAudio.Count -gt 0) { $r.Actions += 'convert the sound to AAC (5.1 stays 5.1, more is mixed to stereo)' }
+    if ($r.Subs.Count -gt 0) { $r.Actions += "save $($r.Subs.Count) subtitle track(s) as .srt next to the video" }
     if ($r.Cover) { $r.Actions += 'save the cover as poster.jpg and strip it from the video' }
-    $r.NeedsWork = $r.Remux -or $r.EncodeVideo -or ($r.BadAudio.Count -gt 0) -or [bool]$r.Cover
-    if (-not $r.NeedsWork) { $r.Actions += 'none - sent as it is' }
+    $r.NeedsWork = $r.Shrink -or ($r.Problems.Count -gt 0)
+    if ($r.NeedsWork -and -not $r.EncodeVideo -and $r.BadAudio.Count -eq 0) { $r.Actions += 'copy into a Watch-safe MP4 (no quality loss)' }
+    if (-not $r.NeedsWork) { $r.Actions += 'none - already Watch-safe, sent untouched' }
     return $r
 }
 
@@ -485,29 +451,28 @@ function Write-CheckResult($r, [string]$name) {
     if ($r.CantFix) { Write-Bad "    Can't send: $($r.CantFix)"; return }
     $h = '?'; if ($r.Height) { $h = "$($r.Height)p" }
     Write-Note ("    {0} {1} / {2} / {3:N0} min / {4}" -f $h, $r.VideoCodec, $r.AudioCodec, ($r.Duration / 60), (Format-Size (Get-Item -LiteralPath $r.Path).Length))
-    if ($r.Problems.Count -eq 0) { Write-Good '    OK - the phone can play it.' }
-    foreach ($p in $r.Problems) { Write-Warn2 "    Problem: $p" }
+    if ($r.Problems.Count -eq 0) { Write-Good '    OK - already Watch-safe.' }
+    foreach ($p in $r.Problems) { Write-Warn2 "    Not Watch-safe: $p" }
     foreach ($a in $r.Actions)  { Write-Host "    Fix: $a" }
     foreach ($n in $r.Notes)    { Write-Note "    Note: $n" }
 }
 
-# Runs ffmpeg for one file. Writes into $outDir (always a temp folder). Returns the new video path.
+# Runs ffmpeg for one file. Writes a Watch-safe MP4 into $outDir (always a temp folder). Returns its path.
 function Invoke-Fix($r, [string]$quality, [string]$outDir, [string]$baseName) {
     Assert-SafeTarget $outDir
     if (-not (Test-Path -LiteralPath $outDir)) { [void](New-Item -ItemType Directory -Path $outDir -Force) }
-    $out = Join-Path $outDir ($baseName + $r.OutExt)
-    $vIndex = Get-Prop $r.MainVideo 'index'
-    $a = @('-hide_banner', '-loglevel', 'error', '-stats', '-y')
-    if ($r.Remux) { $a += @('-fflags', '+genpts') }
-    $a += @('-i', $r.Path, '-map', "0:$vIndex", '-map', '0:a?')
-    foreach ($s in $r.Subs) { $a += @('-map', "0:$(Get-Prop $s 'index')") }
-    $a += @('-map_chapters', '0')
+    $out = Join-Path $outDir ($baseName + '.mp4')
+    $a = @('-hide_banner', '-loglevel', 'error', '-stats', '-y', '-fflags', '+genpts')
+    $a += @('-i', $r.Path, '-map', "0:$(Get-Prop $r.MainVideo 'index')")
+    foreach ($s in $r.Audio) { $a += @('-map', "0:$(Get-Prop $s 'index')") }
+    $a += @('-sn', '-dn', '-map_chapters', '-1')
 
     if ($r.EncodeVideo) {
-        $a += @('-c:v', 'libx264', '-preset', 'medium', '-pix_fmt', 'yuv420p', '-profile:v', 'high')
-        $q = $Qualities[$quality]
+        $h = $r.MaxHeight; $w = [int]([math]::Round($h * 16 / 9 / 2) * 2)
+        $a += @('-vf', "scale='min($w,iw)':'min($h,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2")
+        $a += @('-c:v', 'libx264', '-preset', 'medium', '-pix_fmt', 'yuv420p', '-profile:v', 'high', '-level:v', '4.1')
         if ($r.Shrink) {
-            if ($r.Height -gt $q.Height) { $a += @('-vf', "scale=-2:$($q.Height)") }
+            $q = $Qualities[$quality]
             $a += @('-b:v', "$($q.VideoK)k", '-maxrate', "$([int]($q.VideoK * 1.5))k", '-bufsize', "$($q.VideoK * 2)k")
         } else {
             $a += @('-crf', '20')
@@ -515,24 +480,55 @@ function Invoke-Fix($r, [string]$quality, [string]$outDir, [string]$baseName) {
     } else {
         $a += @('-c:v', 'copy')
     }
-    # Sound: copy the good tracks, AAC for the rest (all of them when shrinking)
-    $a += @('-c:a', 'copy')
+    # Sound: copy Watch-safe AAC tracks, convert the rest (all of them when shrinking)
     for ($i = 0; $i -lt $r.Audio.Count; $i++) {
         if ($r.Shrink -or ($r.BadAudio -contains $i)) {
+            $ch = Get-SafeChannels ([int](Get-Prop $r.Audio[$i] 'channels'))
             $k = 160; if ($r.Shrink) { $k = $Qualities[$quality].AudioK }
-            $a += @("-c:a:$i", 'aac', "-b:a:$i", "${k}k", "-ac:a:$i", '2')
+            if ($ch -eq 6) { $k = 384 }
+            $a += @("-c:a:$i", 'aac', "-b:a:$i", "${k}k", "-ac:a:$i", "$ch")
+        } else {
+            $a += @("-c:a:$i", 'copy')
         }
     }
-    if ($r.Subs.Count -gt 0) {
-        if ($r.OutExt -eq '.mp4') { $a += @('-c:s', 'mov_text') } else { $a += @('-c:s', 'copy') }
-    }
-    if ($r.OutExt -eq '.mp4') { $a += @('-movflags', '+faststart') }
-    $a += @('-max_muxing_queue_size', '4096', $out)
+    $a += @('-movflags', '+faststart', '-max_muxing_queue_size', '4096', $out)
 
     $old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
     try { & $script:Ffmpeg @a; $code = $LASTEXITCODE } finally { $ErrorActionPreference = $old }
-    if ($code -ne 0 -or -not (Test-Path -LiteralPath $out)) { throw "ffmpeg could not fix $($r.Path) (code $code)" }
+    if ($code -ne 0 -or -not (Test-Path -LiteralPath $out)) { throw "ffmpeg could not make $($r.Path) Watch-safe (code $code)" }
     return $out
+}
+
+# Saves each text subtitle track as <baseName>.<lang>.srt in $outDir. Returns the files made.
+function Save-Subtitles($r, [string]$outDir, [string]$baseName) {
+    $made = @()
+    $names = Get-SubFileNames $baseName $r.Subs
+    for ($i = 0; $i -lt $r.Subs.Count; $i++) {
+        $dest = Join-Path $outDir $names[$i]
+        Assert-SafeTarget $dest
+        $a = @('-hide_banner', '-loglevel', 'error', '-y', '-i', $r.Path, '-map', "0:$(Get-Prop $r.Subs[$i] 'index')", '-c:s', 'srt', $dest)
+        $old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+        try { & $script:Ffmpeg @a 2>&1 | Out-Null; $ok = ($LASTEXITCODE -eq 0) } finally { $ErrorActionPreference = $old }
+        if ($ok -and (Test-Path -LiteralPath $dest) -and (Get-Item -LiteralPath $dest).Length -gt 0) { $made += Get-Item -LiteralPath $dest }
+        else { Write-Note "  Note: subtitle track $($i + 1) could not be saved as .srt; left out." }
+    }
+    return ,$made
+}
+
+# Last check before sending: ffprobe the finished file. Throws a plain reason when it must not go.
+# On success, copies the real codec/size/length into $r (for the json).
+function Confirm-WatchSafe([string]$path, $r) {
+    $p = Get-Probe $path
+    $ext = [IO.Path]::GetExtension($path).ToLowerInvariant()
+    $boxes = @(); if ($p -and $ext -eq '.mp4') { $boxes = Get-Mp4BoxOrder $path }
+    $why = Get-SendRefusal $p $boxes $ext $r.Duration
+    if ($why) { throw "NOT SENT - $why." }
+    $st = Split-Streams $p
+    $v = $st.Videos[0]
+    $r.VideoCodec = Get-Prop $v 'codec_name'; $r.Width = Get-Prop $v 'width'; $r.Height = Get-Prop $v 'height'
+    $r.AudioCodec = $null; if ($st.Audio.Count -gt 0) { $r.AudioCodec = Get-Prop $st.Audio[0] 'codec_name' }
+    $r.Duration = [double](Get-Prop $p.format 'duration')
+    Write-Good '  Checked: Watch-safe, same length as the original.'
 }
 
 # Saves the cover picture to $posterPath. $false when it can't.
@@ -783,12 +779,7 @@ function Get-Collection($item, $meta) {
 }
 
 function New-MovieJson($item, $r, [string]$videoName, [bool]$hasPoster, [double]$bytes, $meta, [bool]$hasBackdrop) {
-    $ac = $r.AudioCodec; if ($r.BadAudio -contains 0 -or $r.Shrink) { $ac = 'aac' }
-    $vc = $r.VideoCodec; if ($r.EncodeVideo) { $vc = 'h264' }
-    $w = $r.Width; $h = $r.Height
-    if ($r.Shrink -and $h -gt $Qualities[$script:Quality].Height) {
-        $nh = $Qualities[$script:Quality].Height; $w = [int]([math]::Round($w * $nh / $h / 2) * 2); $h = $nh
-    }
+    $ac = $r.AudioCodec; $vc = $r.VideoCodec; $w = $r.Width; $h = $r.Height   # measured on the sent file
     $poster = $null; if ($hasPoster) { $poster = 'poster.jpg' }
     $backdrop = $null; if ($hasBackdrop) { $backdrop = 'backdrop.jpg' }
     $runtime = [int][math]::Round($r.Duration / 60)
@@ -965,7 +956,7 @@ function Select-Titles($items, $info, [string]$heading = 'Pick what goes to the 
 
 function Read-Quality {
     Write-Title 'Quality'
-    Write-Host '  1  Original      the file as it is (only fixed if the phone needs it)'
+    Write-Host '  1  Original      full quality (copied untouched if already Watch-safe, 1080p at most)'
     Write-Host '  2  1080p         about 4 Mbps, roughly 1.8 GB per hour'
     Write-Host '  3  720p small    about 2 Mbps, roughly 0.9 GB per hour'
     Write-Note '  Files already smaller than the choice are not re-encoded.'
@@ -995,14 +986,15 @@ function Send-Items($picked, $info) {
             else { $bytes = Send-Season $item $usedNow $shows }
             if ($bytes -gt 0) { $usedNow += $bytes; $sent++ ; Write-Good ("  Sent ({0})." -f (Format-Size $bytes)) }
         } catch {
-            Write-Bad "  Failed: $($_.Exception.Message)"
-            Write-Bad '  This title was skipped; the rest carry on.'
+            Write-Bad "  $($_.Exception.Message)"
+            Write-Bad '  This title was not sent; the rest carry on.'
         }
     }
     return $sent
 }
 
-# Fixes one file if needed into $stage; returns @{ Path; Result; Poster }
+# Makes one file Watch-safe in $stage (untouched when it already is), checks it with ffprobe,
+# and saves its subtitles as .srt. Returns @{ Path; Result; Poster; Subs }
 function Prepare-File($file, [string]$stage, [string]$baseName) {
     $r = Test-Media $file.FullName $script:Quality
     if ($r.CantFix) { throw $r.CantFix }
@@ -1013,11 +1005,15 @@ function Prepare-File($file, [string]$stage, [string]$baseName) {
         $pp = Join-Path $stage 'poster.jpg'
         if (Save-Cover $r $pp) { $poster = $pp; Write-Note '  Saved the cover as poster.jpg.' }
     }
-    if (-not $r.NeedsWork) { return @{ Path = $file.FullName; Result = $r; Poster = $poster } }
-    foreach ($a in $r.Actions) { Write-Host "  Fixing: $a" }
-    if ($r.EncodeVideo) { Write-Note ('  Re-encoding takes a while (roughly as long as the film on a fast PC).') }
-    $out = Invoke-Fix $r $script:Quality $stage $baseName
-    return @{ Path = $out; Result = $r; Poster = $poster }
+    $subs = @(); if ($r.Subs.Count -gt 0) { $subs = Save-Subtitles $r $stage $baseName }
+    $out = $file.FullName
+    if ($r.NeedsWork) {
+        foreach ($a in $r.Actions) { Write-Host "  Fixing: $a" }
+        if ($r.EncodeVideo) { Write-Note ('  Re-encoding takes a while (roughly as long as the film on a fast PC).') }
+        $out = Invoke-Fix $r $script:Quality $stage $baseName
+    } else { Write-Note '  Already Watch-safe: sent untouched.' }
+    Confirm-WatchSafe $out $r
+    return @{ Path = $out; Result = $r; Poster = $poster; Subs = $subs }
 }
 
 # Says whether the real size is much bigger than expected, and whether it still fits.
@@ -1049,15 +1045,16 @@ function Send-Movie($item, [double]$usedNow) {
     [void](New-Item -ItemType Directory -Path $stage)
     $prep = Prepare-File $item.Files[0] $stage 'movie'
     $video = Get-Item -LiteralPath $prep.Path
-    $videoName = 'movie' + $prep.Result.OutExt
-    if ($prep.Path -eq $item.Files[0].FullName) { $videoName = 'movie' + $video.Extension.ToLowerInvariant() }
+    $videoName = 'movie.mp4'
     $meta = Get-MovieMeta $item
     $pics = Get-Pictures $meta $prep.Poster $stage
-    $total = [double]$video.Length + $pics.Bytes
-    Test-RealSize $total ($prep.Result.Estimate + $pics.Bytes) $usedNow
+    $subBytes = 0.0; foreach ($sf in $prep.Subs) { $subBytes += $sf.Length }
+    $total = [double]$video.Length + $pics.Bytes + $subBytes
+    Test-RealSize $total ($prep.Result.Estimate + $pics.Bytes + $subBytes) $usedNow
     Write-Host "  Sending $videoName ($(Format-Size $video.Length))..."
     if ($pics.Poster) { Send-File $pics.Poster $item.PhoneDir 'poster.jpg' }
     if ($pics.Backdrop) { Send-File $pics.Backdrop $item.PhoneDir 'backdrop.jpg' }
+    foreach ($sf in $prep.Subs) { Send-File $sf.FullName $item.PhoneDir $sf.Name }
     Send-File $video.FullName $item.PhoneDir $videoName
     $json = New-MovieJson $item $prep.Result $videoName ([bool]$pics.Poster) $video.Length $meta ([bool]$pics.Backdrop)
     Send-Text $json $item.PhoneDir 'movie.json'
@@ -1090,8 +1087,9 @@ function Send-Season($item, [double]$usedNow, $shows) {
         [void](New-Item -ItemType Directory -Path $stage)
         $prep = Prepare-File $ep.File $stage $code
         $video = Get-Item -LiteralPath $prep.Path
-        $videoName = $code + $video.Extension.ToLowerInvariant()
+        $videoName = "$code.mp4"
         Test-RealSize ([double]$video.Length) $prep.Result.Estimate ($usedNow + $total)
+        foreach ($sf in $prep.Subs) { Send-File $sf.FullName $item.PhoneDir $sf.Name; $total += $sf.Length }
         Send-File $video.FullName $item.PhoneDir $videoName
         $tmdbEp = $tmdbEps[$ep.Episode]
         $still = $null
@@ -1197,8 +1195,8 @@ function Invoke-Send {
     $after = $info.Used + $est.Bytes
     Write-Host ''
     Write-Host ("  Estimated size to send: {0}. Watch would then use {1} of the {2} cap." -f (Format-Size $est.Bytes), (Format-Size $after), (Format-Size $CapBytes))
-    if ($est.Problems -eq 0) { Write-Good '  Library check: every picked file can go as it is.' }
-    else { Write-Warn2 "  Library check: $($est.Problems) file(s) need fixing (listed above); it is done on copies." }
+    if ($est.Problems -eq 0) { Write-Good '  Library check: every picked file is already Watch-safe.' }
+    else { Write-Warn2 "  Library check: $($est.Problems) file(s) will be made Watch-safe (listed above), on copies in %TEMP%." }
     if ($after -gt $CapBytes) { Write-Bad '  That is over the 50 GB cap. Pick less or a smaller quality, then try again.'; return }
     if ($null -ne $info.Free -and $est.Bytes -gt $info.Free) { Write-Bad '  There is not enough free space for that.'; return }
 

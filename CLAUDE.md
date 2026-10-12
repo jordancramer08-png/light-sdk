@@ -160,15 +160,35 @@ folder), requires exactly one connected device, prints each step in plain Englis
 it would do and stops. Phone handoff is proven: `adb push` to `/data/local/tmp`, then
 `adb shell` copy into `/sdcard/Watch/...` as `.part`, rename at the end.
 
-- `Watch-Phone-Sync.cmd`: menu of D:\Movies and D:\TV titles with sizes; pick what goes; a
+- `Watch-Phone-Sync.cmd`: menu of titles from all source folders (see below) with sizes; pick what goes; a
   running total against the **50 GB cap** (Jordan's choice; the script refuses to exceed it
   and shows free space on the phone); per-send quality: Original / 1080p / 720p small
   (estimate 720p about 2 Mbps, 1080p about 4 Mbps, then measure the real size and warn).
   Parses `Title (Year)` from file names, folders become collections (numbered 01, 02 = story
-  order). Library check flags files the phone can't play (AVI, AC3/DTS/TrueHD audio,
-  10-bit HEVC, embedded cover track) and fixes them: remux with `-c copy`, or convert only
-  the audio to AAC, or re-encode when shrinking. Embedded cover art is extracted to
-  poster.jpg and stripped from the video (`-map 0:v:0 -map 0:a`).
+  order). **Every title is made Watch-safe on the way to the phone** (rules below, code in
+  `scripts\WatchSafe.ps1`, tests in `scripts\tests\Test-WatchSafe.ps1`). A file already
+  Watch-safe is copied untouched; anything else is converted on a copy in `%TEMP%`: remux
+  with `-c copy` when only the container/index/extra tracks are wrong, convert only the
+  sound when only the sound is wrong, re-encode the picture when it must. Embedded cover art
+  is extracted to poster.jpg and stripped from the video.
+- **Watch-safe format** (from `phone_day\decoders.txt`, Session 11):
+  - MP4 container with the index (`moov`) before the data (`mdat`), i.e. `+faststart`.
+  - Exactly one picture track: **H.264, 8-bit 4:2:0** (`yuv420p`), Baseline/Main/High
+    profile, level 5.1 or lower, **at most 1920x1080**. (The phone's hardware also decodes
+    8-bit HEVC Main and VP9 up to 1080p, but Watch-safe is H.264 only: one format, fewest
+    surprises.)
+  - Every sound track **AAC** (LC/HE), **stereo or 5.1** (the phone's AAC decoder takes 6
+    channels, so 5.1 is kept). Mono stays mono; 7.1 or other layouts are mixed to stereo.
+    The phone has no AC3, E-AC3, DTS or TrueHD decoder.
+  - Nothing else inside: no cover-image track, no subtitle tracks, no data/chapter tracks.
+  - Subtitles: text tracks become sidecar `.srt` files next to the video
+    (`movie.en.srt`, `movie.en.2.srt`, `S01E01.en.srt`); picture subtitles (PGS/VobSub) are
+    dropped with a note.
+  - Converting: picture -> `libx264 -pix_fmt yuv420p -profile:v high -level:v 4.1`, CRF 20
+    (Original) or the 1080p/720p bitrate, scaled down to fit 1920x1080 (or 1280x720).
+- **Check before sending:** every file (converted or untouched) is probed with ffprobe and
+  refused with a plain reason unless it is Watch-safe, has exactly one picture track, and
+  its length is within 1 second of the original.
 - **TMDB**: free key in `private\tmdb-key.txt` (git-ignored; never print it). PC-side only.
   Look up by title + year, save poster, backdrop, overview, genres, cast, director, runtime,
   rating, content rating, collection into json. Cache lookups in `private\tmdb-cache\`.
@@ -179,8 +199,23 @@ it would do and stops. Phone handoff is proven: `adb push` to `/data/local/tmp`,
   `.state`, and an option that grants MANAGE_EXTERNAL_STORAGE.
 - **Ask before installing software.** ffmpeg is needed on the PC:
   `winget install Gyan.FFmpeg` after Jordan says yes. Prefer PowerShell + ffmpeg only.
-- **Nothing in `D:\Movies` or `D:\TV` is ever changed.** All work happens on copies in
+- **Nothing in any source folder (`D:\Movies`, `D:\Marvel Entertainment`, `D:\TV`) is ever changed.** All work happens on copies in
   `%TEMP%\watch-*`, deleted at the end.
+- **Source folders (scan all; skip any that don't exist):** `D:\Movies`, `D:\Marvel Entertainment`,
+  `D:\TV`. Keep the list in one place in the script so another folder is easy to add.
+  - `D:\Movies`: about 325 files; series folders (e.g. Star Wars, Middle-earth, Christmas);
+    `Title (Year)` naming; numbered 01, 02, 03 = story order.
+  - `D:\Marvel Entertainment`: about 1,555 files (742 mp4, 711 mkv, 102 avi), about 795 GB.
+    Films live in per-title folders, often `NN - Title (Year)` (MCU, numbered in watch
+    order) under Phase One to Three, Phase Four to Six Films, `Series & Specials`, and
+    Non-MCU Films (X-Men (Fox), TV, The Gifted, etc.). TV episodes are already named
+    `Show - SxxExx - Title.ext`; season folders are either `Show (Year) - Season N` or
+    `Season N`. Treat any file with `SxxExx` in its name as a TV episode (group by show and
+    season), everything else as a movie. Collections come from the folder (MCU phase,
+    saga, numbered order). Also has Marvel Studios Assembled / Legends folders: inspect
+    before assuming a layout. Expect many AVI and MKV files, so the library check and
+    conversion step matter most here; show a running time estimate for big sends.
+  - Mixed sources can hold the same title twice: warn, don't send both.
 - TV naming expected on the PC: `D:\TV\<Show>\Season 01\<Show> - S01E01 - <Title>.mp4`.
   Create `D:\TV` with a short README.txt explaining this if it doesn't exist.
 - Test mode (no phone): `WATCH_DRY_RUN=<folder>` writes the finished layout there and sends

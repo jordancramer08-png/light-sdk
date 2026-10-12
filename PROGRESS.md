@@ -371,3 +371,32 @@ tool code BEFORE any build is installed.
   headset buttons; watchlist / mark watched / Remove-from-phone screen; filters + search;
   PC Remove, Backup and Restore against the real phone.
 - Build log: `logs/session10-build.log`. Tagged **v1.0**.
+
+## Session 11 part A — Every video Watch-safe (2026-10-12) ✅
+
+- **Decoders:** `adb shell dumpsys media.codec` doesn't exist on LightOS ("Can't find service");
+  the same list comes from `dumpsys media.player`, saved to `phone_day/decoders.txt`.
+  Hardware: H.264 Baseline/Main/High up to level 5, 1920x1088 max; HEVC **Main only (8-bit)**
+  up to 1080p; VP9 1080p. Software only: AV1, VP8, MPEG-4, H.263. Sound: AAC (hardware, up
+  to 6 channels = 5.1), MP3, Opus, Vorbis, FLAC, ALAC, APE, WMA, AMR. **No AC3/E-AC3/DTS/TrueHD.**
+  Nothing above 1080p, no 10-bit.
+- **Phone Day failures:** none (Ted and HP1 played after the old library check). The
+  Watch-safe rule is preventive, built from the decoder list.
+- **Watch-safe** (CLAUDE.md §8): faststart MP4, one H.264 8-bit 4:2:0 track ≤1920x1080 (level
+  ≤5.1), AAC LC/HE stereo or 5.1 (7.1 → stereo), no cover/subtitle/data tracks, text subs as
+  sidecar `.srt`. Rules live in `scripts/WatchSafe.ps1` (dot-sourced; pure, no ffmpeg calls).
+- **Watch-Phone-Sync:** every file goes through the rules. Already safe → sent untouched
+  (checked: same MD5). Otherwise converted in `%TEMP%`: remux only / sound only / picture
+  re-encode, all with `-movflags +faststart -sn -dn -map_chapters -1`. Output is always
+  `movie.mp4` / `SxxEyy.mp4` (no more MKV on the phone). Original / 1080p / 720p and the 50 GB
+  cap unchanged; Original now also caps the picture at 1080p.
+- **ffprobe gate before sending:** Watch-safe, exactly one picture track, length within 1 s of
+  the original; otherwise "NOT SENT - <reason>." and the title is skipped. movie.json codec /
+  width / height now come from the probed file.
+- **Tests:** `scripts/tests/Test-WatchSafe.ps1` — 53 rule tests (safe files, every conversion
+  reason, channels, the send gate incl. the 1 s limit, .srt names, real MP4 box order).
+  Kotlin: unchanged, all passing. Dry run on synthetic files (faststart H.264 = untouched;
+  1440p 10-bit HEVC MKV + AC3 5.1 + srt + cover; AVI MPEG-4 + MP3; 7.1 AAC with index at end;
+  E-AC3 episode) → all five Watch-safe, srt sidecar made. Build log `logs/session11-build.log`.
+- **Not done here:** the new source folders (`D:\Marvel Entertainment`, duplicates) Jordan
+  added to CLAUDE.md §8 — that's part B. Real send of a converted title to the phone.

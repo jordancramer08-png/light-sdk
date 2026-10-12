@@ -127,6 +127,45 @@ tool code BEFORE any build is installed.
   Build log: `logs/session4-build.log`.
 - Phone Day checks: grid scroll smoothness with 300+ posters, row heights look right.
 
+## Session 5 — Detail, TV, Collections, Watchlist, Sort & Filter, Search, Settings (2026-10-12) ✅
+
+- **Home** top bar: left switches posters/list, right (gear) opens **Settings**. Under it a
+  strip: **Watchlist** (Home) or **Sort & Filter** (tabs, shows "(2)" when filters are on),
+  **Search**, **Surprise me**. Every poster now opens its screen (`Navigation.openTitle`).
+- **DetailScreen** (movies and episodes): poster, title, "2016 · 2h 19m · ★ 8.1 · R",
+  genres, quality line, overview, director, cast, progress bar, Mark watched / unwatched,
+  Add to / remove from Watchlist, Remove from phone; bottom button PLAY or
+  "RESUME FROM 1:10:05". Accent color is taken from the poster (`logic/AccentColor`,
+  decoration only: a rule under the header and the progress bar). PLAY shows "Playback
+  arrives in the next update" until Session 6.
+- **Remove from phone** (`RemoveScreen`, confirmation with size). CLAUDE.md §4 says the app
+  never deletes video files, so REMOVE writes the id to **`.state/remove-requests.json`**,
+  hides the movie at once, and the detail page offers "Keep" to undo. **Session 8/9: the PC
+  script must delete those folders on the next sync and clear the file** (keeping
+  positions/watched).
+- **TV:** `ShowScreen` (poster, facts, overview, Watchlist, seasons with "10 episodes · 4
+  watched" / "All watched") → `SeasonScreen` (episodes in order, runtime, air date,
+  "· Watched", progress bar) → episode detail. Specials (season 0) last.
+- **CollectionScreen**: story order, numbered "1. …". **WatchlistScreen**: movies + shows in
+  the order added.
+- **Sort & Filter** (`SortFilterScreen`, Reader style: headings, filled/empty circles,
+  hairlines): all 11 sorts, Order with words per sort (A–Z / Z–A, Newest first, Longest
+  first…), filters Show (watched state), Genre, Decade, Content rating, Collection (Movies),
+  Quality (not TV), "Clear all filters". Each tap is saved at once **per tab** in
+  settings.json (`tabViews`); the screen stays open. Logic: `logic/Browse` (`TabView`,
+  shows/collections summed into one item each).
+- **Search**: title, cast, director across movies and shows (every word, any order, accents
+  ignored). Uses the SDK's full-screen `LightTextInputEditor`; SEARCH shows results, tap the
+  box to type again. (Listen's live-search keyboard needs an SDK addition that only exists on
+  the listen branch; not copied.)
+- **Surprise me**: random movie never started, Genre ‹ › and Length ‹ › (any, 1h 30m, 1h 45m,
+  2h, 2h 30m); ANOTHER never repeats the last pick. Movies only.
+- **Settings**: Theme, Library view, Poster columns 2/3, Skip 10/15/30 s (15 default), Start
+  the player in Portrait/Landscape/Last used, Subtitle size S/M/L/XL, and the TMDB line.
+- Tests: 83 passing (10 new in BrowseTest). Lint: only the 4 old warnings. Build log:
+  `logs/session5-build.log`.
+- Phone Day checks: accent colors look good, detail page layout, search keyboard.
+
 ## Session plan
 
 | # | Session | Done when |

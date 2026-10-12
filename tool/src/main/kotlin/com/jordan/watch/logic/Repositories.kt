@@ -115,6 +115,44 @@ class WatchlistRepository(private val store: StateStore) {
     fun toggle(id: String) = if (contains(id)) remove(id) else add(id)
 }
 
+/**
+ * "Remove from phone" requests. The app never deletes video files (CLAUDE.md 4); it lists
+ * the ids in .state/remove-requests.json, hides them from the library at once, and the
+ * PC script deletes them on the next sync (keeping watched marks and positions).
+ */
+class RemovalRepository(private val store: StateStore) {
+
+    private val _ids = MutableStateFlow<List<String>>(emptyList())
+    val ids: StateFlow<List<String>> = _ids.asStateFlow()
+
+    @Volatile
+    private var fake = false
+
+    @Synchronized
+    fun load() {
+        if (!fake) _ids.value = store.loadRemovals()
+    }
+
+    /** Debug fake library only: requests stay in memory. */
+    fun useFake() {
+        fake = true
+    }
+
+    @Synchronized
+    fun request(id: String) {
+        if (id in _ids.value) return
+        _ids.value = _ids.value + id
+        if (!fake) tryWrite { store.saveRemovals(_ids.value) }
+    }
+
+    @Synchronized
+    fun cancel(id: String) {
+        if (id !in _ids.value) return
+        _ids.value = _ids.value - id
+        if (!fake) tryWrite { store.saveRemovals(_ids.value) }
+    }
+}
+
 /** Watch's settings. */
 class SettingsRepository(private val store: StateStore) {
 
@@ -136,13 +174,15 @@ class SettingsRepository(private val store: StateStore) {
     }
 }
 
-/** All three, made from one .state folder. */
+/** All four, made from one .state folder. */
 class Repositories(store: StateStore) {
     val playback = PlaybackRepository(store)
     val watchlist = WatchlistRepository(store)
     val settings = SettingsRepository(store)
+    val removals = RemovalRepository(store)
 
     fun load() {
+        removals.load()
         playback.load()
         watchlist.load()
         settings.load()

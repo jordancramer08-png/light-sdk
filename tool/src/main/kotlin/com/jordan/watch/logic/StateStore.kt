@@ -30,7 +30,13 @@ data class WatchSettings(
     /** "PORTRAIT", "LANDSCAPE" or "LAST". */
     val startIn: String = "PORTRAIT",
     val lastOrientation: String = "PORTRAIT",
-)
+    /** "SMALL", "MEDIUM", "LARGE" or "XLARGE". */
+    val subtitleSize: String = "MEDIUM",
+    /** Each tab's sort and filters, by [BrowseTab] name. */
+    val tabViews: Map<String, TabView> = emptyMap(),
+) {
+    fun tabView(tab: BrowseTab): TabView = tabViews[tab.name] ?: TabView()
+}
 
 /**
  * The four files in /sdcard/Watch/.state/. Every write is atomic, and a missing or broken
@@ -48,6 +54,10 @@ class StateStore(private val dir: File) {
     /** Title ids in the order they were added. */
     fun loadWatchlist(): List<String> = read(WATCHLIST, watchlistSerializer) ?: emptyList()
     fun saveWatchlist(ids: List<String>) = write(WATCHLIST, watchlistSerializer, ids)
+
+    /** Movie ids Jordan chose "Remove from phone" for; the PC script deletes them next sync. */
+    fun loadRemovals(): List<String> = read(REMOVALS, watchlistSerializer) ?: emptyList()
+    fun saveRemovals(ids: List<String>) = write(REMOVALS, watchlistSerializer, ids)
 
     fun loadSettings(): WatchSettings = read(SETTINGS, WatchSettings.serializer()) ?: WatchSettings()
     fun saveSettings(settings: WatchSettings) = write(SETTINGS, WatchSettings.serializer(), settings)
@@ -70,6 +80,7 @@ class StateStore(private val dir: File) {
         const val WATCHED = "watched.json"
         const val WATCHLIST = "watchlist.json"
         const val SETTINGS = "settings.json"
+        const val REMOVALS = "remove-requests.json"
 
         val positionsSerializer = MapSerializer(String.serializer(), Position.serializer())
         val watchedSerializer = MapSerializer(String.serializer(), Long.serializer())

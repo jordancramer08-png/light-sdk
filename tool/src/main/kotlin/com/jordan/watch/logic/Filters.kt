@@ -1,5 +1,7 @@
 package com.jordan.watch.logic
 
+import kotlinx.serialization.Serializable
+
 /** Picture quality bands, from the video height. */
 enum class Quality(val label: String) {
     SD("SD"), HD720("720p"), HD1080("1080p"), UHD("4K");
@@ -17,6 +19,7 @@ enum class Quality(val label: String) {
 }
 
 /** Which filters are on. A null field means "any". */
+@Serializable
 data class LibraryFilter(
     val genre: String? = null,
     /** First year of the decade, e.g. 1990 for the 90s. */

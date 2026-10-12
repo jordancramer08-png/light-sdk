@@ -14,7 +14,10 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import com.jordan.watch.logic.Browse
+import com.jordan.watch.logic.BrowseTab
 import com.jordan.watch.logic.Library
+import com.jordan.watch.logic.SortLabels
 import com.jordan.watch.logic.Position
 import com.jordan.watch.logic.Shelves
 import com.jordan.watch.logic.Tile
@@ -23,6 +26,7 @@ import com.jordan.watch.storage.LibraryState
 import com.jordan.watch.storage.PosterCache
 import com.jordan.watch.storage.StorageAccess
 import com.jordan.watch.storage.WatchLibrary
+import com.jordan.watch.ui.ButtonStrip
 import com.jordan.watch.ui.CenteredMessage
 import com.jordan.watch.ui.LIST_ROW_GRID_UNITS
 import com.jordan.watch.ui.LocalAccent
@@ -54,7 +58,8 @@ enum class Tab(val label: String) { HOME("Home"), MOVIES("Movies"), TV("TV"), CO
 /**
  * Watch's library: Home (Continue Watching, then Recently Added) and the Movies, TV and
  * Collections tabs, as a poster grid (2 or 3 columns) or a list with small posters. The
- * top bar switches grid/list (left) and the number of columns (right); both are saved.
+ * top bar switches grid/list (left) and opens Settings (right). Under it: Sort & Filter
+ * (Watchlist on Home), Search and Surprise me.
  * Without All files access it shows how to grant it, and checks again on every return.
  */
 @InitialScreen
@@ -89,8 +94,13 @@ class HomeScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Unit>(
                     contentDescription = if (grid) "Show as list" else "Show as posters",
                 ),
                 center = LightTopBarCenter.Text(if (library.updating) "Updating library..." else "Watch"),
-                rightButton = if (grid) LightBarButton.Text("$columns across", onClick = ::toggleColumns) else null,
+                rightButton = LightBarButton.LightIcon(
+                    icon = LightIcons.SETTINGS,
+                    onClick = { navigateTo({ SettingsScreen(it) }) },
+                    contentDescription = "Settings",
+                ),
             )
+            if (library.loaded && !library.library.isEmpty) ActionStrip(current, prefs)
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when {
                     access == false && !library.fake -> CenteredMessage(NO_ACCESS_MESSAGE, Modifier.matchParentSize())
@@ -107,8 +117,11 @@ class HomeScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Unit>(
     private fun TabContent(current: Tab, state: LibraryState, grid: Boolean, columns: Int) {
         val positions by WatchLibrary.repositories.playback.positions.collectAsState()
         val watched by WatchLibrary.repositories.playback.watched.collectAsState()
-        val tiles = rememberTiles(current, state.library, positions, watched) ?: return
-        val tag = listOf(current, grid, columns)
+        val removals by WatchLibrary.repositories.removals.ids.collectAsState()
+        val prefs by settings.settings.collectAsState()
+        val library = Browse.visible(state.library, removals)
+        val tiles = rememberTiles(current, library, positions, watched, prefs) ?: return
+        val tag = listOf(current, grid, columns, browseTab(current)?.let { prefs.tabView(it) })
         when {
             current == Tab.HOME -> WatchLazyList(tag, LIST_ROW_GRID_UNITS) {
                 if (tiles.first.isNotEmpty()) {
@@ -118,6 +131,8 @@ class HomeScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Unit>(
                 headingRow("Recently Added")
                 posterList(tiles.second, ::open, keyPrefix = "recent:")
             }
+            tiles.second.isEmpty() && browseTab(current)?.let { prefs.tabView(it).filter.isEmpty } == false ->
+                CenteredMessage("Nothing matches these filters.\n\nChange them in Sort & Filter.")
             tiles.second.isEmpty() -> CenteredMessage(emptyTabMessage(current))
             grid -> WatchLazyList(tag, gridRowGridUnits(columns)) { posterGrid(tiles.second, columns, ::open) }
             else -> WatchLazyList(tag, LIST_ROW_GRID_UNITS) { posterList(tiles.second, ::open) }
@@ -134,17 +149,46 @@ class HomeScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Unit>(
         library: Library,
         positions: Map<String, Position>,
         watched: Map<String, Long>,
-    ): Pair<List<Tile>, List<Tile>>? =
-        produceState<Pair<List<Tile>, List<Tile>>?>(null, current, library, positions, watched) {
+        prefs: WatchSettings,
+    ): Pair<List<Tile>, List<Tile>>? {
+        val tab = browseTab(current)
+        val view = tab?.let { prefs.tabView(it) }
+        return produceState<Pair<List<Tile>, List<Tile>>?>(null, current, library, positions, watched, view) {
             value = withContext(Dispatchers.Default) {
-                when (current) {
-                    Tab.HOME -> Shelves.continueWatching(library, positions, watched) to Shelves.recentlyAdded(library, watched)
-                    Tab.MOVIES -> emptyList<Tile>() to Shelves.movies(library, watched)
-                    Tab.TV -> emptyList<Tile>() to Shelves.shows(library)
-                    Tab.COLLECTIONS -> emptyList<Tile>() to Shelves.collections(library)
+                if (tab == null || view == null) {
+                    Shelves.continueWatching(library, positions, watched) to Shelves.recentlyAdded(library, watched)
+                } else {
+                    emptyList<Tile>() to Browse.tiles(tab, library, positions, watched, view)
                 }
             }
         }.value
+    }
+
+    /** Under the top bar: Watchlist (Home) or Sort & Filter (tabs), then Search and Surprise me. */
+    @Composable
+    private fun ActionStrip(current: Tab, prefs: WatchSettings) {
+        val tab = browseTab(current)
+        val first: Pair<String, () -> Unit> = if (tab == null) {
+            "Watchlist" to { navigateTo({ WatchlistScreen(it) }) }
+        } else {
+            val filters = SortLabels.filterCount(prefs.tabView(tab).filter)
+            (if (filters > 0) "Sort & Filter ($filters)" else "Sort & Filter") to { navigateTo({ SortFilterScreen(it, tab) }) }
+        }
+        ButtonStrip(
+            listOf(
+                first,
+                "Search" to { navigateTo({ SearchScreen(it) }) },
+                "Surprise me" to { navigateTo({ SurpriseScreen(it) }) },
+            ),
+        )
+    }
+
+    private fun browseTab(tab: Tab): BrowseTab? = when (tab) {
+        Tab.HOME -> null
+        Tab.MOVIES -> BrowseTab.MOVIES
+        Tab.TV -> BrowseTab.TV
+        Tab.COLLECTIONS -> BrowseTab.COLLECTIONS
+    }
 
     /** The tab bar. The chosen tab is underlined and in full color; the others are lighter. */
     @Composable
@@ -173,14 +217,10 @@ class HomeScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Unit>(
 
     private fun toggleView() = changeSettings { it.copy(libraryView = if (it.libraryView == "LIST") "GRID" else "LIST") }
 
-    private fun toggleColumns() = changeSettings { it.copy(gridColumns = if (it.gridColumns == 2) 3 else 2) }
-
     /** Saves a settings change off the main thread (it writes settings.json). */
     private fun changeSettings(change: (WatchSettings) -> WatchSettings) = WatchLibrary.inBackground { settings.update(change) }
 
-    /** The detail, show and collection screens arrive in Session 5. */
-    @Suppress("UNUSED_PARAMETER")
-    private fun open(tile: Tile) = Unit
+    private fun open(tile: Tile) = openTitle(tile.id)
 
     private fun emptyTabMessage(tab: Tab): String = when (tab) {
         Tab.TV -> "No TV shows yet.\n\nSend some with Watch-Phone-Sync.cmd."

@@ -89,6 +89,7 @@ object WatchLibrary {
         if (_state.value.fake) return true
         val index = DevLibrary.fakeIndex() ?: return false
         repositories.playback.useFake(DevLibrary.fakePositions())
+        repositories.removals.useFake()
         if (StorageAccess.hasAllFilesAccess()) inBackground { repositories.settings.load() }
         _state.value = LibraryState(library = Library(index), loaded = true, fake = true)
         return true

@@ -40,6 +40,8 @@ SDK; small SDK tweak if the notch area shows a bar on Phone Day.
 recon. Session 1 must swap the id/label to `com.jordan.watch` / `Watch` and clear the old
 tool code BEFORE any build is installed.
 
+**Decisions (Jordan, 2026-10-12):** (a) Way 1 — SDK video player. (c) Way 1 — rotated player in a portrait app.
+
 ## Session plan
 
 | # | Session | Done when |

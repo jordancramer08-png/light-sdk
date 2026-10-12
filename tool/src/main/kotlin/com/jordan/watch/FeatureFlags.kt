@@ -6,7 +6,7 @@ package com.jordan.watch
  */
 object FeatureFlags {
     /** Landscape by drawing the video turned 90 degrees inside the portrait app. Off = portrait only. */
-    const val ROTATED_PLAYER = false
+    const val ROTATED_PLAYER = true
 
     /**
      * Debug builds only: show a made-up library of 300 movies and 25 shows (held in memory,

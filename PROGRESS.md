@@ -345,4 +345,29 @@ tool code BEFORE any build is installed.
 | 7 | Player extras: tracks, subtitles + nudges, aspect/zoom, sleep timer, next up, volume keys, details overlay | builds |
 | 8 | PC script: Watch-Phone-Sync.cmd, menus, 50 GB cap, ffmpeg checks/fixes, dry run | dry run writes correct layout |
 | 9 | PC script: TMDB lookup + cache, Remove menu, Backup/Restore, permission grant; Settings + TMDB line | dry run with TMDB data |
-| 10 | Phone Day: install, reboot, test everything, flip confirmed FeatureFlags | checklist passed on phone |
+| 10 | Phone Day: install, reboot, test everything, flip confirmed FeatureFlags | ✅ checklist passed on phone |
+
+## Session 10 — Phone Day (2026-10-12) ✅
+
+- Built (99 tests passing), `adb install -r` as `com.jordan.watch` (Jordan's other apps all
+  still installed), rebooted. Watch appeared in the menu; no-access screen shown first.
+- `Watch-Phone-Sync.cmd` on the real phone: Grant (appops reads back `allow`), Send of Ted
+  (2012, 702 MB) and Harry Potter 1 (2.3 GB), both with library-check remux, posters,
+  backdrops, json. `.state` files written atomically (no `.tmp` left behind).
+- **Passed on phone:** library + posters, Collections tab, detail page + quality line, sort
+  A–Z/Z–A/Year, smooth scroll, dark theme; full screen; rotate button both ways without
+  restart; no auto-rotate when tilting; "Start in: Landscape"; seek + time label; 15 s skip;
+  double-tap skip; hold-to-scan; +90 s; speed 0.25x–3.0x pitch-corrected; resume (back and
+  Home) with 5 s rewind and per-title speed; Continue Watching bar; volume keys + bar in
+  player and library; both files play.
+- **FeatureFlags:** `ROTATED_PLAYER` -> **ON** (proved on phone). Before it was on, the "Start
+  in: Landscape" setting did nothing; that was the flag, not a bug. `FAKE_LIBRARY` stays off
+  (debug-only test data, not a phone ability).
+- **Still broken:** nothing found.
+- **Not yet tested on the phone** (worked in builds/dry runs; check when convenient):
+  TV show/season/episode (no episode sent yet); next-up countdown (needs a second film in a
+  collection); subtitles + sync nudge; audio track picker; aspect Fit/Fill/Zoom + pinch;
+  lock controls; sleep timer; Details overlay; pause on headphone/Bluetooth disconnect and
+  headset buttons; watchlist / mark watched / Remove-from-phone screen; filters + search;
+  PC Remove, Backup and Restore against the real phone.
+- Build log: `logs/session10-build.log`. Tagged **v1.0**.

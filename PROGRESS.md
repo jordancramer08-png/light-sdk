@@ -247,6 +247,48 @@ tool code BEFORE any build is installed.
   reach the app; pause on unplugging headphones and on Bluetooth off; next-up countdown;
   Details numbers; storage line speed with 50 GB of files.
 
+## Session 8 — PC side part 1: Watch-Phone-Sync.cmd (2026-10-12) ✅
+
+- **Files:** `scripts/Watch-Phone-Sync.cmd` (double-click) runs `scripts/Watch-Phone-Sync.ps1`
+  (Windows PowerShell 5.1, ASCII only). Log of every run: `logs/sync-<time>.log`.
+- **ffmpeg** was already installed (winget Gyan.FFmpeg, 9.0), so nothing was installed. The
+  script finds ffmpeg/ffprobe on PATH or in WinGet\Links; if missing it prints the winget line.
+- **D:\TV** did not exist: the script made it with `README.txt` (naming from CLAUDE.md §8).
+- **Scan (read only):** every video under D:\Movies. Collection = the folder the file is in
+  (top-level files = `_Singles`); `NN - ` prefix = collectionNumber; `Title (Year)` from the
+  name; ` - ` in a name becomes `: ` in the title ("2001: A Space Odyssey"). Phone folder keeps
+  the file's spelling. **Note:** loose films in a category folder (Christmas/, Family/) get that
+  folder as their collection, e.g. Coco -> "Family"; Family/Harry Potter -> "Harry Potter".
+  TV: one menu row per season, `SxxEyy` from the file name, episode title after it.
+- **Menu:** numbered list with sizes, `[x]` picked, "(on phone)" tag. Numbers/ranges toggle,
+  words search (every word, any order, accent/case-insensitive), A/N/S/C/D/Q. Running total =
+  already on phone + picked, against the 50 GB cap; a pick that would go over is refused.
+  Free space on the phone shown (`df`).
+- **Quality:** Original / 1080p (3850k+160k) / 720p (1850k+128k). Shrinks only files taller
+  or >20% bigger than the target. Estimate before sending, real size measured after each file
+  (warning if >15% over, title skipped if it would break the cap).
+- **Library check (ffprobe):** non-MP4/MKV container (AVI), non-H.264/HEVC/VP9 picture
+  (Xvid/mpeg4), 10-bit picture, AC3/E-AC3/DTS/TrueHD/PCM sound, cover picture stored as a
+  video track, picture subtitles (dropped, noted). **Fixes**, on copies in `%TEMP%\watch-*`:
+  `-c copy` remux, sound-only to AAC stereo, x264 re-encode only when the picture needs it or
+  when shrinking, cover -> `poster.jpg` and stripped (`-map 0:v:<main> -map 0:a?`). Text
+  subtitles kept. Every write goes through `Assert-SafeTarget`, which refuses D:\Movies/D:\TV.
+- **Send:** exactly one device required; phone route = `adb push` to `/data/local/tmp/watch-xfer`,
+  `cp` to `name.part`, `mv` (poster, video, then json last). Already-there titles are replaced
+  only after a yes (positions/watched stay in .state). Writes `.state/last-sync.txt`.
+  No phone: explains the 5 steps and stops. `-Check <files...>` = check only, nothing written.
+- **Dry run:** `WATCH_DRY_RUN=<folder>` writes `<folder>\Watch\...`. Tested on a small
+  synthetic library (AVI+mpeg4+AC3, MP4 with cover+AC3 at 1080p, 10-bit H.264 MKV, good MP4,
+  2 TV episodes): layout matches §4, fixed files are H.264 8-bit + AAC with one video track,
+  sources byte-identical afterwards, temp folder removed. All 325 real names parse.
+- **Check of 10 real files:** 3 AVIs (Pokemon 1, Project X, Beethoven's 2nd) = Xvid picture,
+  need a re-encode (Beethoven's 2nd also AC3). A Quiet Place, Hacksaw Ridge, Watchmen,
+  Inception = AC3 sound + cover track. Casino, 12 Strong, Harry Potter 1 = cover track only.
+  Nearly every MP4/MKV has an embedded cover, so almost all titles get a quick remux.
+- Tests: 99 passing (1 new: the app reads the script's PowerShell-style movie.json).
+  Build log: `logs/session8-build.log`.
+- Session 9: TMDB lookup + cache, Remove menu, Backup/Restore, permission grant.
+
 ## Session plan
 
 | # | Session | Done when |

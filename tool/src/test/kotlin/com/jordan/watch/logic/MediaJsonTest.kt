@@ -99,4 +99,47 @@ class MediaJsonTest {
         File(season, "S02E11.json").writeText("garbage")
         assertEquals(11, MediaJson.readEpisode(File(season, "S02E11.json"), "The Office").episode)
     }
+
+    @Test
+    fun `json written by the PC script (PowerShell layout) is read`() {
+        val dir = folder("Movies/Bourne/The Bourne Identity (2002)")
+        File(dir, "movie.json").writeText(
+            """
+            {
+                "schema":  1,
+                "id":  "Bourne/The Bourne Identity (2002)",
+                "title":  "The Bourne Identity",
+                "year":  2002,
+                "collection":  "Bourne",
+                "collectionNumber":  1,
+                "overview":  "",
+                "genres":  [
+
+                           ],
+                "runtimeMin":  119,
+                "rating":  null,
+                "contentRating":  null,
+                "director":  null,
+                "cast":  [
+
+                         ],
+                "poster":  "poster.jpg",
+                "backdrop":  null,
+                "file":  "movie.mp4",
+                "width":  1280,
+                "height":  720,
+                "videoCodec":  "h264",
+                "audioCodec":  "aac",
+                "bytes":  1601770,
+                "sentAt":  "2026-10-12T17:19:45",
+                "source":  "Bourne\\01 - The Bourne Identity (2002).mp4"
+            }
+            """.trimIndent()
+        )
+        val movie = MediaJson.readMovie(dir, "Bourne/The Bourne Identity (2002)")
+        assertEquals("The Bourne Identity", movie.title)
+        assertEquals(1, movie.collectionNumber)
+        assertEquals("movie.mp4", movie.file)
+        assertEquals(emptyList(), movie.genres)
+    }
 }

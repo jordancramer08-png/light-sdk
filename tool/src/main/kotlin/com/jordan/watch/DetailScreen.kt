@@ -37,7 +37,7 @@ import com.jordan.watch.ui.PosterImage
 import com.jordan.watch.ui.ProgressBar
 import com.jordan.watch.ui.ThemedScreen
 import com.thelightphone.sdk.SealedLightActivity
-import com.thelightphone.sdk.SimpleLightScreen
+import com.jordan.watch.ui.VolumeKeyScreen
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightBottomBar
 import com.thelightphone.sdk.ui.LightScrollView
@@ -46,7 +46,6 @@ import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.designVerticalPxToDp
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -56,10 +55,7 @@ import java.io.File
  * bottom. The page's accent color comes from the poster (decoration only: the progress bar
  * and a thin rule, both also shown by position and words).
  */
-class DetailScreen(sealedActivity: SealedLightActivity, private val id: String) : SimpleLightScreen<Unit>(sealedActivity) {
-
-    /** A short note under the actions ("Playback comes next update"), or null. */
-    private val note = MutableStateFlow<String?>(null)
+class DetailScreen(sealedActivity: SealedLightActivity, private val id: String) : VolumeKeyScreen<Unit>(sealedActivity) {
 
     @Composable
     override fun Content() {
@@ -68,7 +64,6 @@ class DetailScreen(sealedActivity: SealedLightActivity, private val id: String) 
         val watchedMap by WatchLibrary.repositories.playback.watched.collectAsState()
         val watchlist by WatchLibrary.repositories.watchlist.ids.collectAsState()
         val removals by WatchLibrary.repositories.removals.ids.collectAsState()
-        val shownNote by note.collectAsState()
         val library = state.library
         val details = library.movie(id)?.let(DetailsMath::forMovie)
             ?: library.episode(id)?.let { (show, episode) -> DetailsMath.forEpisode(show, episode) }
@@ -111,7 +106,6 @@ class DetailScreen(sealedActivity: SealedLightActivity, private val id: String) 
                                 ActionRow("Remove from phone") { navigateTo({ RemoveScreen(it, id, details.title) }) { removed -> if (removed) goBack() } }
                             }
                         }
-                        shownNote?.let { Paragraph(it, lighten = true) }
                         Spacer(Modifier.height(1f.gridUnitsAsDp()))
                     }
                 }
@@ -159,9 +153,8 @@ class DetailScreen(sealedActivity: SealedLightActivity, private val id: String) 
         }
     }
 
-    /** The player is Session 6; until then the button says so. */
     private fun play() {
-        note.value = "Playback arrives in the next update."
+        navigateTo({ PlayerScreen(it, id) })
     }
 
     private companion object {

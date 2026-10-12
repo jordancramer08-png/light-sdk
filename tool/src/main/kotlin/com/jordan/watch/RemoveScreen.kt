@@ -14,7 +14,7 @@ import com.jordan.watch.storage.WatchLibrary
 import com.jordan.watch.ui.BackTopBar
 import com.jordan.watch.ui.ThemedScreen
 import com.thelightphone.sdk.SealedLightActivity
-import com.thelightphone.sdk.SimpleLightScreen
+import com.jordan.watch.ui.VolumeKeyScreen
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightBottomBar
 import com.thelightphone.sdk.ui.LightText
@@ -30,7 +30,7 @@ class RemoveScreen(
     sealedActivity: SealedLightActivity,
     private val id: String,
     private val title: String,
-) : SimpleLightScreen<Boolean>(sealedActivity) {
+) : VolumeKeyScreen<Boolean>(sealedActivity) {
 
     @Composable
     override fun Content() {

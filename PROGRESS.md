@@ -166,6 +166,41 @@ tool code BEFORE any build is installed.
   `logs/session5-build.log`.
 - Phone Day checks: accent colors look good, detail page layout, search keyboard.
 
+## Session 6 — Player core (2026-10-12) ✅
+
+- SDK commit "SDK: let a tool change the media volume" (Listen's `536682a`, cherry-picked
+  unchanged): `lightContext.mediaVolume`.
+- **Every screen** now extends `ui/VolumeKeyScreen` (Listen's code): volume keys change the
+  MEDIA volume and show a "Volume 7 of 15" bar for 2 s; scroll-wheel press (319) and camera
+  button (27, 80) do nothing; turning the wheel stays LightOS brightness.
+- **`PlayerScreen`** (PLAY / RESUME on the detail page opens it), on the SDK's
+  `LightVideoPlayer`. Black, full screen (LightActivity already hides the system bars),
+  screen kept on by the video view. Controls (fade after 3 s while playing, tap to show/hide):
+  back, title, play/pause (replays at the end), skip back/forward by the setting (15 s
+  default, label under the button), hold a skip button to scan (5 s jumps, 15 s after 2 s,
+  60 s after 6 s), double-tap left/right half to skip, seek bar with elapsed / remaining and
+  a big time label while dragging (seeks when the finger rests 0.3 s), Speed button → panel
+  with − / + (0.25 steps, 0.25x–3.0x) and quick 0.5 0.75 1 1.25 1.5 2 (chosen one underlined).
+- **Resume:** position + speed saved every 10 s while playing and at once on pause, skip,
+  seek, scan, speed change, leaving, app pause. Reopen = 5 s back; a watched title starts at
+  0. Speed is remembered per title. Watched at the last 3% / 2 min (`savePosition`) and at
+  the end of the file. Can't play / file missing → "Can't play this file." with a back button.
+- **Rotate (behind `FeatureFlags.ROTATED_PLAYER`, still OFF):** `ui/quarterTurned` turns the
+  whole player box 90° (picture, controls AND touches, width/height swapped). Nothing is
+  rebuilt, so playback continues at the same second. Rotate button only shows with the flag
+  on; "Start the player in" Portrait / Landscape / Last used is applied then, and every
+  rotate saves `lastOrientation`. Flag off = portrait only (the fallback).
+- `logic/PlayerMath` (time labels, skip clamping, scan steps, seek fraction, double-tap side,
+  start orientation, volume text). Tests: 89 passing (6 new). Lint: only the 4 old warnings.
+  Build log: `logs/session6-build.log`.
+- **Phone Day checks:** turn ROTATED_PLAYER on and test rotate mid-movie (no restart, no lost
+  second, touches match the turned picture); immersive full screen and whether the camera
+  cutout shows a bar; skip/scan feel; volume bar (it stays portrait in landscape — fine?);
+  wheel press / camera do nothing in the player.
+- Session 7 still to do: aspect Fit/Fill/Zoom + pinch, audio/subtitle pickers and drawing
+  subtitles, lock button, 90 s skip-ahead, previous/next, sleep timer, next-up countdown,
+  Details overlay, sync nudges.
+
 ## Session plan
 
 | # | Session | Done when |

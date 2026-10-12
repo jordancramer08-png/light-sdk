@@ -14,10 +14,10 @@ import com.jordan.watch.ui.ThemedScreen
 import com.jordan.watch.ui.WatchLazyList
 import com.jordan.watch.ui.posterList
 import com.thelightphone.sdk.SealedLightActivity
-import com.thelightphone.sdk.SimpleLightScreen
+import com.jordan.watch.ui.VolumeKeyScreen
 
 /** Movies and shows Jordan added to his Watchlist, in the order he added them. */
-class WatchlistScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Unit>(sealedActivity) {
+class WatchlistScreen(sealedActivity: SealedLightActivity) : VolumeKeyScreen<Unit>(sealedActivity) {
 
     @Composable
     override fun Content() {

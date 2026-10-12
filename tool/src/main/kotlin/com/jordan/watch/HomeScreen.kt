@@ -38,7 +38,7 @@ import com.jordan.watch.ui.posterGrid
 import com.jordan.watch.ui.posterList
 import com.thelightphone.sdk.InitialScreen
 import com.thelightphone.sdk.SealedLightActivity
-import com.thelightphone.sdk.SimpleLightScreen
+import com.jordan.watch.ui.VolumeKeyScreen
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightText
@@ -63,7 +63,7 @@ enum class Tab(val label: String) { HOME("Home"), MOVIES("Movies"), TV("TV"), CO
  * Without All files access it shows how to grant it, and checks again on every return.
  */
 @InitialScreen
-class HomeScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Unit>(sealedActivity) {
+class HomeScreen(sealedActivity: SealedLightActivity) : VolumeKeyScreen<Unit>(sealedActivity) {
 
     /** Null until checked, then whether Watch can read /sdcard/Watch. */
     private val hasAccess = MutableStateFlow<Boolean?>(null)

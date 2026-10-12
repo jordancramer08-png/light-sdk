@@ -24,7 +24,7 @@ import com.jordan.watch.ui.ListRow
 import com.jordan.watch.ui.ListStepperRow
 import com.jordan.watch.ui.ThemedScreen
 import com.thelightphone.sdk.SealedLightActivity
-import com.thelightphone.sdk.SimpleLightScreen
+import com.jordan.watch.ui.VolumeKeyScreen
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightBottomBar
 import com.thelightphone.sdk.ui.gridUnitsAsDp
@@ -34,7 +34,7 @@ import com.thelightphone.sdk.ui.gridUnitsAsDp
  * longer than a limit. Tap the pick to open it; ANOTHER picks again (never the same one twice
  * in a row unless it's the only one).
  */
-class SurpriseScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Unit>(sealedActivity) {
+class SurpriseScreen(sealedActivity: SealedLightActivity) : VolumeKeyScreen<Unit>(sealedActivity) {
 
     private var genre by mutableStateOf<String?>(null)
     private var maxRuntime by mutableStateOf<Int?>(null)

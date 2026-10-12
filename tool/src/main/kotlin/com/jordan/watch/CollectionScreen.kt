@@ -14,10 +14,10 @@ import com.jordan.watch.ui.ThemedScreen
 import com.jordan.watch.ui.WatchLazyList
 import com.jordan.watch.ui.posterList
 import com.thelightphone.sdk.SealedLightActivity
-import com.thelightphone.sdk.SimpleLightScreen
+import com.jordan.watch.ui.VolumeKeyScreen
 
 /** A collection's films in story order (collection number, then year), numbered. */
-class CollectionScreen(sealedActivity: SealedLightActivity, private val name: String) : SimpleLightScreen<Unit>(sealedActivity) {
+class CollectionScreen(sealedActivity: SealedLightActivity, private val name: String) : VolumeKeyScreen<Unit>(sealedActivity) {
 
     @Composable
     override fun Content() {

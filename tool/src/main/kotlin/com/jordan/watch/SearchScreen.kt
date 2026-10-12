@@ -29,7 +29,7 @@ import com.jordan.watch.ui.WatchLazyList
 import com.jordan.watch.ui.headingRow
 import com.jordan.watch.ui.posterList
 import com.thelightphone.sdk.SealedLightActivity
-import com.thelightphone.sdk.SimpleLightScreen
+import com.jordan.watch.ui.VolumeKeyScreen
 import com.thelightphone.sdk.rememberKeyboardOptions
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextInputEditor
@@ -46,7 +46,7 @@ import kotlinx.coroutines.withContext
  * order, ignoring capitals and accents. The words are typed on the SDK's full-screen
  * keyboard; SEARCH shows the results, tapping the box types again.
  */
-class SearchScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Unit>(sealedActivity) {
+class SearchScreen(sealedActivity: SealedLightActivity) : VolumeKeyScreen<Unit>(sealedActivity) {
 
     // Kept on the screen so the words are still there when you come back from a title.
     private val query = TextFieldState()

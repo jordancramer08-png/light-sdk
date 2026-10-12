@@ -24,7 +24,7 @@ import com.jordan.watch.ui.BackTopBar
 import com.jordan.watch.ui.ChoiceSection
 import com.jordan.watch.ui.ThemedScreen
 import com.thelightphone.sdk.SealedLightActivity
-import com.thelightphone.sdk.SimpleLightScreen
+import com.jordan.watch.ui.VolumeKeyScreen
 import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 
@@ -34,7 +34,7 @@ import com.thelightphone.sdk.ui.gridUnitsAsDp
  * Every tap is saved at once for this tab (settings.json) and the screen stays open; back
  * returns to the library. Filter choices come from what's actually in the library.
  */
-class SortFilterScreen(sealedActivity: SealedLightActivity, private val tab: BrowseTab) : SimpleLightScreen<Unit>(sealedActivity) {
+class SortFilterScreen(sealedActivity: SealedLightActivity, private val tab: BrowseTab) : VolumeKeyScreen<Unit>(sealedActivity) {
 
     @Composable
     override fun Content() {

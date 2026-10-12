@@ -16,7 +16,7 @@ import com.jordan.watch.ui.SectionHeading
 import com.jordan.watch.ui.ThemedScreen
 import com.jordan.watch.ui.WatchTheme
 import com.thelightphone.sdk.SealedLightActivity
-import com.thelightphone.sdk.SimpleLightScreen
+import com.jordan.watch.ui.VolumeKeyScreen
 import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
@@ -26,7 +26,7 @@ import com.thelightphone.sdk.ui.gridUnitsAsDp
  * Settings (saved in .state/settings.json at each tap): theme, poster columns, library view,
  * skip step, start orientation, subtitle size, then the TMDB credit TMDB's terms require.
  */
-class SettingsScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Unit>(sealedActivity) {
+class SettingsScreen(sealedActivity: SealedLightActivity) : VolumeKeyScreen<Unit>(sealedActivity) {
 
     @Composable
     override fun Content() {

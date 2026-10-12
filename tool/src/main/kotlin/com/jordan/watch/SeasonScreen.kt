@@ -13,14 +13,14 @@ import com.jordan.watch.ui.ThemedScreen
 import com.jordan.watch.ui.WatchLazyList
 import com.jordan.watch.ui.posterList
 import com.thelightphone.sdk.SealedLightActivity
-import com.thelightphone.sdk.SimpleLightScreen
+import com.jordan.watch.ui.VolumeKeyScreen
 
 /** One season's episodes in order, each with runtime, "· Watched" and a progress bar when started. */
 class SeasonScreen(
     sealedActivity: SealedLightActivity,
     private val showId: String,
     private val season: Int,
-) : SimpleLightScreen<Unit>(sealedActivity) {
+) : VolumeKeyScreen<Unit>(sealedActivity) {
 
     @Composable
     override fun Content() {

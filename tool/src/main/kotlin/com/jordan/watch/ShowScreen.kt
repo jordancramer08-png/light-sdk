@@ -29,14 +29,14 @@ import com.jordan.watch.ui.PosterImage
 import com.jordan.watch.ui.SectionHeading
 import com.jordan.watch.ui.ThemedScreen
 import com.thelightphone.sdk.SealedLightActivity
-import com.thelightphone.sdk.SimpleLightScreen
+import com.jordan.watch.ui.VolumeKeyScreen
 import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 
 /** A TV show: poster, facts and overview, Watchlist, then its seasons (with how many are watched). */
-class ShowScreen(sealedActivity: SealedLightActivity, private val showId: String) : SimpleLightScreen<Unit>(sealedActivity) {
+class ShowScreen(sealedActivity: SealedLightActivity, private val showId: String) : VolumeKeyScreen<Unit>(sealedActivity) {
 
     @Composable
     override fun Content() {

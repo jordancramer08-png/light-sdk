@@ -14,6 +14,11 @@
 #  Other switches (for testing):
 #    -Check <file> <file> ...   only run the library check on these files
 #    WATCH_MOVIES_ROOT / WATCH_TV_ROOT   use other library folders
+#    WATCH_BACKUP_DIR                    keep .state backups somewhere else
+#
+#  TMDB: details and posters come from TMDB using the key in
+#  private\tmdb-key.txt (never shown). Answers are cached in
+#  private\tmdb-cache, so a title is looked up online only once.
 #===========================================================================
 param(
     [switch]$Check,
@@ -45,6 +50,10 @@ if ($env:WATCH_DRY_RUN) { $DryRoot = Join-Path $env:WATCH_DRY_RUN 'Watch' }
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $LogDir   = Join-Path $RepoRoot 'logs'
 $Stamp    = Get-Date -Format 'yyyyMMdd-HHmmss'
+$TmdbKeyFile = Join-Path $RepoRoot 'private\tmdb-key.txt'
+$TmdbCache   = Join-Path $RepoRoot 'private\tmdb-cache'
+$BackupRoot  = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Watch-Backups'
+if ($env:WATCH_BACKUP_DIR) { $BackupRoot = $env:WATCH_BACKUP_DIR }
 $WorkDir  = Join-Path ([IO.Path]::GetTempPath()) "watch-$Stamp"
 
 $VideoExts   = @('.mp4', '.m4v', '.mkv', '.webm', '.mov', '.avi', '.wmv', '.mpg', '.mpeg', '.ts', '.flv')
@@ -540,11 +549,240 @@ function Save-Cover($r, [string]$posterPath) {
 #endregion
 
 #---------------------------------------------------------------------------
+# region  TMDB  (details and posters; the key is never shown or logged)
+#---------------------------------------------------------------------------
+$script:TmdbKey = $null
+$script:TmdbOff = $false
+
+# Reads the key once. Without one, titles go with what the file name says.
+function Initialize-Tmdb {
+    $script:TmdbOff = $true
+    if (-not (Test-Path -LiteralPath $TmdbKeyFile)) {
+        Write-Warn2 '  No TMDB key (private\tmdb-key.txt): titles go without TMDB posters and details.'
+        return
+    }
+    $k = ([IO.File]::ReadAllText($TmdbKeyFile)).Trim()
+    if (-not $k) { Write-Warn2 '  private\tmdb-key.txt is empty: titles go without TMDB details.'; return }
+    $script:TmdbKey = $k
+    $script:TmdbOff = $false
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch {}
+    if (-not (Test-Path -LiteralPath $TmdbCache)) { [void](New-Item -ItemType Directory -Path $TmdbCache -Force) }
+    Write-Note '  TMDB key found (not shown). Lookups are cached in private\tmdb-cache.'
+}
+
+# Never let the key reach the screen or the log
+function Hide-Key([string]$text) {
+    if ($script:TmdbKey) { return $text.Replace($script:TmdbKey, '***') }
+    return $text
+}
+
+function Get-Hash([string]$text) {
+    $sha = [Security.Cryptography.SHA1]::Create()
+    $bytes = $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($text))
+    return (($bytes | ForEach-Object { $_.ToString('x2') }) -join '')
+}
+
+function New-WebClient {
+    $wc = New-Object Net.WebClient
+    $wc.Encoding = [Text.Encoding]::UTF8
+    $wc.Headers['User-Agent'] = 'Watch-Phone-Sync'
+    return $wc
+}
+
+# Downloads one API answer. $null when TMDB can't be reached or has nothing.
+function Invoke-TmdbWeb([string]$rel) {
+    $url = "https://api.themoviedb.org/3/$rel"
+    $wc = New-WebClient
+    if ($script:TmdbKey.Length -gt 40) { $wc.Headers['Authorization'] = "Bearer $($script:TmdbKey)" }
+    else {
+        $sep = '?'; if ($url.Contains('?')) { $sep = '&' }
+        $url += $sep + 'api_key=' + $script:TmdbKey
+    }
+    for ($try = 1; $try -le 3; $try++) {
+        try { return $wc.DownloadString($url) }
+        catch {
+            $msg = Hide-Key ([string]$_.Exception.Message)
+            if ($msg -match '\(429\)' -and $try -lt 3) { Start-Sleep -Seconds 2; continue }
+            if ($msg -match '\(404\)') { return $null }
+            if ($msg -match '\(401\)') {
+                Write-Bad '  TMDB did not accept the key in private\tmdb-key.txt. Carrying on without TMDB.'
+            } else {
+                Write-Warn2 '  Could not reach TMDB (no internet?). Carrying on without it.'
+                Write-Note "  ($msg)"
+            }
+            $script:TmdbOff = $true
+            return $null
+        }
+    }
+    return $null
+}
+
+# One TMDB answer as an object, from the cache when it's there.
+function Get-Tmdb([string]$path, [hashtable]$query) {
+    if ($script:TmdbOff) { return $null }
+    $parts = @()
+    foreach ($k in ($query.Keys | Sort-Object)) { $parts += ($k + '=' + [Uri]::EscapeDataString([string]$query[$k])) }
+    $rel = $path
+    if ($parts.Count -gt 0) { $rel += '?' + ($parts -join '&') }
+    $cacheFile = Join-Path $TmdbCache ((Get-Hash $rel) + '.json')
+    if (Test-Path -LiteralPath $cacheFile) {
+        $text = [IO.File]::ReadAllText($cacheFile, [Text.Encoding]::UTF8)
+    } else {
+        $text = Invoke-TmdbWeb $rel
+        if (-not $text) { return $null }
+        [IO.File]::WriteAllText($cacheFile, $text, (New-Object Text.UTF8Encoding($false)))
+    }
+    try { return ($text | ConvertFrom-Json) } catch { return $null }
+}
+
+# Saves a TMDB picture (cached too). $size: w300 / w780 / w1280. $true when saved.
+function Save-TmdbImage([string]$tmdbPath, [string]$size, [string]$dest) {
+    if (-not $tmdbPath -or -not $script:TmdbKey) { return $false }
+    $cached = Join-Path $TmdbCache ("img-$size-" + $tmdbPath.TrimStart('/'))
+    if (-not (Test-Path -LiteralPath $cached)) {
+        try { (New-WebClient).DownloadFile("https://image.tmdb.org/t/p/$size$tmdbPath", $cached) }
+        catch {
+            if (Test-Path -LiteralPath $cached) { Remove-Item -LiteralPath $cached -Force }
+            Write-Warn2 '  Could not download a picture from TMDB.'
+            return $false
+        }
+    }
+    Assert-SafeTarget $dest
+    Copy-Item -LiteralPath $cached -Destination $dest -Force
+    return $true
+}
+
+# "Harry Potter and the Sorcerer's Stone" -> "harrypotterandthesorcerersstone"
+function Get-MatchKey([string]$s) { return ((Fold $s) -replace '[^a-z0-9]', '') }
+
+# Picks the search result that is this title: same year (give or take 1), same name first.
+# With no year in the file name, only an exact name counts.
+function Select-TmdbHit($res, [string]$title, $year, [string]$nameField, [string]$dateField) {
+    $want = Get-MatchKey $title
+    $first = $null
+    foreach ($r in @(Get-Prop $res 'results')) {
+        if ($null -eq $r) { continue }
+        $y = $null
+        if ([string](Get-Prop $r $dateField) -match '^(\d{4})') { $y = [int]$Matches[1] }
+        if ($year -and -not $y) { continue }
+        if ($year -and [math]::Abs($y - $year) -gt 1) { continue }
+        foreach ($n in @((Get-Prop $r $nameField), (Get-Prop $r ('original_' + $nameField)))) {
+            if ($n -and (Get-MatchKey $n) -eq $want) { return $r }
+        }
+        if ($year -and $null -eq $first) { $first = $r }
+    }
+    return $first
+}
+
+# The US rating ("PG-13", "TV-14") from TMDB's list of countries
+function Get-UsRating($results, [string]$listField, [string]$valueField) {
+    foreach ($c in @($results)) {
+        if ($null -eq $c -or (Get-Prop $c 'iso_3166_1') -ne 'US') { continue }
+        $entries = @($c); if ($listField) { $entries = @(Get-Prop $c $listField) }
+        foreach ($e in $entries) {
+            $v = [string](Get-Prop $e $valueField)
+            if ($v) { return $v }
+        }
+    }
+    return $null
+}
+
+function Get-Names($list, [int]$max) {
+    $out = @()
+    foreach ($p in @($list)) {
+        if ($null -eq $p) { continue }
+        $n = Get-Prop $p 'name'
+        if ($n) { $out += [string]$n }
+        if ($out.Count -ge $max) { break }
+    }
+    return ,$out
+}
+
+function Get-TmdbRating($d) {
+    if (-not (Get-Prop $d 'vote_count')) { return $null }
+    return [math]::Round([double](Get-Prop $d 'vote_average'), 1)
+}
+
+# The movie's TMDB details, or $null when there's no match.
+function Get-MovieMeta($item) {
+    if ($script:TmdbOff) { return $null }
+    $q = @{ query = $item.Title; include_adult = 'false' }
+    if ($item.Year) { $q['year'] = $item.Year }
+    $hit = Select-TmdbHit (Get-Tmdb 'search/movie' $q) $item.Title $item.Year 'title' 'release_date'
+    if (-not $hit -and $item.Year) {
+        $q.Remove('year')
+        $hit = Select-TmdbHit (Get-Tmdb 'search/movie' $q) $item.Title $item.Year 'title' 'release_date'
+    }
+    $d = $null
+    if ($hit) { $d = Get-Tmdb ('movie/' + (Get-Prop $hit 'id')) @{ append_to_response = 'credits,release_dates' } }
+    if (-not $d) { Write-Note '  TMDB: no match.'; return $null }
+    $credits = Get-Prop $d 'credits'
+    $directors = @(@(Get-Prop $credits 'crew') | Where-Object { $_ -and (Get-Prop $_ 'job') -eq 'Director' } |
+        ForEach-Object { [string](Get-Prop $_ 'name') } | Select-Object -Unique)
+    $director = $null; if ($directors.Count -gt 0) { $director = $directors -join ', ' }
+    $coll = Get-Prop $d 'belongs_to_collection'
+    $collName = $null; if ($coll) { $collName = [string](Get-Prop $coll 'name') }
+    Write-Good ('  TMDB: matched "{0}" ({1}).' -f (Get-Prop $d 'title'), (Get-Prop $d 'release_date'))
+    return @{
+        Overview = [string](Get-Prop $d 'overview'); Genres = (Get-Names (Get-Prop $d 'genres') 10)
+        Runtime = Get-Prop $d 'runtime'; Rating = (Get-TmdbRating $d)
+        ContentRating = (Get-UsRating (Get-Prop (Get-Prop $d 'release_dates') 'results') 'release_dates' 'certification')
+        Director = $director; Cast = (Get-Names (Get-Prop $credits 'cast') 10); Collection = $collName
+        Poster = [string](Get-Prop $d 'poster_path'); Backdrop = [string](Get-Prop $d 'backdrop_path')
+    }
+}
+
+# The show's TMDB details (and its id for season lookups), or $null.
+function Get-ShowMeta($item) {
+    if ($script:TmdbOff) { return $null }
+    $q = @{ query = $item.Title; include_adult = 'false' }
+    if ($item.Year) { $q['first_air_date_year'] = $item.Year }
+    $hit = Select-TmdbHit (Get-Tmdb 'search/tv' $q) $item.Title $item.Year 'name' 'first_air_date'
+    $d = $null
+    if ($hit) { $d = Get-Tmdb ('tv/' + (Get-Prop $hit 'id')) @{ append_to_response = 'content_ratings,credits' } }
+    if (-not $d) { Write-Note '  TMDB: no match for the show.'; return $null }
+    Write-Good ('  TMDB: matched the show "{0}".' -f (Get-Prop $d 'name'))
+    return @{
+        Id = Get-Prop $d 'id'
+        Overview = [string](Get-Prop $d 'overview'); Genres = (Get-Names (Get-Prop $d 'genres') 10)
+        Rating = (Get-TmdbRating $d)
+        ContentRating = (Get-UsRating (Get-Prop (Get-Prop $d 'content_ratings') 'results') $null 'rating')
+        Cast = (Get-Names (Get-Prop (Get-Prop $d 'credits') 'cast') 10)
+        Poster = [string](Get-Prop $d 'poster_path'); Backdrop = [string](Get-Prop $d 'backdrop_path')
+    }
+}
+
+# Episode number -> TMDB episode, for one season. Empty when there's nothing.
+function Get-SeasonEpisodes($showMeta, [int]$season) {
+    $map = @{}
+    if (-not $showMeta) { return $map }
+    $d = Get-Tmdb "tv/$($showMeta.Id)/season/$season" @{}
+    foreach ($e in @(Get-Prop $d 'episodes')) {
+        if ($null -ne $e) { $map[[int](Get-Prop $e 'episode_number')] = $e }
+    }
+    return $map
+}
+#endregion
+
+#---------------------------------------------------------------------------
 # region  JSON FILES  (CLAUDE.md section 5)
 #---------------------------------------------------------------------------
 function ConvertTo-Json2($o) { return ($o | ConvertTo-Json -Depth 5) }
 
-function New-MovieJson($item, $r, [string]$videoName, [bool]$hasPoster, [double]$bytes) {
+# A value from TMDB's details, or $fallback when there is no match or no value
+function Get-Meta($meta, [string]$name, $fallback) {
+    if ($meta -and $null -ne $meta[$name] -and "$($meta[$name])" -ne '') { return $meta[$name] }
+    return $fallback
+}
+
+# The folder's collection wins when it's numbered (story order);
+# otherwise TMDB's ("Harry Potter Collection") beats a category folder like "Family".
+function Get-Collection($item, $meta) {
+    if ($item.Collection -and $item.Number) { return $item.Collection }
+    return (Get-Meta $meta 'Collection' $item.Collection)
+}
+
+function New-MovieJson($item, $r, [string]$videoName, [bool]$hasPoster, [double]$bytes, $meta, [bool]$hasBackdrop) {
     $ac = $r.AudioCodec; if ($r.BadAudio -contains 0 -or $r.Shrink) { $ac = 'aac' }
     $vc = $r.VideoCodec; if ($r.EncodeVideo) { $vc = 'h264' }
     $w = $r.Width; $h = $r.Height
@@ -552,12 +790,16 @@ function New-MovieJson($item, $r, [string]$videoName, [bool]$hasPoster, [double]
         $nh = $Qualities[$script:Quality].Height; $w = [int]([math]::Round($w * $nh / $h / 2) * 2); $h = $nh
     }
     $poster = $null; if ($hasPoster) { $poster = 'poster.jpg' }
+    $backdrop = $null; if ($hasBackdrop) { $backdrop = 'backdrop.jpg' }
+    $runtime = [int][math]::Round($r.Duration / 60)
+    if ($runtime -le 0) { $runtime = Get-Meta $meta 'Runtime' $null }
     $o = [ordered]@{
         schema = 1; id = $item.Id; title = $item.Title; year = $item.Year
-        collection = $item.Collection; collectionNumber = $item.Number
-        overview = ''; genres = @(); runtimeMin = [int][math]::Round($r.Duration / 60)
-        rating = $null; contentRating = $null; director = $null; cast = @()
-        poster = $poster; backdrop = $null; file = $videoName
+        collection = (Get-Collection $item $meta); collectionNumber = $item.Number
+        overview = (Get-Meta $meta 'Overview' ''); genres = @(Get-Meta $meta 'Genres' @()); runtimeMin = $runtime
+        rating = (Get-Meta $meta 'Rating' $null); contentRating = (Get-Meta $meta 'ContentRating' $null)
+        director = (Get-Meta $meta 'Director' $null); cast = @(Get-Meta $meta 'Cast' @())
+        poster = $poster; backdrop = $backdrop; file = $videoName
         width = $w; height = $h; videoCodec = $vc; audioCodec = $ac
         bytes = [long]$bytes; sentAt = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
         source = $item.Source
@@ -565,17 +807,29 @@ function New-MovieJson($item, $r, [string]$videoName, [bool]$hasPoster, [double]
     return ConvertTo-Json2 $o
 }
 
-function New-ShowJson($item) {
+function New-ShowJson($item, $meta, [bool]$hasPoster, [bool]$hasBackdrop) {
+    $poster = $null; if ($hasPoster) { $poster = 'poster.jpg' }
+    $backdrop = $null; if ($hasBackdrop) { $backdrop = 'backdrop.jpg' }
     $o = [ordered]@{ schema = 1; id = $item.ShowName; title = $item.Title; year = $item.Year
-        overview = ''; genres = @(); contentRating = $null; rating = $null; cast = @(); poster = $null }
+        overview = (Get-Meta $meta 'Overview' ''); genres = @(Get-Meta $meta 'Genres' @())
+        contentRating = (Get-Meta $meta 'ContentRating' $null); rating = (Get-Meta $meta 'Rating' $null)
+        cast = @(Get-Meta $meta 'Cast' @()); poster = $poster; backdrop = $backdrop }
     return ConvertTo-Json2 $o
 }
 
-function New-EpisodeJson($item, $ep, $r, [string]$videoName) {
+# $tmdbEp: TMDB's episode, or $null. The file's own episode title wins over TMDB's.
+function New-EpisodeJson($item, $ep, $r, [string]$videoName, $tmdbEp, [string]$still) {
     $code = 'S{0:D2}E{1:D2}' -f $ep.Season, $ep.Episode
-    $o = [ordered]@{ schema = 1; id = "$($item.ShowName)/$code"; title = $ep.Title
-        season = $ep.Season; episode = $ep.Episode; overview = ''
-        runtimeMin = [int][math]::Round($r.Duration / 60); airDate = $null; still = $null; file = $videoName }
+    $title = $ep.Title
+    $tmdbName = [string](Get-Prop $tmdbEp 'name')
+    if ($tmdbName -and $title -eq "Episode $($ep.Episode)") { $title = $tmdbName }
+    $runtime = [int][math]::Round($r.Duration / 60)
+    if ($runtime -le 0) { $runtime = Get-Prop $tmdbEp 'runtime' }
+    $airDate = [string](Get-Prop $tmdbEp 'air_date'); if (-not $airDate) { $airDate = $null }
+    if (-not $still) { $still = $null }
+    $o = [ordered]@{ schema = 1; id = "$($item.ShowName)/$code"; title = $title
+        season = $ep.Season; episode = $ep.Episode; overview = [string](Get-Prop $tmdbEp 'overview')
+        runtimeMin = $runtime; airDate = $airDate; still = $still; file = $videoName }
     return ConvertTo-Json2 $o
 }
 #endregion
@@ -644,7 +898,8 @@ function Write-Totals($items, $info) {
 }
 
 # Searchable multi-select. Returns the picked items, or @() to stop.
-function Select-Titles($items, $info) {
+# $useCap: refuse picks that would go over the 50 GB cap (sending only).
+function Select-Titles($items, $info, [string]$heading = 'Pick what goes to the phone', [bool]$useCap = $true) {
     $filter = ''
     while ($true) {
         $shown = @($items)
@@ -652,19 +907,20 @@ function Select-Titles($items, $info) {
             $words = @((Fold $filter) -split '\s+' | Where-Object { $_ })
             $shown = @($items | Where-Object { $it = $_; @($words | Where-Object { $it.Search -notlike "*$_*" }).Count -eq 0 })
         }
-        Write-Title 'Pick what goes to the phone'
+        Write-Title $heading
         if ($filter) { Write-Note "  Search: '$filter'   (C clears it)" }
         if ($shown.Count -eq 0) { Write-Warn2 '  Nothing matches.' }
         for ($i = 0; $i -lt $shown.Count; $i++) {
             $it = $shown[$i]
             $mark = '[ ]'; $c = 'Gray'
             if ($it.Selected) { $mark = '[x]'; $c = 'Green' }
-            $tag = ''; if ($it.OnPhone) { $tag = '  (on phone)'; if (-not $it.Selected) { $c = 'DarkGray' } }
+            $tag = ''; if ($it.OnPhone -and $useCap) { $tag = '  (on phone)'; if (-not $it.Selected) { $c = 'DarkGray' } }
             Write-Host ('{0,4} {1} ' -f ($i + 1), $mark) -NoNewline -ForegroundColor DarkCyan
             Write-Host ('{0,9}  {1}{2}' -f (Format-Size $it.Bytes), $it.Label, $tag) -ForegroundColor $c
         }
         Write-Host ''
-        Write-Totals $items $info
+        if ($useCap) { Write-Totals $items $info }
+        else { Write-Host ("  Picked: {0} ({1})" -f @($items | Where-Object { $_.Selected }).Count, (Format-Size (Get-SelectedBytes $items))) -ForegroundColor Green }
         Write-Host ''
         Write-Note '  Numbers pick or un-pick: 3   1,4,7   10-15      Words: search (title, collection)'
         Write-Note '  A = pick all shown   N = un-pick all   S = show picked   C = clear search'
@@ -698,7 +954,7 @@ function Select-Titles($items, $info) {
         foreach ($it in $targets) {
             if ($it.Selected -and $ans -ine 'A') { $it.Selected = $false; continue }
             $after = $info.Used + (Get-SelectedBytes $items) + $it.Bytes
-            if ($after -gt $CapBytes) {
+            if ($useCap -and $after -gt $CapBytes) {
                 Write-Bad ("  Not picked: {0} - it would go over the {1} cap." -f $it.Label, (Format-Size $CapBytes))
                 continue
             }
@@ -774,6 +1030,19 @@ function Test-RealSize([double]$real, [double]$estimate, [double]$usedNow) {
     }
 }
 
+# Poster and backdrop for a title. TMDB's poster when it matched; the embedded cover only when
+# TMDB has none. Returns @{ Poster; Backdrop; Bytes } (paths in $stage, or $null).
+function Get-Pictures($meta, [string]$cover, [string]$stage) {
+    $out = @{ Poster = $null; Backdrop = $null; Bytes = 0.0 }
+    $p = Join-Path $stage 'tmdb-poster.jpg'
+    if ($meta -and (Save-TmdbImage $meta.Poster 'w780' $p)) { $out.Poster = $p }
+    elseif ($cover) { $out.Poster = $cover; Write-Note '  Poster: the cover stored in the file.' }
+    $b = Join-Path $stage 'tmdb-backdrop.jpg'
+    if ($meta -and (Save-TmdbImage $meta.Backdrop 'w1280' $b)) { $out.Backdrop = $b }
+    foreach ($f in @($out.Poster, $out.Backdrop)) { if ($f) { $out.Bytes += (Get-Item -LiteralPath $f).Length } }
+    return $out
+}
+
 function Send-Movie($item, [double]$usedNow) {
     $stage = Join-Path $WorkDir 'stage'
     if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
@@ -782,13 +1051,15 @@ function Send-Movie($item, [double]$usedNow) {
     $video = Get-Item -LiteralPath $prep.Path
     $videoName = 'movie' + $prep.Result.OutExt
     if ($prep.Path -eq $item.Files[0].FullName) { $videoName = 'movie' + $video.Extension.ToLowerInvariant() }
-    $total = [double]$video.Length
-    if ($prep.Poster) { $total += (Get-Item -LiteralPath $prep.Poster).Length }
-    Test-RealSize $total $prep.Result.Estimate $usedNow
+    $meta = Get-MovieMeta $item
+    $pics = Get-Pictures $meta $prep.Poster $stage
+    $total = [double]$video.Length + $pics.Bytes
+    Test-RealSize $total ($prep.Result.Estimate + $pics.Bytes) $usedNow
     Write-Host "  Sending $videoName ($(Format-Size $video.Length))..."
-    if ($prep.Poster) { Send-File $prep.Poster $item.PhoneDir 'poster.jpg' }
+    if ($pics.Poster) { Send-File $pics.Poster $item.PhoneDir 'poster.jpg' }
+    if ($pics.Backdrop) { Send-File $pics.Backdrop $item.PhoneDir 'backdrop.jpg' }
     Send-File $video.FullName $item.PhoneDir $videoName
-    $json = New-MovieJson $item $prep.Result $videoName ([bool]$prep.Poster) $video.Length
+    $json = New-MovieJson $item $prep.Result $videoName ([bool]$pics.Poster) $video.Length $meta ([bool]$pics.Backdrop)
     Send-Text $json $item.PhoneDir 'movie.json'
     Remove-Item -LiteralPath $stage -Recurse -Force
     return $total
@@ -796,11 +1067,21 @@ function Send-Movie($item, [double]$usedNow) {
 
 function Send-Season($item, [double]$usedNow, $shows) {
     $showDir = "TV/$($item.ShowName)"
-    if (-not $shows.ContainsKey($item.ShowName)) {
-        Send-Text (New-ShowJson $item) $showDir 'show.json'
-        $shows[$item.ShowName] = $true
-    }
     $total = 0.0
+    if (-not $shows.ContainsKey($item.ShowName)) {
+        $meta = Get-ShowMeta $item
+        $stage = Join-Path $WorkDir 'show'
+        if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
+        [void](New-Item -ItemType Directory -Path $stage)
+        $pics = Get-Pictures $meta $null $stage
+        if ($pics.Poster) { Send-File $pics.Poster $showDir 'poster.jpg' }
+        if ($pics.Backdrop) { Send-File $pics.Backdrop $showDir 'backdrop.jpg' }
+        Send-Text (New-ShowJson $item $meta ([bool]$pics.Poster) ([bool]$pics.Backdrop)) $showDir 'show.json'
+        Remove-Item -LiteralPath $stage -Recurse -Force
+        $total += $pics.Bytes
+        $shows[$item.ShowName] = $meta
+    }
+    $tmdbEps = Get-SeasonEpisodes $shows[$item.ShowName] $item.Season
     foreach ($ep in $item.Episodes) {
         $code = 'S{0:D2}E{1:D2}' -f $ep.Season, $ep.Episode
         Write-Host "  $code $($ep.Title)"
@@ -812,7 +1093,15 @@ function Send-Season($item, [double]$usedNow, $shows) {
         $videoName = $code + $video.Extension.ToLowerInvariant()
         Test-RealSize ([double]$video.Length) $prep.Result.Estimate ($usedNow + $total)
         Send-File $video.FullName $item.PhoneDir $videoName
-        Send-Text (New-EpisodeJson $item $ep $prep.Result $videoName) $item.PhoneDir "$code.json"
+        $tmdbEp = $tmdbEps[$ep.Episode]
+        $still = $null
+        $stillLocal = Join-Path $stage "$code.jpg"
+        if (Save-TmdbImage ([string](Get-Prop $tmdbEp 'still_path')) 'w300' $stillLocal) {
+            Send-File $stillLocal $item.PhoneDir "$code.jpg"
+            $still = "$code.jpg"
+            $total += (Get-Item -LiteralPath $stillLocal).Length
+        }
+        Send-Text (New-EpisodeJson $item $ep $prep.Result $videoName $tmdbEp $still) $item.PhoneDir "$code.json"
         $total += $video.Length
         Remove-Item -LiteralPath $stage -Recurse -Force
     }
@@ -841,12 +1130,15 @@ function Get-Estimate($picked, [string]$quality) {
 function Show-WhatItDoes {
     Write-Host ''
     Write-Host '  What this does when the phone is plugged in:'
-    Write-Host '    1. Lists every movie in D:\Movies and every TV season in D:\TV.'
-    Write-Host '    2. You pick titles; it keeps a running total against the 50 GB cap.'
-    Write-Host '    3. You pick a quality: Original, 1080p or 720p small.'
-    Write-Host '    4. It checks each file and fixes what the phone cannot play,'
-    Write-Host '       on copies in your TEMP folder. D:\Movies and D:\TV are never changed.'
-    Write-Host '    5. It copies them to the phone into /sdcard/Watch.'
+    Write-Host '    1. Send: lists D:\Movies and D:\TV, you pick titles (50 GB cap) and a'
+    Write-Host '       quality; it fixes what the phone cannot play (on copies in TEMP),'
+    Write-Host '       adds posters and details from TMDB, and copies them to /sdcard/Watch.'
+    Write-Host '    2. Remove: deletes titles you pick from the phone. Watched marks and'
+    Write-Host '       positions are kept.'
+    Write-Host '    3. Backup / 4. Restore: copies Watch''s saved places (.state) to and'
+    Write-Host '       from Documents\Watch-Backups on this PC.'
+    Write-Host '    5. Grant: lets Watch read its files on the phone.'
+    Write-Host '  D:\Movies and D:\TV are never changed.'
 }
 
 function Invoke-CheckOnly([string[]]$paths) {
@@ -857,8 +1149,26 @@ function Invoke-CheckOnly([string[]]$paths) {
     }
 }
 
-function Main {
-    Write-Title 'Watch - Phone Sync'
+# Tells the app something changed, so it rescans on next open.
+function Write-LastSync {
+    Send-Text (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss') '.state' 'last-sync.txt'
+}
+
+function Read-MainChoice {
+    Write-Title 'Watch - what do you want to do?'
+    Write-Host '  1  Send movies and TV to the phone'
+    Write-Host '  2  Remove titles from the phone (keeps watched marks and positions)'
+    Write-Host '  3  Back up saved places (.state) to this PC'
+    Write-Host '  4  Restore saved places from a backup'
+    Write-Host '  5  Let Watch read its files (grant file access)'
+    Write-Host '  Q  Quit'
+    $a = Read-Host '  Choose'
+    if ($null -eq $a) { return 'Q' }
+    return $a.Trim().ToUpperInvariant()
+}
+
+#--- 1. Send ---------------------------------------------------------------
+function Invoke-Send {
     $script:Ffmpeg = Find-Ffmpeg 'ffmpeg'
     $script:Ffprobe = Find-Ffmpeg 'ffprobe'
     if (-not $script:Ffmpeg -or -not $script:Ffprobe) {
@@ -867,12 +1177,225 @@ function Main {
         Write-Host '  Then close this window and double-click Watch-Phone-Sync.cmd again.'
         return
     }
-    if ($Check) { Invoke-CheckOnly @($CheckFiles); return }
-
     Ensure-TvFolder
+    Write-Step 'Reading D:\Movies and D:\TV (read only)'
+    $items = @(Get-Movies) + @(Get-Seasons)
+    Write-Host "  Found $(@($items | Where-Object Kind -eq 'Movie').Count) movies and $(@($items | Where-Object Kind -eq 'Season').Count) TV seasons."
+    if ($items.Count -eq 0) { Write-Warn2 '  Nothing to send.'; return }
+
+    Write-Step 'Looking at what is already there'
+    $info = Get-TargetInfo
+    foreach ($it in $items) { $it.OnPhone = $info.Dirs.ContainsKey($it.PhoneDir) }
+    Write-Host ("  Watch uses {0}; {1} titles/seasons are already there." -f (Format-Size $info.Used), @($items | Where-Object OnPhone).Count)
+
+    $picked = @(Select-Titles $items $info)
+    if ($picked.Count -eq 0) { Write-Host '  Nothing picked. Nothing was changed.'; return }
+
+    $script:Quality = Read-Quality
+    Write-Step "Checking the $($picked.Count) picked title(s) at $($script:Quality)"
+    $est = Get-Estimate $picked $script:Quality
+    $after = $info.Used + $est.Bytes
+    Write-Host ''
+    Write-Host ("  Estimated size to send: {0}. Watch would then use {1} of the {2} cap." -f (Format-Size $est.Bytes), (Format-Size $after), (Format-Size $CapBytes))
+    if ($est.Problems -eq 0) { Write-Good '  Library check: every picked file can go as it is.' }
+    else { Write-Warn2 "  Library check: $($est.Problems) file(s) need fixing (listed above); it is done on copies." }
+    if ($after -gt $CapBytes) { Write-Bad '  That is over the 50 GB cap. Pick less or a smaller quality, then try again.'; return }
+    if ($null -ne $info.Free -and $est.Bytes -gt $info.Free) { Write-Bad '  There is not enough free space for that.'; return }
+
+    $replacing = @($picked | Where-Object OnPhone)
+    if ($replacing.Count -gt 0) {
+        Write-Warn2 "  $($replacing.Count) of these are already there and would be replaced."
+        Write-Note '  Watched marks and positions are kept (they live in .state).'
+        if (-not (Read-YesNo '  Replace them?')) { $picked = @($picked | Where-Object { -not $_.OnPhone }) }
+        if ($picked.Count -eq 0) { Write-Host '  Nothing left to send.'; return }
+    }
+    if (-not (Read-YesNo "  Send $($picked.Count) title(s) now?")) { Write-Host '  Nothing was changed.'; return }
+
+    Write-Step 'TMDB (posters and details)'
+    Initialize-Tmdb
+    $sent = Send-Items $picked $info
+    Write-LastSync
+    if (-not $DryRoot) { [void](Invoke-Phone ("rm -rf " + (Q $PhoneTmp))) }
+    Write-Host ''
+    Write-Good "  Done: $sent of $($picked.Count) sent."
+    if ($DryRoot) { Write-Host "  Look in $DryRoot to see the layout." }
+    else { Write-Host '  Open Watch on the phone; it shows "Updating library..." and then the new titles.' }
+}
+
+#--- 2. Remove -------------------------------------------------------------
+
+# Everything on the phone (or dry-run folder) as menu items, with sizes.
+function Get-TargetItems {
+    $sizes = @{}
+    if ($DryRoot) {
+        foreach ($top in @('Movies', 'TV')) {
+            $p = Join-Path $DryRoot $top
+            if (-not (Test-Path -LiteralPath $p)) { continue }
+            foreach ($a in (Get-ChildItem -LiteralPath $p -Directory)) {
+                foreach ($b in (Get-ChildItem -LiteralPath $a.FullName -Directory)) {
+                    $t = 0.0; foreach ($f in (Get-ChildItem -LiteralPath $b.FullName -Recurse -File)) { $t += $f.Length }
+                    $sizes["$top/$($a.Name)/$($b.Name)"] = $t
+                }
+            }
+        }
+    } else {
+        $du = Invoke-Phone "cd $PhoneRoot 2>/dev/null && find Movies TV -mindepth 2 -maxdepth 2 -type d -exec du -sk {} + 2>/dev/null"
+        foreach ($l in $du.Out) { if ($l -match '^(\d+)\s+(.+)$') { $sizes[$Matches[2].Trim()] = [double]$Matches[1] * 1KB } }
+    }
+    $items = New-Object System.Collections.Generic.List[object]
+    foreach ($rel in ($sizes.Keys | Sort-Object)) {
+        $parts = $rel.Split('/')
+        if ($parts[0] -eq 'Movies') {
+            $label = $parts[2]
+            if ($parts[1] -ne '_Singles') { $label = "$label  [$($parts[1])]" }
+        } else {
+            $label = "$($parts[1]) - $($parts[2])  [TV]"
+        }
+        $items.Add([pscustomobject]@{ Label = $label; Search = (Fold $label); PhoneDir = $rel; Bytes = $sizes[$rel]
+            OnPhone = $true; Selected = $false })
+    }
+    return $items
+}
+
+# After a removal: drop an empty collection folder, or a show with no seasons left.
+function Remove-EmptyParent([string]$rel) {
+    $parent = $rel.Substring(0, $rel.LastIndexOf('/'))
+    if ($DryRoot) {
+        $p = Join-Path $DryRoot $parent
+        if (-not (Test-Path -LiteralPath $p)) { return }
+        $left = @(Get-ChildItem -LiteralPath $p -Directory)
+        if ($rel.StartsWith('TV/')) { $empty = ($left.Count -eq 0) } else { $empty = (@(Get-ChildItem -LiteralPath $p -Force).Count -eq 0) }
+        if ($empty) { Remove-Item -LiteralPath $p -Recurse -Force }
+        return
+    }
+    $pp = Q "$PhoneRoot/$parent"
+    if ($rel.StartsWith('TV/')) {
+        [void](Invoke-Phone "if [ -z ""`$(find $pp -mindepth 1 -maxdepth 1 -type d)"" ]; then rm -rf $pp; fi")
+    } else {
+        [void](Invoke-Phone "rmdir $pp 2>/dev/null")
+    }
+}
+
+function Invoke-Remove {
+    Write-Step 'Looking at what is on the phone'
+    $items = @(Get-TargetItems)
+    if ($items.Count -eq 0) { Write-Host '  Nothing is on the phone yet.'; return }
+    $info = @{ Used = 0.0; Free = $null }
+    $picked = @(Select-Titles $items $info 'Pick what to REMOVE from the phone' $false)
+    if ($picked.Count -eq 0) { Write-Host '  Nothing picked. Nothing was changed.'; return }
+    Write-Title 'These will be deleted from the phone'
+    $bytes = 0.0
+    foreach ($it in $picked) { Write-Host ('  {0,9}  {1}' -f (Format-Size $it.Bytes), $it.Label); $bytes += $it.Bytes }
+    Write-Host ''
+    Write-Note '  Watched marks and positions stay, so a title sent again resumes where you stopped.'
+    Write-Note '  The files on this PC are not touched.'
+    if (-not (Read-YesNo ("  Delete these {0} ({1}) from the phone?" -f $picked.Count, (Format-Size $bytes)))) {
+        Write-Host '  Nothing was changed.'; return
+    }
+    foreach ($it in $picked) {
+        Remove-Target $it.PhoneDir
+        Remove-EmptyParent $it.PhoneDir
+        Write-Good "  Removed: $($it.Label)"
+    }
+    Write-LastSync
+    Write-Good ("  Done: {0} freed." -f (Format-Size $bytes))
+}
+
+#--- 3. Backup / 4. Restore ------------------------------------------------
+
+# Copies .state into Documents\Watch-Backups\state-<time>[-note]. Returns the folder, or $null.
+function Invoke-Backup([string]$note = '') {
+    $name = "state-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+    if ($note) { $name = "$name-$note" }
+    $dest = Join-Path $BackupRoot $name
+    Assert-SafeTarget $dest
+    [void](New-Item -ItemType Directory -Path $dest -Force)
+    if ($DryRoot) {
+        $src = Join-Path $DryRoot '.state'
+        if (Test-Path -LiteralPath $src) {
+            Get-ChildItem -LiteralPath $src -File | Where-Object { $_.Extension -notin @('.tmp', '.part') } |
+                ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $dest }
+        }
+    } else {
+        $ls = Invoke-Phone "ls $PhoneRoot/.state 2>/dev/null"
+        foreach ($f in $ls.Out) {
+            $f = $f.Trim()
+            if (-not $f -or $f -match '\.(tmp|part)$') { continue }
+            $r = Invoke-Adb pull "$PhoneRoot/.state/$f" (Join-Path $dest $f)
+            if ($r.Code -ne 0) { Write-Bad "  Could not copy $f from the phone."; return $null }
+        }
+    }
+    $files = @(Get-ChildItem -LiteralPath $dest -File)
+    if ($files.Count -eq 0) {
+        Remove-Item -LiteralPath $dest -Force
+        Write-Warn2 '  Watch has no saved places on the phone yet; nothing to back up.'
+        return $null
+    }
+    foreach ($f in $files) { Write-Note ('    {0,-16} {1}' -f $f.Name, (Format-Size $f.Length)) }
+    Write-Good "  Backed up to $dest"
+    return $dest
+}
+
+function Invoke-Restore {
+    $backups = @()
+    if (Test-Path -LiteralPath $BackupRoot) {
+        $backups = @(Get-ChildItem -LiteralPath $BackupRoot -Directory -Filter 'state-*' | Sort-Object Name -Descending)
+    }
+    if ($backups.Count -eq 0) { Write-Warn2 "  No backups in $BackupRoot yet."; return }
+    Write-Title 'Restore saved places from a backup'
+    for ($i = 0; $i -lt $backups.Count; $i++) {
+        $b = $backups[$i]
+        $n = @(Get-ChildItem -LiteralPath $b.FullName -File).Count
+        Write-Host ('{0,4}  {1}   ({2} files)' -f ($i + 1), $b.Name, $n)
+    }
+    $a = Read-Host '  Number to restore (Enter = cancel)'
+    if ($null -eq $a -or $a.Trim() -notmatch '^\d+$') { Write-Host '  Nothing was changed.'; return }
+    $k = [int]$a.Trim()
+    if ($k -lt 1 -or $k -gt $backups.Count) { Write-Host '  Not on the list. Nothing was changed.'; return }
+    $pick = $backups[$k - 1]
+    Write-Warn2 "  This replaces Watch's watched marks, positions, watchlist and settings with $($pick.Name)."
+    Write-Note '  What is on the phone now is backed up first, so this can be undone.'
+    if (-not (Read-YesNo '  Restore it?')) { Write-Host '  Nothing was changed.'; return }
+
+    Write-Step 'Backing up what is there now'
+    [void](Invoke-Backup 'before-restore')
+    if (-not $DryRoot) {
+        Write-Note '  Closing Watch on the phone so it does not write over the restore.'
+        [void](Invoke-Phone "am force-stop $AppPackage")
+    }
+    Write-Step "Restoring $($pick.Name)"
+    foreach ($f in (Get-ChildItem -LiteralPath $pick.FullName -File)) {
+        Send-File $f.FullName '.state' $f.Name
+        Write-Note "    $($f.Name)"
+    }
+    Write-Good '  Restored. Open Watch on the phone.'
+}
+
+#--- 5. Grant file access --------------------------------------------------
+function Invoke-Grant {
+    $cmd = "appops set $AppPackage MANAGE_EXTERNAL_STORAGE allow"
+    if ($DryRoot) { Write-Note "  TEST MODE: on the phone this runs:  adb shell $cmd"; return }
+    $pm = Invoke-Phone "pm path $AppPackage"
+    if (-not (($pm.Out -join ' ') -match 'package:')) {
+        Write-Warn2 '  Watch is not installed on the phone yet. Install it first, then run this again.'
+        return
+    }
+    [void](Invoke-Phone $cmd)
+    $check = Invoke-Phone "appops get $AppPackage MANAGE_EXTERNAL_STORAGE"
+    if (($check.Out -join ' ') -match 'allow') { Write-Good '  Done: Watch can read /sdcard/Watch. Open Watch on the phone.' }
+    else { Write-Bad ('  The phone did not accept it: ' + ($check.Out -join ' ')) }
+}
+
+function Main {
+    Write-Title 'Watch - Phone Sync'
+    if ($Check) {
+        $script:Ffmpeg = Find-Ffmpeg 'ffmpeg'; $script:Ffprobe = Find-Ffmpeg 'ffprobe'
+        if (-not $script:Ffprobe) { Write-Bad '  ffmpeg is not installed (winget install Gyan.FFmpeg).'; return }
+        Invoke-CheckOnly @($CheckFiles); return
+    }
 
     if ($DryRoot) {
-        Write-Warn2 "  TEST MODE: nothing goes to the phone. The layout is written to $DryRoot"
+        Write-Warn2 "  TEST MODE: nothing goes to the phone. Everything happens in $DryRoot"
         if (-not (Test-Path -LiteralPath $env:WATCH_DRY_RUN)) { [void](New-Item -ItemType Directory -Path $env:WATCH_DRY_RUN -Force) }
         Assert-SafeTarget $DryRoot
     } else {
@@ -886,48 +1409,18 @@ function Main {
         if (-not (Connect-Phone)) { Show-WhatItDoes; Write-Host ''; Write-Host '  Stopped: nothing was changed.'; return }
         Write-Good "  Phone connected ($($script:Serial))."
     }
-
-    Write-Step 'Reading D:\Movies and D:\TV (read only)'
-    $items = @(Get-Movies) + @(Get-Seasons)
-    Write-Host "  Found $(@($items | Where-Object Kind -eq 'Movie').Count) movies and $(@($items | Where-Object Kind -eq 'Season').Count) TV seasons."
-    if ($items.Count -eq 0) { Write-Warn2 '  Nothing to send.'; return }
-
-    Write-Step 'Looking at what is already there'
-    $info = Get-TargetInfo
-    foreach ($it in $items) { $it.OnPhone = $info.Dirs.ContainsKey($it.PhoneDir) }
-    Write-Host ("  Watch uses {0}; {1} titles/seasons are already there." -f (Format-Size $info.Used), @($items | Where-Object OnPhone).Count)
-
-    $picked = @(Select-Titles $items $info)
-    if ($picked.Count -eq 0) { Write-Host '  Nothing picked. Stopped: nothing was changed.'; return }
-
-    $script:Quality = Read-Quality
-    Write-Step "Checking the $($picked.Count) picked title(s) at $($script:Quality)"
-    $est = Get-Estimate $picked $script:Quality
-    $after = $info.Used + $est.Bytes
-    Write-Host ''
-    Write-Host ("  Estimated size to send: {0}. Watch would then use {1} of the {2} cap." -f (Format-Size $est.Bytes), (Format-Size $after), (Format-Size $CapBytes))
-    if ($est.Problems -eq 0) { Write-Good '  Library check: every picked file can go as it is.' }
-    else { Write-Warn2 "  Library check: $($est.Problems) file(s) need fixing (listed above); it is done on copies." }
-    if ($after -gt $CapBytes) { Write-Bad '  That is over the 50 GB cap. Pick less or a smaller quality, then run this again.'; return }
-    if ($null -ne $info.Free -and $est.Bytes -gt $info.Free) { Write-Bad '  There is not enough free space for that.'; return }
-
-    $replacing = @($picked | Where-Object OnPhone)
-    if ($replacing.Count -gt 0) {
-        Write-Warn2 "  $($replacing.Count) of these are already there and would be replaced."
-        Write-Note '  Watched marks and positions are kept (they live in .state).'
-        if (-not (Read-YesNo '  Replace them?')) { $picked = @($picked | Where-Object { -not $_.OnPhone }) }
-        if ($picked.Count -eq 0) { Write-Host '  Nothing left to send.'; return }
-    }
-    if (-not (Read-YesNo "  Send $($picked.Count) title(s) now?")) { Write-Host '  Stopped: nothing was changed.'; return }
-
     [void](New-Item -ItemType Directory -Path $WorkDir -Force)
-    $sent = Send-Items $picked $info
-    Send-Text (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss') '.state' 'last-sync.txt'
-    if (-not $DryRoot) { [void](Invoke-Phone ("rm -rf " + (Q $PhoneTmp))) }
-    Write-Host ''
-    Write-Good "  Done: $sent of $($picked.Count) sent."
-    if ($DryRoot) { Write-Host "  Look in $DryRoot to see the layout." }
-    else { Write-Host '  Open Watch on the phone; it shows "Updating library..." and then the new titles.' }
+
+    while ($true) {
+        switch (Read-MainChoice) {
+            '1' { Invoke-Send }
+            '2' { Invoke-Remove }
+            '3' { Write-Step 'Backing up saved places'; [void](Invoke-Backup) }
+            '4' { Invoke-Restore }
+            '5' { Write-Step 'Granting file access'; Invoke-Grant }
+            'Q' { return }
+        }
+    }
 }
 
 if (-not (Test-Path -LiteralPath $LogDir)) { [void](New-Item -ItemType Directory -Path $LogDir) }

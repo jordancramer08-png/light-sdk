@@ -289,6 +289,48 @@ tool code BEFORE any build is installed.
   Build log: `logs/session8-build.log`.
 - Session 9: TMDB lookup + cache, Remove menu, Backup/Restore, permission grant.
 
+## Session 9 — PC side part 2: TMDB, Remove, Backup/Restore, grant (2026-10-12) ✅
+
+- **Main menu** in `Watch-Phone-Sync.cmd`: 1 Send, 2 Remove, 3 Backup, 4 Restore, 5 Grant
+  file access, Q. No phone = explains all five and stops. ffmpeg is only needed for Send.
+- **TMDB** (PC only): key read from `private/tmdb-key.txt`, never printed; error text is
+  scrubbed of it (checked: the key appears in no log). v3 key -> `api_key`, long v4 token ->
+  Bearer header. Every API answer and picture is cached in `private/tmdb-cache/` (looked up
+  online once). Match = search by title + year (then without year), year within 1, exact name
+  preferred; a title with no year needs an exact name. No internet / bad key: says so once
+  and carries on without TMDB.
+- **Saved into movie.json:** overview, genres, runtime (file length wins; TMDB when the file
+  can't say), rating (vote average, 1 decimal), US content rating, director(s), top 10 cast,
+  collection, poster (w780) + backdrop (w1280). **Collection rule:** a numbered folder
+  (`01 - ...`) keeps its folder name (story order); otherwise TMDB's collection beats a
+  category folder (Coco -> "Coco Collection"), else the folder stays. Title stays Jordan's
+  spelling ("Sorcerer's Stone", not TMDB's "Philosopher's").
+- **show.json:** overview, genres, rating, content rating, cast, poster, backdrop.
+  **Episode json:** TMDB overview, air date, runtime, still (`S01E02.jpg`, w300); the file's
+  episode title wins unless it's just "Episode N".
+- **Posters:** TMDB poster when matched; the cover stored in the video only when TMDB has
+  no match/no poster (the cover is still stripped from the video either way).
+- **adb handoff / last-sync.txt:** already in Session 8 (push to /data/local/tmp, cp as
+  `.part`, mv). last-sync.txt is now also written after Remove.
+- **Remove:** lists what's on the phone with sizes (one `du` call), pick/search like the send
+  menu, confirm, `rm -rf` the title/season; empty collection folders and shows with no seasons
+  left go too. `.state` is never touched, so a title sent again resumes.
+- **Backup:** pulls `.state` (not .tmp/.part) to `Documents\Watch-Backups\state-<time>`.
+  **Restore:** pick a backup, it backs up the current state first (`-before-restore`), stops
+  Watch (`am force-stop`), then sends each file with the `.part` -> rename route.
+- **Grant:** checks Watch is installed (`pm path`), runs `appops set com.jordan.watch
+  MANAGE_EXTERNAL_STORAGE allow`, reads it back to confirm.
+- **Dry run** (5 synthetic 4-second movies named after real films + made-up show "The Gravel
+  Pit Gang"): Coco, Hacksaw Ridge, Harry Potter 1, Inception matched with poster, backdrop and
+  details; "Zzyzx Moonbeam (2031)" no match -> embedded cover as poster; the show had no match
+  -> plain show.json, episode titles from file names. Remove/Backup/Restore tested on a copy
+  (positions.json kept after removing a title; restore brought the old file back). Extra check:
+  "The Office (2005)" S01E02 matched with title, overview, air date and still.
+- Tests: 99 passing (no app code changed; Settings already shows the TMDB line).
+  Build log: `logs/session9-build.log`.
+- **Phone Day checks:** run the real send of a few titles over adb; Remove/Backup/Restore/Grant
+  against the real phone; `du`/`find` output format on LightOS.
+
 ## Session plan
 
 | # | Session | Done when |

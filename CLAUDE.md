@@ -1,273 +1,207 @@
-# CLAUDE.md — Bible Reader for Light Phone III
+# CLAUDE.md — Watch (movies + TV player) for Light Phone III
 
-Read this at the start of every session. If anything here conflicts with what you remember
-about Android development, **this file wins** — this is not a standard Android environment.
+Read this at the start of every session, together with PROGRESS.md. If anything here
+conflicts with what you remember about Android development, **this file wins** — this is
+not a standard Android environment.
 
----
-
-## 1. Platform constraints (non-negotiable)
-
-- **Target:** Light Phone III on LightOS. **1080 × 1240, 3.92", black and white.** API 34.
-  **No Google Play Services.**
-- **Monochrome screen — color never carries meaning.**
-- **All app code in the `tool` module**, using primitives from `sdk/client`.
-- **Kotlin, Compose, Coroutines, MVVM.** Screens extend `LightScreen`; view models extend
-  **`LightViewModel`** (there is no `LightScreenViewModel` — that name is wrong).
-- **Navigate with `navigateTo` only.** Back stack is automatic — do NOT override
-  `onBackPressed()`.
-- **The SDK does not render a back bar.** Every non-root screen places its own:
-  ```kotlin
-  LightTopBar(
-      leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
-  )
-  ```
-  Root (`@InitialScreen`) screens omit it. `sdk/client/README.md:64` says otherwise and is
-  wrong.
-- **Third-party libraries are restricted and lint-enforced.** Check `lint-rules/` first.
-- **`Context` is import-blocked.** No `getExternalFilesDir`. Use `lightContext.fileShare`
-  for anything pushed onto the device.
-- **Offline only.** No network, no sync, no accounts. `permissions` stays empty.
-
-## 2. Package identity ⚠️
-
-Three tools are already on this phone: `com.thelightphone.app` (prayer list),
-`com.thelightphone.smallgroup`, and `com.thelightphone.reader`. **This tool's `id` must
-differ from all three**, or installing it overwrites one and destroys its data. Suggested:
-`com.thelightphone.bible`.
-
-`serverPackage` is `com.lightos` for the physical LP3.
-
-## 3. Build commands
-
-```bash
-./gradlew :tool:assembleDebug
-```
-
-Requires `gpr.user` / `gpr.key` in `local.properties`. **Never read, print, or commit it.**
-
-After installing on physical hardware, **reboot the phone.** The LightOS launcher caches
-its menu and won't show a freshly installed/updated tool until restarted.
+Jordan is not an Android developer. Explain anything he must do in plain, numbered steps,
+including exactly which file to double-click or which command to type. Keep explanations
+short. He reads this code himself: short functions, plain names.
 
 ---
 
-## 4. What the app is
+## 1. What this app is
 
-A personal Bible reader with two independent sections reachable from the home screen:
+ONE Light Phone III tool, label **Watch**, that plays movies and TV from files on the phone.
+Poster-grid library like Plex/Jellyfin, a full-screen player, full color, and a PC script
+that loads titles, posters and details. The phone app itself is offline and uses no GPS.
 
-**Read** — browse by book, then chapter, then read.
-**Plan** — a day-by-day reading plan; tapping a date opens that day's full passages.
+## 2. Platform constraints (non-negotiable)
 
-Quiet, fast, readable. No streaks, no progress gamification, no notifications.
+- **Target:** Light Phone III on LightOS, 1080 x 1240, 3.92", API 34, no Google Play
+  Services. Jordan's phone shows **full color** (grayscale is turned off). Use color freely
+  (poster accents, themes), but never let color be the only signal: also use a label, icon or
+  position.
+- **All app code in the `tool` module**, package `com.jordan.watch`, using primitives from
+  `sdk/client` and `sdk/ui`. Kotlin, Compose, Coroutines, MVVM. Screens extend `LightScreen`;
+  view models extend `LightViewModel` (there is no `LightScreenViewModel`).
+- **Navigate with `navigateTo` only.** Never override `onBackPressed()`. The SDK draws no back
+  bar: every non-root screen places its own
+  `LightTopBar(leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }))`.
+- **Libraries and imports are lint-enforced** (see `NOTES.md` and `lint-rules/`). Media3
+  ExoPlayer is already used by Listen, so it is allowed; check the video-surface classes
+  (`PlayerView`, `SurfaceView`, `AndroidView`) before using them. If lint rejects something,
+  stop, name what it blocked, and offer two alternatives. Do not work around it.
+- **No emulator. No Android Studio.** Build from PowerShell with the Gradle wrapper
+  (`.\gradlew.bat :tool:testDebugUnitTest :tool:assembleDebug`). Phone testing happens only
+  in the last session ("Phone Day"). After the FIRST install the phone must be rebooted
+  (the launcher caches its menu).
+- `local.properties` may hold private keys. **Never read, print or commit it.**
+- Pure logic (sorting, filtering, search matching, title parsing, position and resume math,
+  speed steps, next-up choice, storage maths) lives in `com.jordan.watch.logic` with NO
+  `android.*` / `androidx.compose.*` imports, covered by JVM unit tests.
+- Anything that depends on an unconfirmed phone ability ships with a working fallback and a
+  switch in `FeatureFlags.kt`, default OFF until Phone Day confirms it.
 
----
+## 3. Identity — protects Jordan's other apps
 
-## 5. Reuse from the reader project
+- `applicationId` / `id = "com.jordan.watch"`, `label = "Watch"`, `serverPackage = "com.lightos"`.
+- **Never reuse** the ids already on his phone: `com.thelightphone.app`,
+  `com.thelightphone.smallgroup`, `com.thelightphone.bible`, `com.thelightphone.reader`,
+  `com.thelightphone.listen`, `com.jordan.utilities`, `com.jordan.faith`,
+  `com.thelightphone.ferment`. Same id = overwrites that app and destroys its data.
+- Branch `watch` of `jordancramer08-png/light-sdk`. Never merge, rebase onto, or push to
+  `main`, `reader`, `listen` or any other tool's branch. Commit at the end of each session
+  and `git push origin watch`.
+- Never edit files outside this folder. Reading `Documents\listen`, `Documents\reader` and
+  `Documents\lp3-utilities` is allowed, read-only, in Session 0 and whenever a session prompt
+  says so. **Reuse their patterns** (lists, rows, themes, settings, file access, volume keys,
+  Gradle, signing, install commands) instead of inventing new ones.
 
-Do not build these from scratch. `Documents\reader` contains working implementations that
-were verified on real hardware:
-
-- **`tools/converter/convert.py`** — already parses EPUB containers, walks the OPF spine,
-  reads NCX/nav titles, and strips HTML to clean plain text. The Bible converter is an
-  **extension** of this, adding verse-level extraction. Start from that file.
-- **`ReaderScreen.kt`** — `TextMeasurer`-based pagination, tap zones for page turns,
-  chapter headings sized into the pagination budget, position stored as a character offset
-  rather than a page number. The same approach applies here directly.
-- **`BookRepository.kt` / position storage** — the `fileShare` read pattern and the Room
-  position model.
-
-`TextMeasurer` (from `androidx.compose.ui.text`) is reachable from the `tool` module and is
-not on the blocked-import list. This was verified in the reader project.
-
----
-
-## 6. Architecture — two pieces
-
-### Piece A: the converter (PC only)
-
-Extends the reader's `convert.py`. **The phone never parses EPUB.**
-
-**Output** — one file per chapter, one verse per line:
+## 4. Where the files are (the PC script depends on this; don't change it)
 
 ```
-bible/<translation>/<book-slug>/<chapter>.txt
+/sdcard/Watch/Movies/<Collection or "_Singles">/<Title (Year)>/movie.<mp4|mkv>
+        movie.json   poster.jpg   backdrop.jpg (optional)   movie.en.srt (optional)
+/sdcard/Watch/TV/<Show>/show.json   poster.jpg
+/sdcard/Watch/TV/<Show>/Season 01/S01E01.<ext>   S01E01.json   (thumb optional)
+/sdcard/Watch/.state/   positions.json watched.json watchlist.json settings.json last-sync.txt
 ```
 
-```
-33|Sample verse text spanning a poetic line break, / continuing on the second line here.
-34|Another sample verse showing the plain single-line case with no line break at all.
-```
+- **File access:** `MANAGE_EXTERNAL_STORAGE` and plain `java.io.File`, exactly as Listen does
+  (PC script grants it with `adb shell appops set com.jordan.watch MANAGE_EXTERNAL_STORAGE allow`).
+  If access is missing, show a plain screen telling him to run `Watch-Phone-Sync.cmd`.
+- **App state lives in `/sdcard/Watch/.state/`**, not private storage, so an uninstall or new
+  signing key can never erase his place in a movie. Write every file atomically
+  (`name.tmp`, then rename). The PC script can back it up and restore it.
+- **Rescan** on launch/resume when `last-sync.txt` or folder mtimes changed; only re-read
+  titles whose path/size/mtime changed. Never block the UI: show "Updating library...".
+- Don't scan outside `/sdcard/Watch/`. Don't modify or delete video files from the app
+  (the PC script adds and removes). No internet in the app. `permissions` = storage access only.
+- Never commit videos, posters, TMDB data, or `private\` contents.
 
-Verse number, pipe, verse text. Poetic line breaks within a verse become ` / `. This makes
-verse-range extraction (needed for Psalm 119) a plain line filter on the phone — no
-parsing, no index files.
-
-Also emit `bible/<translation>/manifest.json`: display name, and per book its canonical
-name, slug, and chapter count.
-
-### Piece B: the app
-
-Reads only the converted `.txt` files, `manifest.json`, and `reading_plan_2026.json` from
-`lightContext.fileShare`. Knows nothing about EPUB.
-
-**Not wired up yet:** `reading_plan_2026.json` needs to be pushed to the device's
-`lightContext.fileShare` root (alongside `bible/`) the same way the converted chapters are.
-There is no install step that does this yet — it currently only lives at
-`bible-source/reading_plan_2026.json` on the PC.
-
----
-
-## 7. Source files and extraction gotchas
-
-Sources live at `C:\Users\bjc38\Documents\bible-source`, **outside the repo**. No scripture
-text or converted output is ever committed. Gitignore the output directory.
-
-- **NASB 1995** — Calibre EPUB, "Includes Translators' Notes." (The filename says 2013; the
-  content is 1995.)
-- **ESV** — **plain 2007 ESV text edition, not the Study Bible.** No study apparatus at all.
-
-**Re-verified 2026-09-15 against the current files in `bible-source` (Jordan replaced the
-source files; the notes below reflect what's actually in them now, not the earlier
-download).**
-
-**NASB:**
-- Filenames are opaque Calibre split-part names (`text/part0018_split_009.html`) — **not**
-  named by book/chapter. Each split file happens to hold one chapter's worth of content,
-  but chapter identity must come from the in-page `<p class="head">Psalm 119</p>`-style
-  heading, never the filename.
-- Verse numbers use two different wrappers depending on position:
-  - First verse after a paragraph/stanza break: `<span class="small1"><b class="calibre5">33</b></span>`
-    (bold, no `<sup>`).
-  - Every other verse: `<small class="small1"><sup class="calibre11">34</sup></small>`.
-- Translator's-note markers use the **same markup as a mid-paragraph verse number**
-  (`<small class="small1"><sup class="calibre11">a</sup></small>`) — digit vs. letter is
-  the only discriminator there. The extra `<a href="...#fNNN">` wrapper on the note marker
-  is **prose-only** — confirmed present in Genesis 38, Genesis 43, Exodus 16. In poetry
-  (e.g. Psalm 119) note markers carry **no `<a href>`** at all, so don't rely on the href
-  as a universal test — check digit-vs-letter first, in every genre.
-- Translator's notes are fenced in literal `[ ... ]` — **but so are disputed passages**
-  (John 7:53–8:11, Mark 16:9–20 both confirmed still bracket-wrapped this way). A rule
-  stripping all bracketed text would delete scripture. Handle these explicitly.
-- One known displaced note: Psalm 119 v56's note sits after the *next* section heading
-  ("Heth.") — confirmed still present, byte-identical to the earlier file.
-- `LORD` is small-caps split markup and needs recombining: `L<span class="small1">ORD</span>`,
-  and for the possessive, `L<span class="small1">ORD</span>’<span class="small1">S</span>`.
-- NASB's `*` before some verbs is part of the text — keep it. (Confirmed in the Gospels,
-  e.g. Matthew 2, John 8 — historic-present marker. Not expected in OT poetry.)
-- Book nav (`toc.ncx`) uses "Song of Solomon."
-
-**ESV (plain 2007 text edition):**
-- **No separate stream files exist.** There is no `*.text.xhtml` / `*.studynotes.xhtml` /
-  `*.crossrefs.xhtml` / `*.footnotes.xhtml` / `*.intros.xhtml` / `*.main.xhtml`, and no
-  `b19.00`…`b19.06`-style book-part split. Everything is flat, opaque Calibre split files
-  (`The_Holy_Bib-rd_Version_ESV_split_1083.html`) — same shape as the NASB file, not the
-  Study Bible layout the old notes described.
-- Verse numbers are `<span class="bold">33 </span>` — plain bold, no `id`, no
-  `verse-num` class, no verse-id scheme at all. **The character right after the number is
-  U+00A0 (non-breaking space), not a regular space** — same for the mid-line indent before
-  poetic second lines (`   and I will keep it...`). A plain `.strip()`/split
-  on `" "` will not catch it; normalize NBSP to a regular space (or strip it) explicitly, or
-  verse text will start with a stray character.
-- **Verse 1 is fused with the chapter number only at a within-book chapter transition** —
-  `<span class="bold" id="filepos...."><big class="calibre18">119</big>:1 </span>`, confirmed
-  at Psalm 119. **Corrected 2026-09-15:** this does NOT apply to a book's own opening
-  chapter — confirmed against Jude 1:1, which is plain `<span class="bold">1 </span>` with
-  no `<big>` chapter prefix. The fusion exists only to disambiguate a chapter change inside
-  a book's flowing text; a book's first chapter needs no such marker since the book heading
-  already establishes "chapter 1." Handle both forms: don't assume every verse 1 is fused,
-  and don't assume every verse 1 is bare.
-- Footnotes: the inline marker is
-  `<a id="..." title="the note text" href="...split_NNNN.html#..." class="calibre4">[253]</a>`.
-  The note text is duplicated in the `title` attribute — read it from there; there's no
-  need to follow the `href` to the separate endnotes file it points to.
-- No cross-references and no smallcap wrappers exist in this edition — `LORD` is plain
-  uppercase text (verified: this edition's stylesheet has no smallcap class at all).
-- Book nav (`toc.ncx`) uses "Song of Solomon" — matches NASB, so no cross-translation
-  aliasing gap there.
-
-**If bible-source is replaced again, re-verify this section before trusting it — both
-files changed once already without the extraction notes being updated to match.**
-
----
-
-## 8. The reading plan file
-
-`reading_plan_2026.json`. Each day:
+## 5. movie.json / show.json / episode json (the PC script writes them)
 
 ```json
-{
-  "day": 120, "date": "2026-04-30", "weekday": "Thursday",
-  "displayDate": "Apr 30", "complete": false,
-  "label": "Isaiah 45-48 • Psalms 119:33-64",
-  "passages": [
-    { "book": "Isaiah", "startChapter": 45, "endChapter": 48 },
-    { "book": "Psalms", "startChapter": 119, "endChapter": 119,
-      "startVerse": 33, "endVerse": 64 }
-  ]
-}
+{ "schema": 1, "id": "Collection/Title (Year)", "title": "Hacksaw Ridge", "year": 2016,
+  "collection": "Harry Potter", "collectionNumber": 1, "overview": "...",
+  "genres": ["Drama","War"], "runtimeMin": 139, "rating": 8.1, "contentRating": "R",
+  "director": "Mel Gibson", "cast": ["Andrew Garfield"], "poster": "poster.jpg",
+  "backdrop": null, "file": "movie.mp4", "width": 1920, "height": 1080,
+  "videoCodec": "h264", "audioCodec": "aac", "bytes": 123, "sentAt": "2026-10-12T15:00:00" }
 ```
 
-- 358 reading days (Day 1 = Jan 1 2026, Day 358 = Dec 24) plus 7 days with
-  `"complete": true` and label `PLAN COMPLETE` for Dec 25–31.
-- `label` is display-ready. `passages` is what you look up.
-- `startVerse`/`endVerse` appear only on the twelve Psalm 119 days. When present, show
-  **only those verses**.
-- The day's psalm is shown together with the rest of that day's reading, not as a separate
-  section.
+If a json is missing or broken: fall back to the folder name `Title (Year)` and never crash.
+`collectionNumber` and `rating` may be null. Show/episode json carry title, overview, season,
+episode, runtime, air date, still image.
 
-**Book name resolution — the most likely source of silent bugs.** The file carries a
-`bookAliases` map for all 66 books, plus `canonicalBookOrder`. Resolve every book name
-through it before lookup — case-insensitively, ignoring periods and extra whitespace.
-Never compare book names directly. The translation files and the plan do not use the same
-spellings ("Song of Solomon" vs "Song of Songs", "Psalm" vs "Psalms").
+## 6. Library screens
 
----
+- Tabs (bottom bar): **Movies, TV, Collections**. Home opens with **Continue Watching**
+  (progress bars), then Recently Added.
+- Poster grid (2 or 3 columns, setting) or list with small poster. Posters decoded downscaled
+  (about 240 px grid, 800 px detail), cached to disk by key, loaded off the main thread, small
+  memory LRU. No poster = placeholder with the title's first letter.
+- Detail page: poster, title, year, runtime, rating, content rating, genres, overview,
+  director, cast, quality line (e.g. "1080p H.264 AAC · 2.1 GB"), Play/Resume, Mark watched,
+  Watchlist, Remove from phone (confirmation screen).
+- TV: show -> seasons -> episodes (watched marks, runtime). Collections open in story order.
+- **Sort** (each A–Z / Z–A, remembered per tab): Title (ignore leading The/A/An), Year,
+  Recently added, Recently watched, Runtime, Rating, Genre, Collection, Resolution, File
+  size, Unwatched first. **Filters:** genre, decade, watched / unwatched / in progress,
+  content rating, collection, quality. **Search:** title, cast, director; every typed word
+  must match, any order, accent/case-insensitive. Match the Reader's sort screen style.
+- Every list is a `LightLazyScrollView` with uniform rows. 325+ titles must scroll smoothly.
 
-## 9. Screens
+## 7. Player
 
-**HomeScreen** (`@InitialScreen`) — two entries, **Read** and **Plan**, plus access to
-translation selection.
+- **Media3 ExoPlayer**, hardware decoding. Original files untouched when the phone can decode
+  them. File that fails: "Can't play this file", back to the library, never crash.
+- **Full screen:** immersive (hide system bars and cutout area), edge to edge, screen kept on.
+- **Orientation: NEVER auto-rotate.** The screen is locked to portrait or landscape and
+  changes only when Jordan presses the rotate button in the player. Rotation must not restart
+  playback or lose the second (handle the configuration change; keep the player alive).
+  Setting "Start in": Portrait / Landscape / Last used. The library screens stay portrait.
+  **Feasibility first:** `Context` is import-blocked and the SDK may only allow
+  `orientation = "portrait"` in `lighttool.toml`. Session 0 must find out how a tool can
+  switch orientation at runtime. If the SDK can't, report it and propose an SDK change in a
+  separate "SDK: ..." commit (like Listen's volume keys). If LightOS blocks it, stop and tell
+  Jordan.
+- **Aspect:** Fit / Fill (crop) / Zoom, pinch to zoom freely, remembered per orientation.
+- **Controls** (fade after 3 s, tap to show): play/pause; back/forward **15 s** (setting 10/15/30);
+  double-tap left/right half to skip; press-and-hold the skip buttons to scan; seek bar with
+  elapsed/remaining and a time label while dragging; **speed 0.25x–3.0x in 0.25 steps**
+  (quick buttons 0.5, 0.75, 1.0, 1.25, 1.5, 2.0), pitch corrected, remembered per title;
+  previous/next in collection or season; audio track picker; subtitle picker; lock-controls
+  button; rotate button; aspect button; 90-second skip-ahead button.
+- **Resume:** per title save position, speed, watched flag, last-played; every 10 s while
+  playing and at once on pause, seek, leaving the player, app pause. Reopen rewinds 5 s.
+  Watched at the last 3% or 2 minutes, whichever is smaller. Keyed by `id`, so a title
+  removed and sent again resumes where he stopped.
+- Pause on headphone/Bluetooth disconnect; audio focus via Media3 (`handleAudioFocus = true`);
+  Bluetooth/headset buttons work.
+- **Keys:** volume keys change MEDIA volume everywhere in Watch with a small on-screen volume
+  bar for about 2 s (reuse Listen's code); scroll-wheel press and camera button do nothing
+  (they never reach LightOS); turning the wheel stays LightOS brightness.
+- Subtitles: embedded text tracks and sidecar `.srt`; size and position settings; sync nudge
+  in 100 ms steps. Audio/video sync nudge in 50 ms steps if ExoPlayer allows; otherwise skip
+  and say so.
+- Sleep timer: 15/30/45/60 min or end of movie.
+- **Next up:** at the end of a collection film or episode, offer the next one with a 10-second
+  countdown that can be cancelled.
+- Show codec, resolution and bitrate in small text on a "Details" overlay.
 
-**BooksScreen** — all 66 books in canonical order under two headings: **Old Testament**
-(Genesis–Malachi) and **New Testament** (Matthew–Revelation).
+## 8. PC side (scripts\, double-click .cmd files)
 
-**ChaptersScreen** — the chapter numbers for the selected book.
+Everything that organizes, converts, names or sends files is a double-click `.cmd` in
+`scripts\`, calling a PowerShell script. Each one: checks for adb (PATH or a remembered
+folder), requires exactly one connected device, prints each step in plain English, logs to
+`logs\`, never deletes phone data without asking, and with no phone connected explains what
+it would do and stops. Phone handoff is proven: `adb push` to `/data/local/tmp`, then
+`adb shell` copy into `/sdcard/Watch/...` as `.part`, rename at the end.
 
-**ChapterScreen** — the chapter text, paginated using the reader project's approach. Book
-and chapter at the top. Verse numbers inline, lighter than the text.
+- `Watch-Phone-Sync.cmd`: menu of D:\Movies and D:\TV titles with sizes; pick what goes; a
+  running total against the **50 GB cap** (Jordan's choice; the script refuses to exceed it
+  and shows free space on the phone); per-send quality: Original / 1080p / 720p small
+  (estimate 720p about 2 Mbps, 1080p about 4 Mbps, then measure the real size and warn).
+  Parses `Title (Year)` from file names, folders become collections (numbered 01, 02 = story
+  order). Library check flags files the phone can't play (AVI, AC3/DTS/TrueHD audio,
+  10-bit HEVC, embedded cover track) and fixes them: remux with `-c copy`, or convert only
+  the audio to AAC, or re-encode when shrinking. Embedded cover art is extracted to
+  poster.jpg and stripped from the video (`-map 0:v:0 -map 0:a`).
+- **TMDB**: free key in `private\tmdb-key.txt` (git-ignored; never print it). PC-side only.
+  Look up by title + year, save poster, backdrop, overview, genres, cast, director, runtime,
+  rating, content rating, collection into json. Cache lookups in `private\tmdb-cache\`.
+  Embedded cover wins over a downloaded poster only if no TMDB match. Show the required
+  line in the app's Settings: "This product uses the TMDB API but is not endorsed or
+  certified by TMDB."
+- Remove menu (deletes chosen titles, keeps watched marks and positions), Backup/Restore of
+  `.state`, and an option that grants MANAGE_EXTERNAL_STORAGE.
+- **Ask before installing software.** ffmpeg is needed on the PC:
+  `winget install Gyan.FFmpeg` after Jordan says yes. Prefer PowerShell + ffmpeg only.
+- **Nothing in `D:\Movies` or `D:\TV` is ever changed.** All work happens on copies in
+  `%TEMP%\watch-*`, deleted at the end.
+- TV naming expected on the PC: `D:\TV\<Show>\Season 01\<Show> - S01E01 - <Title>.mp4`.
+  Create `D:\TV` with a short README.txt explaining this if it doesn't exist.
+- Test mode (no phone): `WATCH_DRY_RUN=<folder>` writes the finished layout there and sends
+  nothing.
 
-**PlanScreen** — the plan by day, each row showing date and label. Opens on today's date if
-today falls in the plan year; otherwise Day 1.
+## 9. Look and feel
 
-**PlanDayScreen** — that day's full text, all passages in the order given in `passages`,
-each with its own heading, paginated. Psalm 119 days show only the assigned verses.
-`PLAN COMPLETE` days show a short message and nothing else.
+Match the Reader and Listen: same theme options, spacing and row style, 48 dp+ tap targets,
+long names ellipsize or scroll, never wrap into three lines. Full color: poster-derived
+accent on the detail page, a dark default so a movie library doesn't glare. Quiet and fast.
+No streaks, no badges, no notifications.
 
-**TranslationScreen** — pick the active translation. Persists, and applies to both sections.
+## 10. Out of scope (suggest, don't build)
 
----
+Family mode, casting, trailers, online playback, accounts, sync, HDR/Dolby Vision, DTS
+decoding on the phone, picture-in-picture, background video, downloads inside the app.
 
-## 10. Build order
+## 11. Session hygiene
 
-One phase per session. Do not start the next until the current compiles and Jordan has
-confirmed it looks right.
-
-0. **Recon** — verify the copied `NOTES.md` against the current SDK.
-1. **Converter** — extend the reader's `convert.py` for verse-level extraction. Verify one
-   book, then the hard cases, then run both translations in full.
-2. **Data layer** — read converted chapters, manifest, and the plan file. No UI.
-3. **Read section** — Home, Books, Chapters, Chapter text.
-4. **Plan section** — the day list and the day view.
-5. **Translation switching.**
-6. **Polish** — typography and spacing for sustained reading.
-
----
-
-## 11. Working agreement
-
-- If an SDK component doesn't exist, say so and propose building it from primitives.
-- If a lint rule blocks an approach, name what it blocked and give two alternatives.
-- Keep functions short and the layout obvious. Jordan reads this code himself and is not an
-  Android developer.
-- Don't add features that aren't in this spec. Suggest, don't build.
-- **Never guess at scripture text.** If extraction produces something uncertain, surface it
-  rather than filling the gap.
+Start by reading PROGRESS.md. Every session ends with `gradlew.bat :tool:testDebugUnitTest
+:tool:assembleDebug` passing (log to `logs\sessionN-build.log`, git-ignored), PROGRESS.md
+updated, a commit with the session number, and Jordan shown the session's Done-when
+checklist marked with a check or a cross for each item. If something conflicts with the SDK,
+stop and explain before changing course.

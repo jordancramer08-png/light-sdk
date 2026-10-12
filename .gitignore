@@ -63,3 +63,7 @@ __pycache__/
 
 ### Converted scripture text — copyrighted content, never committed (CLAUDE.md section 7) ###
 /bible/
+### Watch — private keys/TMDB data, build logs, phone test output (CLAUDE.md §4, §11) ###
+/private/
+/logs/
+/phone_day/

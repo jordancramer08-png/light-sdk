@@ -180,6 +180,21 @@ class LightToolMetadataTest {
     }
 
     @Test
+    fun `all files access permission is allowed`(@TempDir dir: Path) {
+        val file = writeToml(dir, """
+            [tool]
+            id = "com.example.mytool"
+            label = "X"
+            versionCode = 1
+            versionName = "1.0.0"
+            permissions = ["android.permission.MANAGE_EXTERNAL_STORAGE"]
+            serverPackage = "com.lightos"
+        """.trimIndent())
+        val meta = LightToolMetadata.parse(file)
+        assertEquals(listOf("android.permission.MANAGE_EXTERNAL_STORAGE"), meta.permissions)
+    }
+
+    @Test
     fun `unlisted permission fails`(@TempDir dir: Path) {
         val file = writeToml(dir, """
             [tool]

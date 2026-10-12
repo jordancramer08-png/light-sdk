@@ -57,6 +57,25 @@ tool code BEFORE any build is installed.
 - **Moved to Session 2:** the "SDK: let a tool play video" player (decision a) wasn't in
   this session's prompt.
 
+## Session 2 — SDK video player + library logic (2026-10-12) ✅
+
+- SDK commit "SDK: let a tool play video": `sdk/client/.../video/LightVideoPlayer.kt`.
+  Tools get one with `DefaultLightVideo(sealedActivity).newPlayer()` (same shape as
+  `DefaultLightAudio`). It owns the ExoPlayer (audio focus on, pauses on headphone unplug)
+  and draws on a **TextureView**: `player.Surface(modifier, quarterTurns = 1)` turns it 90°
+  and swaps width/height, so rotating never restarts playback. Play, pause, seekTo,
+  positionMs/durationMs, setSpeed (0.25–3.0, pitch kept natural), audioTracks /
+  subtitleTracks + select (null = subtitles off), sidecar .srt/.vtt, `subtitleText` (the
+  app draws the lines), videoSize/videoFormat (for the Details overlay), keepScreenOn, release.
+- Lint: the only thing it flagged was Media3's "unstable API" marker on reading the video
+  bitrate; fixed with `@OptIn(UnstableApi::class)` exactly as Listen does. A throwaway tool
+  file using `DefaultLightVideo` + `Surface` passed the Light import/code rules (deleted).
+- `logic/`: `LibraryItem` (+ `WatchState`), `Sorting` (11 keys, A–Z/Z–A, missing values
+  last, ties by title, The/A/An ignored), `Filters` (+ `Quality`, choice lists), `Search`,
+  `Resume`, `Speed`, `NextUp`, `StorageMath` (50 GB cap, estimates, "1080p H.264 AAC · 2.1 GB").
+- Tests: 49 passing (37 new). Build log: `logs/session2-build.log`.
+- Not yet on the phone: the rotated TextureView and subtitle rendering are Phone Day checks.
+
 ## Session plan
 
 | # | Session | Done when |

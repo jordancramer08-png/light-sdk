@@ -431,3 +431,46 @@ tool code BEFORE any build is installed.
   in their Marvel folder layout): both sent, Watch-safe, json + TMDB show/still. Source files
   checked unchanged (MD5 and size/time of all 1,555 Marvel files).
 - Tests: Test-WatchSafe 53/53; Gradle build + unit tests pass (`logs/session10b-build.log`).
+
+## Session 11 part B — Library report, pre-convert, smoke test, why-won't-it-play (2026-10-12) ✅
+
+- **Shared code:** everything the PC scripts share (sources, scan, check, fix, TMDB, json,
+  send, menus) moved from `Watch-Phone-Sync.ps1` into `scripts/WatchCommon.ps1`; all four
+  scripts dot-source it, so `$SourceRoots` / `WATCH_SOURCES` is in one place. New pure rules
+  in `scripts/LibraryRules.ps1` (report verdicts, size/time estimates, staging match, smoke
+  picks, plain-word reasons).
+- **Probe cache:** `private/probe-cache.tsv`, one line per file (key = path|size|time), written
+  as each file is read, so Ctrl+C loses nothing; 4 ffprobes at once. Sync, staging, smoke and
+  why all use it. Encode speed measured once (20 s of a real 1080p file) in
+  `private/encode-speed.json` and refined by real conversions: this PC (Ryzen 3 2200U) takes
+  about 3 h per hour of 1080p.
+- **Watch-Library-Report.cmd:** OK / Needs a quick fix / Needs a full convert / Can't play,
+  with reason, fix, size after (Original and 720p), convert time, totals per folder and in
+  all; `phone_day/library-report.csv` + `.html` (filter box, status chips, sortable columns,
+  dark mode). Real run: 1,880 files, 2,130.6 GB, first run 4.5 min, second run 1 min.
+  Result: 319 OK, 1,200 quick fix, 361 full convert, 0 can't play; about 373 h of converting
+  in all (Marvel 356 h, Movies 17 h). Most common: MKV (742), subtitles inside (579), AC3 (476),
+  cover track (316), index at end (293), HEVC (149), AVI (112).
+- **Pre-convert (Sync option 6, also offered with no phone):** picks + quality → checks free
+  space (needs estimate +10% + 5 GB), asks before creating `D:\Watch-Staging`
+  (`WATCH_STAGING` overrides), one file at a time in `<name>.part\`, moved in and
+  `<name>.stage.json` written last; unchanged staged files are skipped; already-safe files are
+  not copied. Keeps Windows awake with `SetThreadExecutionState` (no power setting changed;
+  released at the end, on Ctrl+C, or when the window closes). Send uses a staged copy when the
+  source size/time and quality match; the 50 GB cap applies at send only.
+- **Watch-Smoke-Test.cmd:** picks real examples (rarest kind first): MP4+AAC, MKV, AVI, AC3,
+  720p, 1080p, Marvel TV episode; cuts 20 s (`-c copy`, 5 min in), sends it through the normal
+  Watch-safe path as collection "Smoke Test" (numbered, so next-up is testable) and show
+  "Smoke Test TV"; asks before replacing an earlier run; checklist printed and saved to
+  `phone_day/smoke-test.txt`.
+- **Watch-Why-Wont-It-Play.cmd:** search + pick; checks the original (readable, Watch-safe,
+  length by picture and sound only — the 10b fix, first/last 30 s decode errors) and the phone
+  copy (installed, file access, video + json there, size matches json `bytes`, no `.part`,
+  old non-H.264 copy); plain words for every reason; with a yes fixes and re-sends (old copy
+  doesn't count against the cap). Damaged originals are explained, not sent.
+- **Tests:** `scripts/tests/Test-LibraryTools.ps1` — 67 rule tests + 51 end-to-end on synthetic
+  files with WATCH_DRY_RUN (report, Ctrl+C resume, staging + restart after a stop, send from
+  staging, smoke, why incl. a cut-off phone copy, source folders unchanged by MD5): 118/118.
+  Test-WatchSafe 53/53. Gradle build + unit tests pass (`logs/session11b-build.log`).
+- **Not done here (needs the phone):** real smoke test send and the on-phone checklist; Why
+  against the real phone (`ls -l` format on LightOS); an overnight staging run on real titles.

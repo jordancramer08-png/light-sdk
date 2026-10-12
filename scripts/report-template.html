@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Watch Library Report</title>
+<!-- Filled in by Watch-Library-Report.ps1: {{WHEN}} {{SPEED}} {{TOTALS}} {{DATA}} -->
+<style>
+:root {
+  --bg: #f6f6f4; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #e2e1dc;
+  --ok: #2e7d32; --ok-bg: #e8f3e8; --quick: #a35f00; --quick-bg: #fdf1dc;
+  --full: #b3261e; --full-bg: #fbe5e3; --bad: #5e5a72; --bad-bg: #ebe9f1; --accent: #2b5fab;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141413; --panel: #1e1e1c; --text: #ecebe6; --muted: #a09f98; --line: #34332f;
+    --ok: #7cc47f; --ok-bg: #1f2d20; --quick: #f0b453; --quick-bg: #33281a;
+    --full: #f28b82; --full-bg: #3a1f1d; --bad: #b9b4d1; --bad-bg: #29273a; --accent: #8ab4f8;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+main { max-width: 1500px; margin: 0 auto; padding: 24px 16px 64px; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+h2 { font-size: 16px; margin: 28px 0 8px; }
+.sub { color: var(--muted); margin: 0; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; }
+th, td { padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#totals td { text-align: right; font-variant-numeric: tabular-nums; }
+#totals tr.all { font-weight: 600; }
+#totals tr:last-child th, #totals tr:last-child td { border-bottom: 0; }
+.key { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 10px; align-items: center; }
+.chip { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 999px;
+  padding: 6px 12px; font: inherit; cursor: pointer; min-height: 34px; display: inline-flex; gap: 6px; align-items: center; }
+.chip[aria-pressed="false"] { opacity: .45; text-decoration: line-through; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+#q { flex: 1 1 260px; min-width: 0; padding: 8px 12px; font: inherit; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--text); min-height: 36px; }
+#count { color: var(--muted); }
+#list thead th { position: sticky; top: 0; background: var(--panel); cursor: pointer; user-select: none; white-space: nowrap; z-index: 1; }
+#list thead th:hover { color: var(--accent); }
+#list thead th[aria-sort="ascending"]::after { content: " \25B2"; font-size: 10px; }
+#list thead th[aria-sort="descending"]::after { content: " \25BC"; font-size: 10px; }
+#list tbody tr { border-left: 4px solid transparent; }
+.st { white-space: nowrap; font-weight: 600; display: inline-flex; gap: 6px; align-items: center; padding: 2px 8px; border-radius: 6px; }
+.s-ok .st { color: var(--ok); background: var(--ok-bg); }  .s-ok .dot { background: var(--ok); }
+.s-quick .st { color: var(--quick); background: var(--quick-bg); } .s-quick .dot { background: var(--quick); }
+.s-full .st { color: var(--full); background: var(--full-bg); } .s-full .dot { background: var(--full); }
+.s-bad .st { color: var(--bad); background: var(--bad-bg); } .s-bad .dot { background: var(--bad); }
+.k-ok { background: var(--ok); } .k-quick { background: var(--quick); } .k-full { background: var(--full); } .k-bad { background: var(--bad); }
+.path { color: var(--muted); font-size: 12px; word-break: break-all; }
+.reason { max-width: 380px; }
+.note { color: var(--quick); font-size: 12px; }
+footer { color: var(--muted); margin-top: 18px; font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Watch library report</h1>
+  <p class="sub">Made {{WHEN}}. Read only: nothing in the source folders was changed.</p>
+
+  <h2>Totals</h2>
+  <div class="panel">
+    <table id="totals">
+      <thead><tr><th>Source folder</th><th class="n">Files</th><th class="n">OK</th><th class="n">Quick fix</th>
+        <th class="n">Full convert</th><th class="n">Can't play</th><th class="n">Size now</th>
+        <th class="n">After (Original)</th><th class="n">After (720p)</th><th class="n">Convert time</th></tr></thead>
+      <tbody>{{TOTALS}}</tbody>
+    </table>
+  </div>
+  <p class="sub" style="margin-top:8px">{{SPEED}} Sizes and times are estimates.</p>
+
+  <h2>Every file</h2>
+  <div class="key" role="group" aria-label="Show these">
+    <button class="chip" data-s="OK" aria-pressed="true"><span class="dot k-ok"></span>OK</button>
+    <button class="chip" data-s="Needs a quick fix" aria-pressed="true"><span class="dot k-quick"></span>Needs a quick fix</button>
+    <button class="chip" data-s="Needs a full convert" aria-pressed="true"><span class="dot k-full"></span>Needs a full convert</button>
+    <button class="chip" data-s="Can't play" aria-pressed="true"><span class="dot k-bad"></span>Can't play</button>
+    <input id="q" type="search" placeholder="Filter: any words, e.g. marvel ac3 avi" aria-label="Filter">
+    <span id="count"></span>
+  </div>
+  <div class="panel">
+    <table id="list">
+      <thead><tr>
+        <th data-k="s">Status</th><th data-k="t">Title</th><th data-k="src">Source</th><th data-k="ty">Type</th>
+        <th data-k="p">Picture</th><th data-k="a">Sound</th><th data-k="m" class="n">Length</th><th data-k="b" class="n">Size now</th>
+        <th data-k="e" class="n">After (Original)</th><th data-k="e7" class="n">After (720p)</th><th data-k="w" class="n">Convert time</th>
+        <th data-k="r">Reason / fix</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <footer>OK = goes to the phone untouched. Quick fix = copied into an MP4 or the sound converted (minutes, no picture quality lost).
+    Full convert = the picture is re-encoded (slow). Can't play = damaged or no picture. Click a column to sort; click again to reverse.</footer>
+</main>
+<script>
+var ROWS = {{DATA}};
+var ORDER = { "OK": 0, "Needs a quick fix": 1, "Needs a full convert": 2, "Can't play": 3 };
+var CLS = { "OK": "s-ok", "Needs a quick fix": "s-quick", "Needs a full convert": "s-full", "Can't play": "s-bad" };
+var sortKey = "s", sortDir = 1, shown = { "OK": 1, "Needs a quick fix": 1, "Needs a full convert": 1, "Can't play": 1 };
+function fold(s) { return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase(); }
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+function size(b) { if (b >= 1073741824) return (b / 1073741824).toFixed(1) + " GB"; if (b >= 1048576) return Math.round(b / 1048576) + " MB"; return Math.round(b / 1024) + " KB"; }
+function dur(s) { if (s <= 0) return "-"; if (s < 60) return "1 min"; var m = Math.round(s / 60); if (m < 60) return m + " min"; var h = Math.floor(m / 60); m = m % 60; return m ? h + " h " + m + " min" : h + " h"; }
+function mins(m) { return m > 0 ? Math.round(m) + " min" : "-"; }
+ROWS.forEach(function (r) { r._f = fold([r.s, r.t, r.src, r.k, r.g, r.f, r.ty, r.p, r.a, r.r, r.x, r.n].join(" ")); });
+function val(r, k) { return k === "s" ? ORDER[r.s] : r[k]; }
+function render() {
+  var words = fold(document.getElementById("q").value).split(/\s+/).filter(Boolean);
+  var list = ROWS.filter(function (r) {
+    if (!shown[r.s]) return false;
+    for (var i = 0; i < words.length; i++) if (r._f.indexOf(words[i]) < 0) return false;
+    return true;
+  });
+  list.sort(function (a, b) {
+    var x = val(a, sortKey), y = val(b, sortKey), c;
+    if (typeof x === "number" && typeof y === "number") c = x - y;
+    else c = String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: "base" });
+    if (c === 0) c = String(a.t).localeCompare(String(b.t), undefined, { numeric: true });
+    return c * sortDir;
+  });
+  var html = [];
+  for (var i = 0; i < list.length; i++) {
+    var r = list[i];
+    html.push('<tr class="' + CLS[r.s] + '"><td><span class="st"><span class="dot"></span>' + esc(r.s) + '</span></td>' +
+      '<td>' + esc(r.t) + (r.g ? ' <span class="path">· ' + esc(r.g) + '</span>' : '') + '<div class="path">' + esc(r.f) + '</div>' +
+      (r.n ? '<div class="note">' + esc(r.n) + '</div>' : '') + '</td>' +
+      '<td>' + esc(r.src) + '</td><td>' + esc(r.ty) + '</td><td>' + esc(r.p) + '</td><td>' + esc(r.a) + '</td>' +
+      '<td class="n">' + mins(r.m) + '</td><td class="n">' + size(r.b) + '</td><td class="n">' + size(r.e) + '</td>' +
+      '<td class="n">' + size(r.e7) + '</td><td class="n">' + dur(r.w) + '</td>' +
+      '<td class="reason">' + (r.r ? esc(r.r) + '<div class="path">Fix: ' + esc(r.x) + '</div>' : '<span class="path">' + esc(r.x) + '</span>') + '</td></tr>');
+  }
+  document.querySelector("#list tbody").innerHTML = html.join("");
+  document.getElementById("count").textContent = list.length.toLocaleString() + " of " + ROWS.length.toLocaleString() + " files";
+  document.querySelectorAll("#list thead th").forEach(function (th) {
+    th.setAttribute("aria-sort", th.dataset.k === sortKey ? (sortDir > 0 ? "ascending" : "descending") : "none");
+  });
+}
+document.querySelectorAll("#list thead th").forEach(function (th) {
+  th.addEventListener("click", function () {
+    if (sortKey === th.dataset.k) sortDir = -sortDir; else { sortKey = th.dataset.k; sortDir = 1; }
+    render();
+  });
+});
+document.querySelectorAll(".chip").forEach(function (b) {
+  b.addEventListener("click", function () {
+    var s = b.dataset.s; shown[s] = shown[s] ? 0 : 1;
+    b.setAttribute("aria-pressed", shown[s] ? "true" : "false"); render();
+  });
+});
+document.getElementById("q").addEventListener("input", render);
+render();
+</script>
+</body>
+</html>

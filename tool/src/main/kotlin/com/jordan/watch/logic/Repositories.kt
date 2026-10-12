@@ -20,10 +20,23 @@ class PlaybackRepository(private val store: StateStore) {
     private val _watched = MutableStateFlow<Map<String, Long>>(emptyMap())
     val watched: StateFlow<Map<String, Long>> = _watched.asStateFlow()
 
+    /** True while the debug fake library is shown: nothing is read from or written to .state. */
+    @Volatile
+    private var fake = false
+
     @Synchronized
     fun load() {
+        if (fake) return
         _positions.value = store.loadPositions()
         _watched.value = store.loadWatched()
+    }
+
+    /** Debug fake library only: shows [positions] and never touches the real .state files. */
+    @Synchronized
+    fun useFake(positions: Map<String, Position>) {
+        fake = true
+        _positions.value = positions
+        _watched.value = emptyMap()
     }
 
     fun position(id: String): Position? = _positions.value[id]
@@ -36,7 +49,7 @@ class PlaybackRepository(private val store: StateStore) {
     @Synchronized
     fun savePosition(id: String, positionMs: Long, durationMs: Long, speed: Float, nowMs: Long) {
         _positions.value = _positions.value + (id to Position(positionMs.coerceAtLeast(0), speed, nowMs))
-        tryWrite { store.savePositions(_positions.value) }
+        if (!fake) tryWrite { store.savePositions(_positions.value) }
         if (Resume.isWatched(positionMs, durationMs)) markWatched(id, nowMs)
     }
 
@@ -45,17 +58,17 @@ class PlaybackRepository(private val store: StateStore) {
     fun markWatched(id: String, nowMs: Long) {
         if (id in _watched.value) return
         _watched.value = _watched.value + (id to nowMs)
-        tryWrite { store.saveWatched(_watched.value) }
+        if (!fake) tryWrite { store.saveWatched(_watched.value) }
     }
 
     /** Unmarks [id] and starts it from the beginning next time. */
     @Synchronized
     fun markUnwatched(id: String) {
         _watched.value = _watched.value - id
-        tryWrite { store.saveWatched(_watched.value) }
+        if (!fake) tryWrite { store.saveWatched(_watched.value) }
         val old = _positions.value[id] ?: return
         _positions.value = _positions.value + (id to old.copy(positionMs = 0))
-        tryWrite { store.savePositions(_positions.value) }
+        if (!fake) tryWrite { store.savePositions(_positions.value) }
     }
 
     /** The state the library rows and filters use. */

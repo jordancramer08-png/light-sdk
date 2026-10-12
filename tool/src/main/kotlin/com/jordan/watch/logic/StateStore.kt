@@ -24,6 +24,8 @@ data class WatchSettings(
     /** "DARK" or "LIGHT"; anything unknown reads as dark. */
     val theme: String = "DARK",
     val gridColumns: Int = 3,
+    /** "GRID" (posters) or "LIST" (rows with a small poster). */
+    val libraryView: String = "GRID",
     val skipSeconds: Int = 15,
     /** "PORTRAIT", "LANDSCAPE" or "LAST". */
     val startIn: String = "PORTRAIT",

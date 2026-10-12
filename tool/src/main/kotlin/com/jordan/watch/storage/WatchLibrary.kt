@@ -1,6 +1,8 @@
 package com.jordan.watch.storage
 
 import android.util.Log
+import com.jordan.watch.FeatureFlags
+import com.jordan.watch.dev.DevLibrary
 import com.jordan.watch.logic.Library
 import com.jordan.watch.logic.LibraryIndexStore
 import com.jordan.watch.logic.LibraryScanner
@@ -25,6 +27,8 @@ data class LibraryState(
     val library: Library = Library(),
     val loaded: Boolean = false,
     val updating: Boolean = false,
+    /** The debug fake library is shown (FeatureFlags.FAKE_LIBRARY). */
+    val fake: Boolean = false,
 )
 
 /**
@@ -76,7 +80,18 @@ object WatchLibrary {
      * [filesDir] is the app's own files folder, where the saved index lives.
      */
     fun refresh(filesDir: File) {
+        if (FeatureFlags.FAKE_LIBRARY && showFakeLibrary()) return
         if (StorageAccess.hasAllFilesAccess()) requests.trySend(File(filesDir, "cache"))
+    }
+
+    /** Debug builds: puts the made-up library on screen once. False in release builds. */
+    private fun showFakeLibrary(): Boolean {
+        if (_state.value.fake) return true
+        val index = DevLibrary.fakeIndex() ?: return false
+        repositories.playback.useFake(DevLibrary.fakePositions())
+        if (StorageAccess.hasAllFilesAccess()) inBackground { repositories.settings.load() }
+        _state.value = LibraryState(library = Library(index), loaded = true, fake = true)
+        return true
     }
 
     private fun refreshNow(indexDir: File) {

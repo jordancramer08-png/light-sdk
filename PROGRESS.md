@@ -76,6 +76,32 @@ tool code BEFORE any build is installed.
 - Tests: 49 passing (37 new). Build log: `logs/session2-build.log`.
 - Not yet on the phone: the rotated TextureView and subtitle rendering are Phone Day checks.
 
+## Session 3 — App core: scanner, index, posters, repositories (2026-10-12) ✅
+
+- `logic/LibraryScanner`: finds `Movies/<Collection>/<Title (Year)>/` and
+  `TV/<Show>/<Season>/S01E01.<ext>` (mp4, mkv, m4v, mov, webm). Skips hidden folders/files
+  (`.state`, `.part` sends) and folders with no video. `stamp()` = last-sync.txt + every
+  folder's change time; same stamp = no scan. A rescan re-reads only titles whose folder,
+  video size/time or json changed; removed titles drop out. Same design as Listen's music.
+- `logic/LibraryIndex`: the scan result (saved to the app's own `files/cache/library_index.json`
+  so the library shows instantly on launch; always rebuildable) and `Library`: lookups by id,
+  collections in story order, seasons, episodes.
+- `storage/WatchLibrary`: app-wide `StateFlow<LibraryState>`. `refresh(filesDir)` queues a
+  background check (one at a time); shows the saved index first, sets `updating` while
+  rescanning. Called from `HomeScreen.willShow()` (launch + every return), which now shows
+  "Updating library..." or the movie/show count. No new screens.
+- `storage/PosterCache` (+ pure `logic/PosterMath`): posters decoded downscaled (GRID 240 px,
+  DETAIL 800 px wide), saved as small JPEGs in `files/cache/posters` keyed by path+size+time,
+  16 MB memory LRU, 2 decodes at a time off the main thread, one job per picture. Same as
+  Listen's ArtworkCache. Missing poster = `Poster.Missing` (placeholder letter, Session 4).
+- `logic/Repositories`: `PlaybackRepository` (positions, watched; reaching the end marks
+  watched; Continue Watching ids newest first), `WatchlistRepository`, `SettingsRepository`,
+  each a StateFlow over the `.state` files. Re-read on every refresh (PC Restore is noticed).
+  A failed write keeps the change in memory.
+- Tests: 66 passing (17 new: LibraryScannerTest 8 on a made-up Watch folder,
+  RepositoriesTest 6, PosterMathTest 3). Lint clean. Build log: `logs/session3-build.log`.
+- Phone Day checks: scan time for 325 titles, poster decode speed.
+
 ## Session plan
 
 | # | Session | Done when |

@@ -100,7 +100,11 @@ object MediaJson {
         return Episode(id = "$showId/$code", title = "Episode $episode", season = season, episode = episode)
     }
 
-    /** "Hacksaw Ridge (2016)" -> ("Hacksaw Ridge", 2016); no year -> (name, null). */
+    /** The "file" movie.json names, or null when the json is missing, broken or names none. */
+    fun videoFileName(jsonFile: File): String? =
+        parseOrNull(AtomicFile.readTextOrNull(jsonFile), Movie.serializer())?.file?.takeIf { it.isNotBlank() }
+
+    /** "Hacksaw Ridge (2016)" ->("Hacksaw Ridge", 2016); no year -> (name, null). */
     fun splitTitleYear(name: String): Pair<String, Int?> {
         val trimmed = name.trim()
         val match = titleYear.matchEntire(trimmed) ?: return trimmed to null

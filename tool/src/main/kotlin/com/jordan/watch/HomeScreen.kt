@@ -11,7 +11,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.jordan.watch.storage.LibraryState
+import com.jordan.watch.storage.PosterCache
 import com.jordan.watch.storage.StorageAccess
+import com.jordan.watch.storage.WatchLibrary
 import com.thelightphone.sdk.InitialScreen
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.SimpleLightScreen
@@ -39,11 +42,14 @@ class HomeScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Unit>(
     override fun willShow() {
         super.willShow()
         hasAccess.value = StorageAccess.hasAllFilesAccess()
+        PosterCache.setFilesDir(lightContext.filesDir)
+        WatchLibrary.refresh(lightContext.filesDir)
     }
 
     @Composable
     override fun Content() {
         val access by hasAccess.collectAsState()
+        val library by WatchLibrary.state.collectAsState()
         val colors by LightThemeController.colors.collectAsState()
         LightTheme(colors = colors) {
             Column(modifier = Modifier.fillMaxSize().background(LightThemeTokens.colors.background)) {
@@ -52,16 +58,18 @@ class HomeScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Unit>(
                     modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 2f.gridUnitsAsDp()),
                     contentAlignment = Alignment.Center,
                 ) {
-                    LightText(text = messageFor(access), variant = LightTextVariant.Paragraph)
+                    LightText(text = messageFor(access, library), variant = LightTextVariant.Paragraph)
                 }
             }
         }
     }
 
-    private fun messageFor(access: Boolean?): String = when (access) {
-        null -> ""
-        false -> NO_ACCESS_MESSAGE
-        true -> "Your library will appear here."
+    private fun messageFor(access: Boolean?, state: LibraryState): String = when {
+        access == null -> ""
+        access == false -> NO_ACCESS_MESSAGE
+        state.updating -> "Updating library..."
+        !state.loaded -> ""
+        else -> "${state.library.movies.size} movies, ${state.library.shows.size} shows.\n\nThe library screens arrive next."
     }
 
     private companion object {

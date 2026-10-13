@@ -152,6 +152,20 @@ Check 'damaged explained'  ((Get-PlainExplanation "ffprobe can't read it") -matc
 Check 'every rule reason has plain words' (@((Get-SafeProblems (Probe @((V 'hevc' 3840 2160 'yuv420p10le' 'Main 10'), (A 'dts' 8 'DTS'))) $Back '.mkv') |
     Where-Object { (Get-PlainExplanation $_) -eq $_ }).Count -eq 0)
 
+#--- Session 12: encoder choice and fallback ---------------------------------
+Check 'encoder: blank = fast'              ((Get-EncoderChoice '') -eq 'fast')
+Check 'encoder: MEDIUM (any case) = medium' ((Get-EncoderChoice ' MEDIUM ') -eq 'medium')
+Check 'encoder: unknown word = fast'       ((Get-EncoderChoice 'turbo') -eq 'fast')
+Check 'plan: fast = veryfast then medium'  ((@(Get-EncoderPlan 'fast') -join ',') -eq 'veryfast,medium')
+Check 'plan: medium = medium only'         ((@(Get-EncoderPlan 'medium') -join ',') -eq 'medium')
+Check 'fallback: made + safe = done'       ((Get-FallbackStep $true '' 0 2) -eq 'done')
+Check 'fallback: ffmpeg failed = next'     ((Get-FallbackStep $false 'code 1' 0 2) -eq 'next')
+Check 'fallback: not Watch-safe = next'    ((Get-FallbackStep $true 'hevc picture' 0 2) -eq 'next')
+Check 'fallback: medium failed too = fail' ((Get-FallbackStep $false 'code 1' 1 2) -eq 'fail')
+Check 'fallback: medium only, failed = fail' ((Get-FallbackStep $true 'bad' 0 1) -eq 'fail')
+Check 'speed file: old (no preset) = medium' ((Get-SpeedPreset ([pscustomobject]@{ secPerSec1080 = 2.96 })) -eq 'medium')
+Check 'speed file: preset read'            ((Get-SpeedPreset ([pscustomobject]@{ secPerSec1080 = 1; preset = 'veryfast' })) -eq 'veryfast')
+
 #===========================================================================
 #  End to end, on synthetic files (needs ffmpeg)
 #===========================================================================
@@ -171,7 +185,7 @@ if ($RulesOnly -or -not $ffmpeg) {
     $base = Join-Path ([IO.Path]::GetTempPath()) "wtest-11b-$PID"
     $src = Join-Path $base 'src'; $dry = Join-Path $base 'dry'; $stageDir = Join-Path $base 'staging'; $rep = Join-Path $base 'report'
     $old = @{}
-    foreach ($n in 'WATCH_SOURCES', 'WATCH_DRY_RUN', 'WATCH_STAGING', 'WATCH_REPORT_DIR', 'WATCH_PROBE_CACHE', 'WATCH_ENCODE_SPEED', 'WATCH_BACKUP_DIR') { $old[$n] = [Environment]::GetEnvironmentVariable($n) }
+    foreach ($n in 'WATCH_SOURCES', 'WATCH_DRY_RUN', 'WATCH_STAGING', 'WATCH_REPORT_DIR', 'WATCH_PROBE_CACHE', 'WATCH_ENCODE_SPEED', 'WATCH_BACKUP_DIR', 'WATCH_ENCODER', 'WATCH_TEST_BREAK_FAST') { $old[$n] = [Environment]::GetEnvironmentVariable($n) }
     try {
         Write-Host 'Making synthetic videos (about a minute)...'
         $movies = Join-Path $src 'Movies'; $marvel = Join-Path $src 'Marvel Entertainment'
@@ -329,6 +343,63 @@ if ($RulesOnly -or -not $ffmpeg) {
         Check 'restore (cancel): runs, no error'  ($p6 -notmatch $NoProp -and $p6 -match 'Nothing was changed')
         $p7 = Run 'Watch-Why-Wont-It-Play.ps1' "1`n2`nN`nzeta`n1`nD`n"
         Check 'why one: no missing-property error' ($p7 -notmatch $NoProp -and $p7 -match 'Zeta')
+
+        Write-Host 'Fast encoder (Session 12): default, forced medium, and the fallback'
+        # x264 writes its settings into the file: veryfast = subme=2, medium = subme=7
+        function Get-X264Subme([string]$path) {
+            $m = [regex]::Match([Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($path)), 'subme=(\d+)')
+            if ($m.Success) { return [int]$m.Groups[1].Value }; return -1
+        }
+        function Send-Gamma([string]$tag) {
+            $env:WATCH_DRY_RUN = Join-Path $base "dry-$tag"; $env:WATCH_STAGING = Join-Path $base "stage-$tag"
+            $o = Run 'Watch-Phone-Sync.ps1' "1`ngamma`n1`nD`n1`ny`nQ`n"
+            $v = Join-Path $env:WATCH_DRY_RUN 'Watch\Movies\_Singles\Gamma (2003)\movie.mp4'
+            $safe = $false; $sub = -1
+            if (Test-Path $v) {
+                $fp = (& (Find-Tool 'ffprobe') -v error -print_format json -show_streams -show_format -i $v) -join "`n" | ConvertFrom-Json
+                $safe = -not (Get-SendRefusal $fp (Get-Mp4BoxOrder $v) '.mp4' 65.0)
+                $sub = Get-X264Subme $v
+            }
+            return @{ Out = $o; Safe = $safe; Subme = $sub }
+        }
+        $f1 = Send-Gamma 'fast'
+        Check 'fast: AVI sent with veryfast (subme=2)'   ($f1.Safe -and $f1.Subme -eq 2)
+        Check 'fast: no fallback needed'                 ($f1.Out -notmatch "fast converter didn't work")
+        $env:WATCH_ENCODER = 'medium'
+        $f2 = Send-Gamma 'medium'
+        Check 'WATCH_ENCODER=medium: medium used (subme=7)' ($f2.Safe -and $f2.Subme -eq 7)
+        $env:WATCH_ENCODER = $null
+        $env:WATCH_TEST_BREAK_FAST = '1'
+        $f3 = Send-Gamma 'fallback'
+        Check 'fallback: says the fast converter failed' ($f3.Out -match "fast converter didn't work" -and $f3.Out -match 'slower, proven setting')
+        Check 'fallback: sent anyway, with medium, Watch-safe' ($f3.Safe -and $f3.Subme -eq 7)
+        $env:WATCH_ENCODER = 'medium'
+        $f4 = Send-Gamma 'nofallback'
+        Check 'forced medium ignores the fast-only break' ($f4.Safe -and $f4.Subme -eq 7 -and $f4.Out -notmatch "fast converter didn't work")
+        $env:WATCH_ENCODER = $null; $env:WATCH_TEST_BREAK_FAST = $null
+        $env:WATCH_DRY_RUN = $dry; $env:WATCH_STAGING = $stageDir
+
+        Write-Host 'Subtitles in one pass'
+        $subSrc = Join-Path $base 'subs.mkv'
+        $srt = Join-Path $base 'a.srt'
+        [IO.File]::WriteAllText($srt, "1`r`n00:00:01,000 --> 00:00:03,000`r`nHello`r`n")
+        $sa = @('-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x240:rate=5', '-i', $srt, '-i', $srt, '-i', $srt, '-t', '10',
+                '-map', '0', '-map', '1', '-map', '2', '-map', '3', '-c:v', 'libx264', '-preset', 'ultrafast', '-c:s', 'srt',
+                '-metadata:s:s:0', 'language=eng', '-metadata:s:s:1', 'language=eng', '-metadata:s:s:2', 'language=fre', $subSrc)
+        & $ffmpeg @sa
+        $sb = Join-Path $base 'subs-out'; [void](New-Item -ItemType Directory -Force -Path $sb)
+        $subScript = Join-Path $base 'subs.ps1'
+        # Run Save-Subtitles in its own PowerShell (WatchCommon needs the script folder)
+        Set-Content -LiteralPath $subScript -Value @"
+. '$Scripts\WatchCommon.ps1'
+`$script:Ffmpeg = '$ffmpeg'; `$script:Ffprobe = '$(Find-Tool 'ffprobe')'
+`$r = Test-Media '$subSrc' 'Original'
+`$made = Save-Subtitles `$r '$sb' 'movie'
+(`$made | ForEach-Object { `$_.Name }) -join ','
+"@
+        $subNames = (& powershell -NoProfile -ExecutionPolicy Bypass -File $subScript 2>&1 | Out-String).Trim()
+        Check 'subtitles: 3 tracks saved in one go' (@($subNames.Split(',') | Where-Object { $_ -match '^movie\..+\.srt$' }).Count -eq 3)
+        Check 'subtitles: each file has the text' (@(Get-ChildItem $sb -Filter *.srt | Where-Object { (Get-Content -Raw $_.FullName) -match 'Hello' }).Count -eq 3)
 
         Check 'source folders unchanged (size, time and MD5 of every file)' ((Get-Snapshot) -eq $before)
     } finally {

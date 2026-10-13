@@ -488,3 +488,47 @@ tool code BEFORE any build is installed.
   (picking 2 titles, then un-picking all, then removing one), Remove then No, Backup, Restore (cancel)
   and Why-Wont-It-Play. Backups in the tests now go to a temp folder (WATCH_BACKUP_DIR).
   Without the fix the Remove test fails. Results: 129 + 53 passed; the build passed.
+
+## Session 12 — Faster conversions: libx264 veryfast by default (2026-10-13) ✅
+
+- **This PC:** Ryzen 3 2200U (2 cores / 4 threads, 2.5 GHz), 7.6 GB, plugged in, Balanced plan.
+  Radeon Vega 3, driver 31.0.21925.1001 — **switched off by Windows (Device Manager error 43)**,
+  so every hardware path failed (h264_amf, d3d11va, dxva2, d3d12va, vulkan). ffmpeg 9.0
+  (gyan.dev) lists h264_amf / h264_mf / h264_qsv / h264_nvenc; qsv and nvenc are Intel/NVIDIA only.
+- **Benchmark:** 60 s of Doctor Strange (1080p HEVC Main 10), temp copy only. Speed = x real
+  time; hours = the report's 373 h total scaled by speed; SSIM/PSNR vs the source at 1080p.
+
+  | Option | Speed | Est. hours | Size (60 s) | SSIM / PSNR | Watch-safe |
+  |---|---|---|---|---|---|
+  | x264 medium CRF 20 (old default) | 0.51x | ~373 h | 15.7 MB | 0.9893 / 36.70 | pass |
+  | x264 fast | 0.66x | ~288 h | 16.6 MB | 0.9894 / 36.70 | pass |
+  | x264 faster | 0.82x | ~232 h | 16.3 MB | 0.9894 / 36.69 | pass |
+  | **x264 veryfast CRF 20 (new default)** | **1.42x** | **~134 h** | **13.0 MB** | **0.9889 / 36.65** | **pass** |
+  | x264 veryfast CRF 21 | 1.44x | ~132 h | 11.2 MB | 0.9885 / 36.62 | pass |
+  | x264 superfast | 1.67x | ~114 h | 29.1 MB | 0.9898 / 36.73 | pass |
+  | h264_mf (Windows, processor) | 1.59x | ~120 h | 22.3 MB | 0.9874 / 36.63 | pass |
+  | veryfast 720p | 1.70x | ~112 h | 14.8 MB | 0.9872 / 36.30 | pass |
+  | veryfast -threads 4 | 1.26x | — | same | same | pass |
+  | veryfast, 2 jobs at once | 1.36x overall (1 job 1.27x) | ~7% better | — | — | pass |
+  | AMF / hardware decode | — | — | — | — | failed: GPU off |
+
+  AVI (DivX 656x352): medium 2.25x, veryfast 5.49x. 60 fps clip: 5.55x; capping at 30 fps
+  5.65x (only 14 small H.264 files are above 30 fps — no cap added). Sound-only fixes already
+  copy the picture (`-c:v copy`). HEVC 10-bit decoding costs ~12.6 s per 60 s regardless.
+  Medium vs veryfast: 0.0004 SSIM, 0.05 dB — not visible on a 3.9" screen (numbers only, no
+  still-frame comparison).
+- **Changes:** `WatchCommon.ps1` — `$Encoder` (`WATCH_ENCODER=fast|medium`, default fast);
+  `Invoke-Fix` takes the preset; new `Invoke-FixWithFallback` tries veryfast, and if ffmpeg fails
+  or the result fails the send gate (`Get-WatchSafeRefusal`, split out of `Confirm-WatchSafe`)
+  it tries medium. Send and pre-convert both use it. `Save-Subtitles` saves all text tracks in
+  one ffmpeg pass (30 tracks: 35.7 s → 1.7 s), retrying any missed track on its own.
+  `encode-speed.json` records the preset; a speed measured with another preset is measured
+  again, and a fallback to medium is not mixed into the fast speed. Rules in `LibraryRules.ps1`
+  (`Get-EncoderChoice`, `Get-EncoderPlan`, `Get-FallbackStep`, `Get-SpeedPreset`).
+- **Re-measured:** 1 h of 1080p now ~1 h 19 min (was ~3 h). Library Report: 373 h → **172 h**
+  (Marvel 161 h, Movies 12 h).
+- **Tests:** Test-LibraryTools 149/149 (+12 rule tests; end to end with WATCH_DRY_RUN: default
+  sends with veryfast, WATCH_ENCODER=medium forces medium, a broken fast encoder falls back to
+  medium and still sends Watch-safe, one-pass subtitles for 3 tracks). Test-WatchSafe 53/53.
+  Gradle build + unit tests pass (`logs/session12-build.log`).
+- **Open:** fix the AMD driver (error 43) and then benchmark h264_amf.

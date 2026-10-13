@@ -17,7 +17,41 @@ $SmallVideoKbps = 1850; $SmallAudioKbps = 128; $SmallHeight = 720
 # Speeds for the time estimate
 $CopyBytesPerSec  = 60MB      # remux = read + write on the same disk
 $AudioEncodeSpeed = 150       # media seconds converted per second (AAC is quick)
-$DefaultSecPerSec1080 = 2.5   # until measured: seconds of work per second of 1080p film
+$DefaultSecPerSec1080 = 1.0   # until measured: seconds of work per second of 1080p film (veryfast)
+
+#--- encoder choice (Session 12) --------------------------------------------
+# 'fast'   = libx264 veryfast CRF 20 (default; 2.8x quicker here, same look on the phone)
+# 'medium' = libx264 medium CRF 20 (the old path; also the automatic fallback)
+# Set WATCH_ENCODER=fast or WATCH_ENCODER=medium to force one.
+$EncoderPresets = @{ 'fast' = 'veryfast'; 'medium' = 'medium' }
+
+# The setting in plain form: 'fast' or 'medium'. Anything else (or blank) = 'fast'.
+function Get-EncoderChoice([string]$setting) {
+    $s = "$setting".Trim().ToLowerInvariant()
+    if ($EncoderPresets.ContainsKey($s)) { return $s }
+    return 'fast'
+}
+
+# x264 presets to try, in order. Fast falls back to medium; medium has no fallback.
+function Get-EncoderPlan([string]$choice) {
+    if ((Get-EncoderChoice $choice) -eq 'medium') { return @('medium') }
+    return @('veryfast', 'medium')
+}
+
+# After one try: 'done' (keep it), 'next' (try the next preset) or 'fail' (give up).
+# $made = ffmpeg finished with a file; $refusal = the Watch-safe check's reason, or blank.
+function Get-FallbackStep([bool]$made, [string]$refusal, [int]$attempt, [int]$planCount) {
+    if ($made -and -not $refusal) { return 'done' }
+    if ($attempt + 1 -lt $planCount) { return 'next' }
+    return 'fail'
+}
+
+# The preset a saved speed was measured with (old files without one = medium).
+function Get-SpeedPreset($saved) {
+    $p = Get-P $saved 'preset'
+    if ($p) { return "$p" }
+    return 'medium'
+}
 
 # Status names (also the report's colour key)
 $StatusOk    = 'OK'

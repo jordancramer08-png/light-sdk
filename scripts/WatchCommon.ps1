@@ -45,6 +45,9 @@ $WorkDir  = Join-Path ([IO.Path]::GetTempPath()) "watch-$Stamp"
 $VideoExts   = @('.mp4', '.m4v', '.mkv', '.webm', '.mov', '.avi', '.wmv', '.mpg', '.mpeg', '.ts', '.flv')
 . (Join-Path $PSScriptRoot 'WatchSafe.ps1')     # the Watch-safe rules (CLAUDE.md section 8)
 . (Join-Path $PSScriptRoot 'LibraryRules.ps1')  # report, staging, smoke test, why-won't-it-play rules
+# Picture encoder: 'fast' (libx264 veryfast, default) or 'medium' (the old path). Fast falls back
+# to medium by itself. WATCH_ENCODER=fast / medium forces one (Session 12).
+$Encoder = Get-EncoderChoice $env:WATCH_ENCODER
 # Bitrates for the smaller qualities (picture + sound, kbit/s)
 $Qualities = @{
     'Original' = $null
@@ -618,7 +621,8 @@ function Write-CheckResult($r, [string]$name) {
 }
 
 # Runs ffmpeg for one file. Writes a Watch-safe MP4 into $outDir (always a temp folder). Returns its path.
-function Invoke-Fix($r, [string]$quality, [string]$outDir, [string]$baseName) {
+# $preset = libx264 preset for a picture re-encode ('veryfast' or 'medium').
+function Invoke-Fix($r, [string]$quality, [string]$outDir, [string]$baseName, [string]$preset = 'medium') {
     Assert-SafeTarget $outDir
     if (-not (Test-Path -LiteralPath $outDir)) { [void](New-Item -ItemType Directory -Path $outDir -Force) }
     $out = Join-Path $outDir ($baseName + '.mp4')
@@ -630,7 +634,9 @@ function Invoke-Fix($r, [string]$quality, [string]$outDir, [string]$baseName) {
     if ($r.EncodeVideo) {
         $h = $r.MaxHeight; $w = [int]([math]::Round($h * 16 / 9 / 2) * 2)
         $a += @('-vf', "scale='min($w,iw)':'min($h,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2")
-        $a += @('-c:v', 'libx264', '-preset', 'medium', '-pix_fmt', 'yuv420p', '-profile:v', 'high', '-level:v', '4.1')
+        # Test hook: makes the fast try fail like a real ffmpeg error, so the fallback can be tested
+        $use = $preset; if ($env:WATCH_TEST_BREAK_FAST -and $preset -ne 'medium') { $use = 'no-such-preset' }
+        $a += @('-c:v', 'libx264', '-preset', $use, '-pix_fmt', 'yuv420p', '-profile:v', 'high', '-level:v', '4.1')
         if ($r.Shrink) {
             $q = $Qualities[$quality]
             $a += @('-b:v', "$($q.VideoK)k", '-maxrate', "$([int]($q.VideoK * 1.5))k", '-bufsize', "$($q.VideoK * 2)k")
@@ -659,18 +665,58 @@ function Invoke-Fix($r, [string]$quality, [string]$outDir, [string]$baseName) {
     return $out
 }
 
+# Invoke-Fix with the chosen encoder ($Encoder). A picture re-encode tries the fast preset first;
+# if ffmpeg fails or the result is not Watch-safe it tries again with medium (the old path).
+# Sets $script:LastPreset (for the speed estimate). Returns the finished file's path.
+function Invoke-FixWithFallback($r, [string]$quality, [string]$outDir, [string]$baseName) {
+    $script:LastPreset = $null
+    if (-not $r.EncodeVideo) { return (Invoke-Fix $r $quality $outDir $baseName) }
+    $plan = @(Get-EncoderPlan $Encoder)
+    for ($i = 0; $i -lt $plan.Count; $i++) {
+        $out = $null; $why = $null
+        try { $out = Invoke-Fix $r $quality $outDir $baseName $plan[$i] }
+        catch { $why = "$_" }
+        if ($out) { $why = Get-WatchSafeRefusal $out $r }
+        $step = Get-FallbackStep ([bool]$out) $why $i $plan.Count
+        if ($step -eq 'done') { $script:LastPreset = $plan[$i]; return $out }
+        if ($out -and (Test-Path -LiteralPath $out)) { Remove-Item -LiteralPath $out -Force }
+        if ($step -eq 'fail') { throw "ffmpeg could not make $($r.Path) Watch-safe ($why)" }
+        Write-Warn2 "  The fast converter didn't work ($why)."
+        Write-Warn2 "  Trying again with the slower, proven setting ($($plan[$i + 1]))..."
+    }
+}
+
+# Runs ffmpeg quietly; the caller checks the files it made.
+function Invoke-FfmpegQuiet([string[]]$a) {
+    $old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try { & $script:Ffmpeg @a 2>&1 | Out-Null } finally { $ErrorActionPreference = $old }
+}
+
+function Test-NonEmpty([string]$path) { return ((Test-Path -LiteralPath $path) -and (Get-Item -LiteralPath $path).Length -gt 0) }
+
 # Saves each text subtitle track as <baseName>.<lang>.srt in $outDir. Returns the files made.
+# One ffmpeg pass for all tracks (one pass per track read a big file 30+ times); a track
+# that pass misses is tried again on its own.
 function Save-Subtitles($r, [string]$outDir, [string]$baseName) {
     $made = @()
     $names = Get-SubFileNames $baseName $r.Subs
+    $dests = @(for ($i = 0; $i -lt $r.Subs.Count; $i++) { Join-Path $outDir $names[$i] })
+    $a = @('-hide_banner', '-loglevel', 'error', '-y', '-i', $r.Path)
     for ($i = 0; $i -lt $r.Subs.Count; $i++) {
-        $dest = Join-Path $outDir $names[$i]
-        Assert-SafeTarget $dest
-        $a = @('-hide_banner', '-loglevel', 'error', '-y', '-i', $r.Path, '-map', "0:$(Get-Prop $r.Subs[$i] 'index')", '-c:s', 'srt', $dest)
-        $old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-        try { & $script:Ffmpeg @a 2>&1 | Out-Null; $ok = ($LASTEXITCODE -eq 0) } finally { $ErrorActionPreference = $old }
-        if ($ok -and (Test-Path -LiteralPath $dest) -and (Get-Item -LiteralPath $dest).Length -gt 0) { $made += Get-Item -LiteralPath $dest }
-        else { Write-Note "  Note: subtitle track $($i + 1) could not be saved as .srt; left out." }
+        Assert-SafeTarget $dests[$i]
+        $a += @('-map', "0:$(Get-Prop $r.Subs[$i] 'index')", '-c:s', 'srt', $dests[$i])
+    }
+    Invoke-FfmpegQuiet $a
+    for ($i = 0; $i -lt $r.Subs.Count; $i++) {
+        $dest = $dests[$i]
+        if (-not (Test-NonEmpty $dest)) {
+            Invoke-FfmpegQuiet @('-hide_banner', '-loglevel', 'error', '-y', '-i', $r.Path, '-map', "0:$(Get-Prop $r.Subs[$i] 'index')", '-c:s', 'srt', $dest)
+        }
+        if (Test-NonEmpty $dest) { $made += Get-Item -LiteralPath $dest }
+        else {
+            if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Force }
+            Write-Note "  Note: subtitle track $($i + 1) could not be saved as .srt; left out."
+        }
     }
     return ,$made
 }
@@ -698,7 +744,8 @@ function Get-PlayLength([string]$path, [double]$formatDur) {
     return $formatDur
 }
 
-function Confirm-WatchSafe([string]$path, $r) {
+# Why a finished file must not be sent (the ffprobe send gate), or $null when it is fine.
+function Get-WatchSafeRefusal([string]$path, $r) {
     $p = Get-Probe $path
     $ext = [IO.Path]::GetExtension($path).ToLowerInvariant()
     $boxes = @(); if ($p -and $ext -eq '.mp4') { $boxes = Get-Mp4BoxOrder $path }
@@ -708,7 +755,13 @@ function Confirm-WatchSafe([string]$path, $r) {
         $playLen = Get-PlayLength $r.Path $r.Duration
         if ($playLen -ne $r.Duration) { $why = Get-SendRefusal $p $boxes $ext $playLen }
     }
+    return $why
+}
+
+function Confirm-WatchSafe([string]$path, $r) {
+    $why = Get-WatchSafeRefusal $path $r
     if ($why) { throw "NOT SENT - $why." }
+    $p = Get-Probe $path
     $st = Split-Streams $p
     $v = $st.Videos[0]
     $r.VideoCodec = Get-Prop $v 'codec_name'; $r.Width = Get-Prop $v 'width'; $r.Height = Get-Prop $v 'height'
@@ -1214,7 +1267,7 @@ function Prepare-File($file, [string]$stage, [string]$baseName, [string]$phoneDi
     if ($r.NeedsWork) {
         foreach ($a in $r.Actions) { Write-Host "  Fixing: $a" }
         if ($r.EncodeVideo) { Write-Note ('  Re-encoding takes a while (roughly as long as the film on a fast PC).') }
-        $out = Invoke-Fix $r $script:Quality $stage $baseName
+        $out = Invoke-FixWithFallback $r $script:Quality $stage $baseName
     } else { Write-Note '  Already Watch-safe: sent untouched.' }
     Confirm-WatchSafe $out $r
     return @{ Path = $out; Result = $r; Poster = $poster; Subs = $subs }
@@ -1444,24 +1497,34 @@ function Invoke-ProbeMany($files, [scriptblock]$OnEach = $null) {
 # region  ENCODE SPEED  (how fast this PC re-encodes; for time estimates)
 #---------------------------------------------------------------------------
 
+# The x264 preset a full convert tries first with today's setting ('veryfast' or 'medium').
+function Get-CurrentPreset { return @(Get-EncoderPlan $Encoder)[0] }
+
 # Seconds of work per second of 1080p film, or $null when not measured yet.
+# A speed measured with another preset doesn't count, so a new encoder is measured again.
 function Get-EncodeSpeed {
     if ($env:WATCH_ENCODE_SPEED) { return [double]$env:WATCH_ENCODE_SPEED }
     if (-not (Test-Path -LiteralPath $SpeedFile)) { return $null }
-    try { return [double](([IO.File]::ReadAllText($SpeedFile) | ConvertFrom-Json).secPerSec1080) } catch { return $null }
+    try {
+        $saved = [IO.File]::ReadAllText($SpeedFile) | ConvertFrom-Json
+        if ((Get-SpeedPreset $saved) -ne (Get-CurrentPreset)) { return $null }
+        return [double]$saved.secPerSec1080
+    } catch { return $null }
 }
 
 function Save-EncodeSpeed([double]$value, [string]$from) {
     if ($env:WATCH_ENCODE_SPEED) { return }
-    $o = [ordered]@{ secPerSec1080 = [math]::Round($value, 3); from = $from; at = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss') }
+    $o = [ordered]@{ secPerSec1080 = [math]::Round($value, 3); preset = (Get-CurrentPreset); from = $from; at = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss') }
     $dir = Split-Path -Parent $SpeedFile
     if (-not (Test-Path -LiteralPath $dir)) { [void](New-Item -ItemType Directory -Path $dir -Force) }
     [IO.File]::WriteAllText($SpeedFile, ($o | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
 }
 
-# After a real re-encode: fold the real speed into the saved one.
-function Update-EncodeSpeed([double]$elapsed, [double]$duration, [int]$w, [int]$h) {
+# After a real re-encode: fold the real speed into the saved one. $preset = what made the file;
+# a fallback to medium is not mixed into the fast speed.
+function Update-EncodeSpeed([double]$elapsed, [double]$duration, [int]$w, [int]$h, [string]$preset) {
     if ($duration -lt 30 -or $w -le 0) { return }
+    if ($preset -and $preset -ne (Get-CurrentPreset)) { return }
     $fit = Get-FitSize $w $h $SafeMaxWidth $SafeMaxHeight
     $px = [math]::Max(0.15, ($fit[0] * $fit[1]) / (1920.0 * 1080.0))
     $measured = $elapsed / $duration / $px
@@ -1487,7 +1550,7 @@ function Get-EncodeSpeedOrMeasure([string]$sample) {
     } else {
         $a += @('-f', 'lavfi', '-i', 'testsrc2=size=1920x1080:rate=24', '-t', '20')
     }
-    $a += @('-vf', $vf, '-c:v', 'libx264', '-preset', 'medium', '-pix_fmt', 'yuv420p', '-crf', '20', '-an', '-f', 'null', 'NUL')
+    $a += @('-vf', $vf, '-c:v', 'libx264', '-preset', (Get-CurrentPreset), '-pix_fmt', 'yuv420p', '-crf', '20', '-an', '-f', 'null', 'NUL')
     $watch = [Diagnostics.Stopwatch]::StartNew()
     $old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
     try { & $script:Ffmpeg @a 2>&1 | Out-Null } finally { $ErrorActionPreference = $old }
@@ -1552,7 +1615,7 @@ function Invoke-StageFile($file, [string]$phoneDir, [string]$baseName, [string]$
     if ($r.Cover -and (Save-Cover $r (Join-Path $work "$baseName.poster.jpg"))) { $poster = "$baseName.poster.jpg" }
     $subs = @(); if ($r.Subs.Count -gt 0) { $subs = @(Save-Subtitles $r $work $baseName) }
     $srcW = [int]$r.Width; $srcH = [int]$r.Height
-    $out = Invoke-Fix $r $quality $work $baseName
+    $out = Invoke-FixWithFallback $r $quality $work $baseName
     Confirm-WatchSafe $out $r
     foreach ($f in @(Get-ChildItem -LiteralPath $work -File)) {
         Move-Item -LiteralPath $f.FullName -Destination (Join-Path $dir $f.Name) -Force
@@ -1565,7 +1628,7 @@ function Invoke-StageFile($file, [string]$phoneDir, [string]$baseName, [string]$
         stagedAt = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss') }
     Write-Utf8 "$mf.tmp" ($m | ConvertTo-Json)
     Move-Item -LiteralPath "$mf.tmp" -Destination $mf -Force
-    if ($r.EncodeVideo -and -not $r.Shrink) { Update-EncodeSpeed $watch.Elapsed.TotalSeconds $r.Duration $srcW $srcH }
+    if ($r.EncodeVideo -and -not $r.Shrink) { Update-EncodeSpeed $watch.Elapsed.TotalSeconds $r.Duration $srcW $srcH $script:LastPreset }
     $bytes = [double]$vb; foreach ($s in $subs) { $bytes += $s.Length }
     return @{ What = 'staged'; Bytes = $bytes }
 }

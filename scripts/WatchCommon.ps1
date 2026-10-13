@@ -1132,8 +1132,13 @@ function Select-Titles($items, $info, [string]$heading = 'Pick what goes to the 
         if ($null -eq $targets) { $filter = $ans; continue }
         foreach ($it in $targets) {
             if ($it.Selected -and $ans -ine 'A') { $it.Selected = $false; continue }
-            $twin = @($items | Where-Object { $_.Selected -and $_.DupKey -eq $it.DupKey -and $_ -ne $it }) | Select-Object -First 1
-            if ($useCap -and $twin) {
+            # Duplicate check is for sending only; Remove-list items have no DupKey.
+            $twin = $null
+            $key = Get-Prop $it 'DupKey'
+            if ($useCap -and $key) {
+                $twin = @($items | Where-Object { $_.Selected -and (Get-Prop $_ 'DupKey') -eq $key -and $_ -ne $it }) | Select-Object -First 1
+            }
+            if ($twin) {
                 Write-Bad ("  Not picked: {0} - the same title is already picked from {1}." -f $it.Label, $twin.Source)
                 continue
             }

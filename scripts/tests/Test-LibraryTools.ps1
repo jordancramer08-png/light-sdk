@@ -171,7 +171,7 @@ if ($RulesOnly -or -not $ffmpeg) {
     $base = Join-Path ([IO.Path]::GetTempPath()) "wtest-11b-$PID"
     $src = Join-Path $base 'src'; $dry = Join-Path $base 'dry'; $stageDir = Join-Path $base 'staging'; $rep = Join-Path $base 'report'
     $old = @{}
-    foreach ($n in 'WATCH_SOURCES', 'WATCH_DRY_RUN', 'WATCH_STAGING', 'WATCH_REPORT_DIR', 'WATCH_PROBE_CACHE', 'WATCH_ENCODE_SPEED') { $old[$n] = [Environment]::GetEnvironmentVariable($n) }
+    foreach ($n in 'WATCH_SOURCES', 'WATCH_DRY_RUN', 'WATCH_STAGING', 'WATCH_REPORT_DIR', 'WATCH_PROBE_CACHE', 'WATCH_ENCODE_SPEED', 'WATCH_BACKUP_DIR') { $old[$n] = [Environment]::GetEnvironmentVariable($n) }
     try {
         Write-Host 'Making synthetic videos (about a minute)...'
         $movies = Join-Path $src 'Movies'; $marvel = Join-Path $src 'Marvel Entertainment'
@@ -201,6 +201,7 @@ if ($RulesOnly -or -not $ffmpeg) {
         $env:WATCH_ENCODE_SPEED = '2.0'
         $env:WATCH_STAGING = $stageDir
         $env:WATCH_DRY_RUN = $dry
+        $env:WATCH_BACKUP_DIR = Join-Path $base 'backups'
         function Run([string]$script, [string]$typed, [string[]]$more = @()) {
             $ErrorActionPreference = 'Continue'
             $out = ($typed | powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Scripts $script) @more 2>&1 | Out-String)
@@ -305,6 +306,29 @@ if ($RulesOnly -or -not $ffmpeg) {
         Check 'why: safe title not on phone -> offers to send' ($w3 -match 'Watch-safe' -and $w3 -match 'not on the phone')
         $w4 = Run 'Watch-Why-Wont-It-Play.ps1' "broken`n1`nD`n"
         Check 'why: damaged file explained, no fix offered' ($w4 -match 'damaged' -and $w4 -match 'cannot be fixed')
+
+        # Session 11c: every menu that uses Select-Titles, picking ONE item by number
+        $NoProp = 'cannot be found on this object|PropertyNotFound'
+        Write-Host 'Pick one item in each menu (Session 11c)'
+        $p1 = Run 'Watch-Phone-Sync.ps1' "1`nzeta`n1`nD`n1`ny`nQ`n"
+        Check 'send one: no missing-property error' ($p1 -notmatch $NoProp)
+        Check 'send one: Zeta sent'               (Test-Path (Join-Path $dry 'Watch\Movies\_Singles\Zeta (2006)\movie.mp4'))
+        $p2 = Run 'Watch-Phone-Sync.ps1' "6`ndelta`n1`nD`n1`nQ`n"
+        Check 'pre-convert one: no missing-property error' ($p2 -notmatch $NoProp)
+        Check 'pre-convert one: Delta already staged' ($p2 -match 'already pre-converted')
+        # pick 1, then 2 (a second pick runs the duplicate check), un-pick all, then pick Beta only
+        $p3 = Run 'Watch-Phone-Sync.ps1' "2`n1`n2`nN`nbeta`n1`nD`ny`nQ`n"
+        Check 'remove one: no missing-property error' ($p3 -notmatch $NoProp)
+        Check 'remove one: Beta gone from the phone' (-not (Test-Path (Join-Path $dry 'Watch\Movies\_Singles\Beta (2002)')))
+        Check 'remove one: Zeta still there'      (Test-Path (Join-Path $dry 'Watch\Movies\_Singles\Zeta (2006)\movie.mp4'))
+        $p4 = Run 'Watch-Phone-Sync.ps1' "2`n1`nD`nn`nQ`n"
+        Check 'remove one, then No: nothing changed' ($p4 -notmatch $NoProp -and $p4 -match 'Nothing was changed' -and (Test-Path (Join-Path $dry 'Watch\Movies\_Singles\Zeta (2006)\movie.mp4')))
+        $p5 = Run 'Watch-Phone-Sync.ps1' "3`nQ`n"
+        Check 'backup: runs, no error'            ($p5 -notmatch $NoProp -and $p5 -match 'Backing up')
+        $p6 = Run 'Watch-Phone-Sync.ps1' "4`n`nQ`n"
+        Check 'restore (cancel): runs, no error'  ($p6 -notmatch $NoProp -and $p6 -match 'Nothing was changed')
+        $p7 = Run 'Watch-Why-Wont-It-Play.ps1' "1`n2`nN`nzeta`n1`nD`n"
+        Check 'why one: no missing-property error' ($p7 -notmatch $NoProp -and $p7 -match 'Zeta')
 
         Check 'source folders unchanged (size, time and MD5 of every file)' ((Get-Snapshot) -eq $before)
     } finally {

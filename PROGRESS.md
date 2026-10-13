@@ -474,3 +474,17 @@ tool code BEFORE any build is installed.
   Test-WatchSafe 53/53. Gradle build + unit tests pass (`logs/session11b-build.log`).
 - **Not done here (needs the phone):** real smoke test send and the on-phone checklist; Why
   against the real phone (`ls -l` format on LightOS); an overnight staging run on real titles.
+
+## Session 11c — Fix: Remove from phone stopped on "DupKey" (2026-10-12) ✅
+
+- Bug: in Watch-Phone-Sync option 2 (Remove), picking a second title stopped the script with
+  "The property 'DupKey' cannot be found on this object" (Select-Titles in WatchCommon.ps1).
+  Phone-list items have no DupKey, and strict mode refuses a missing property.
+- Fix: the duplicate check now runs only when sending (`$useCap`), and reads DupKey with
+  `Get-Prop`, so a missing property can never stop the script.
+- Checked every caller of Select-Titles: Send, Pre-convert, Remove, Why-Wont-It-Play. Only Remove
+  lacked DupKey. Backup, Restore and the Smoke Test don't use Select-Titles.
+- Tests (Test-LibraryTools.ps1, WATCH_DRY_RUN): a one-title pick in Send, Pre-convert, Remove
+  (picking 2 titles, then un-picking all, then removing one), Remove then No, Backup, Restore (cancel)
+  and Why-Wont-It-Play. Backups in the tests now go to a temp folder (WATCH_BACKUP_DIR).
+  Without the fix the Remove test fails. Results: 129 + 53 passed; the build passed.

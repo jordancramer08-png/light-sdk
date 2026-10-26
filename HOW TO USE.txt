@@ -1,0 +1,146 @@
+LISTEN (Light Phone 3) - HOW TO USE THE DOUBLE-CLICK FILES
+=========================================================
+Written 26 October 2026. You only need File Explorer and your phone's USB cable.
+
+HOW TO OPEN A .CMD FILE
+  1. Open File Explorer.
+  2. Go to the folder named below (most are in Documents\listen).
+  3. Double-click the file.
+  A black window opens. Read what it says. When it ends it says
+  "Press any key to continue". Press any key and the window closes.
+
+BEFORE ANYTHING THAT USES THE PHONE
+  1. Plug the Light Phone into the PC with its USB cable.
+  2. Unlock the phone.
+  3. If the phone asks "Allow USB debugging?", tap Allow.
+  Unplug the tablet first.
+
+IF A WINDOW SHOWS AN ERROR
+  - Red lines say what went wrong in plain words. Do what they say,
+    then double-click the file again.
+  - "MISSING: ..." means a program is not on this PC. The line says
+    which one and how to get it.
+  - "No phone found" / "No device is connected": plug in and unlock the
+    phone, then try again.
+  - Every run writes a log in Documents\listen\logs. The window shows its
+    name on the last lines.
+
+
+-------------------------------------------------------------------------
+FILES AT THE TOP OF THE listen FOLDER
+-------------------------------------------------------------------------
+
+Back Up Phone Data.cmd
+  What: copies Listen's data off the phone: playlists, listening positions,
+        played marks, your podcast list and settings (the folder
+        /sdcard/Listen/.state). It does NOT copy the songs and audiobooks;
+        those are copies of D:\Music and D:\Reading\Audio Books.
+        It only reads from the phone. Listen is closed while it copies.
+  When: before installing an update, and now and then to be safe.
+  Steps:
+    1. Plug in and unlock the phone.
+    2. Double-click "Back Up Phone Data.cmd".
+    3. Wait for "Backup saved in: ...". Press any key.
+  The backup goes to Documents\App Backups\Listen\<date and time>.
+
+Restore Phone Data.cmd
+  What: puts one of those backups back. It first makes a fresh backup of
+        what the phone has now, so it can be undone.
+  When: if your playlists or positions are lost.
+  Steps:
+    1. Plug in and unlock the phone.
+    2. Double-click "Restore Phone Data.cmd".
+    3. Type the number of the backup you want and press Enter
+       (just Enter = 1, the newest).
+    4. Type YES (capitals) and press Enter.
+    5. Wait for "Done". Open Listen on the phone and check.
+
+Install on Phone.cmd
+  What: installs the APK saved in the releases folder as an UPDATE (your
+        data is kept; it never uninstalls). Then it switches on "All files
+        access" for Listen, which Listen needs to see its music.
+  When: if Listen is missing or broken, or after "Rebuild App.cmd".
+  Steps:
+    1. Run "Back Up Phone Data.cmd" first.
+    2. Plug in and unlock the phone.
+    3. Double-click "Install on Phone.cmd".
+    4. Check the version it shows. Type YES (capitals) and press Enter.
+    5. When it asks to restart the phone, type Y and press Enter.
+       (The Light Phone only shows a new or updated app after a restart.)
+  If it says "DIFFERENT KEY": stop. Do NOT uninstall Listen (that erases
+  your data). Keep the log.
+
+Rebuild App.cmd
+  What: builds Listen from the code on this PC and saves the new APK in
+        releases with today's date. Never installs. Warns you if the new
+        APK has a different signing key than the app on your phone.
+  When: only if the saved APK is lost or damaged. Needs internet the first
+        time. Takes several minutes.
+  Steps:
+    1. (Optional) plug in the phone, so it can compare keys with the app.
+    2. Double-click "Rebuild App.cmd".
+    3. Wait. At the end look for "Saved:" and "Same key as ...".
+    4. Press any key.
+
+Any of these four can be tried without changing anything: in a Command
+Prompt in the listen folder, type for example:   "Install on Phone.cmd" /preview
+
+
+-------------------------------------------------------------------------
+THE TOOLS YOU ALREADY HAD
+-------------------------------------------------------------------------
+
+D:\Music\Listen-Phone-Sync.cmd      (it lives in D:\Music, not in Documents)
+  What: adds and removes music and audiobooks on the phone. Files are copied
+        exactly as they are. It also backs up and restores playlists and
+        positions (to D:\Music\_Listen Backups), and can switch on All files
+        access. Nothing in your music folders is changed, except the
+        audiobook titles list if you edit it (option 5).
+  When: whenever you want to change what music or audiobooks are on the phone.
+  Steps:
+    1. Plug in the D: drive. Plug in and unlock the phone.
+    2. In File Explorer open D:\Music.
+    3. Double-click "Listen-Phone-Sync.cmd".
+    4. A menu appears. Type a number and press Enter:
+         1 add music          2 remove music
+         3 add audiobooks     4 remove audiobooks
+         5 edit audiobook titles / series / narrators
+         6 show what's on the phone
+         7 back up playlists + positions    8 restore them
+         9 give Listen access to its files (after a fresh install)
+         Q quit
+    5. Follow the questions. Type Q and press Enter when you are done.
+  Errors: "No phone found" = plug in and unlock, then answer Y to
+  "Try again?". The log is in Documents\listen\logs.
+  A spare copy of this tool is in Documents\listen\tools\pc-sync-copy.
+  If the one in D:\Music is ever lost, copy the spare back to D:\Music.
+
+scripts\Podcasts.cmd
+  What: finds and follows podcasts (Apple's podcast directory, no login),
+        imports a list from another podcast app, and syncs your follow list
+        with the phone. It also backs up and restores podcast data.
+  When: when you want to follow or unfollow a show.
+  Steps:
+    1. Double-click "Podcasts.cmd" in Documents\listen\scripts.
+    2. A menu appears. Type a number and press Enter:
+         1 search and follow    2 import an OPML file
+         3 add a feed address   4 list / unfollow
+         5 sync with the phone (plug the phone in first)
+         6 back up / restore podcast data
+         Q quit
+  Errors: if a search fails, check the internet connection and try again.
+
+scripts\Build and Install Listen.cmd
+  What: the older all-in-one tool: builds Listen, installs it and offers
+        to restart. It does not check which device is plugged in. Prefer
+        "Rebuild App.cmd" then "Install on Phone.cmd".
+  Steps:
+    1. Back up first.
+    2. Plug in only the phone, unlocked.
+    3. Double-click it. Wait several minutes.
+    4. When asked "Reboot the phone now", press Y.
+
+The "Claude outputs" folder holds old one-time setup files for Faith and a
+planned "Go" app. Faith is already set up and Go was never made. Don't use them.
+
+Listen uses no passwords or keys that can expire.

@@ -89,3 +89,6 @@ releases/*.apk
 
 ### Leftover setup files for Faith and the dropped Go app (kept on this PC only) ###
 Claude outputs/
+
+### Hand-off kit logs (stay on this PC) ###
+logs/

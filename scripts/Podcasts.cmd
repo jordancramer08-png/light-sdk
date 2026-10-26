@@ -8,12 +8,19 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$t=[IO.File]::ReadAllText($env:ABS_SELF); $m=[char]35+'BEGIN-POWERSHELL'+[char]35; $i=$t.IndexOf($m); if($i -lt 0){Write-Host 'Script body not found.' -ForegroundColor Red; exit 1}; Invoke-Expression $t.Substring($i)"
+rem Hand-off kit: keep a copy of everything shown in a log file.
+set "LOGDIR=%~dp0..\logs"
+if not exist "%LOGDIR%" mkdir "%LOGDIR%"
+for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set "STAMP=%%i"
+set "KIT_LOG=%LOGDIR%\podcasts-%STAMP%.log"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Transcript -LiteralPath $env:KIT_LOG | Out-Null; try { $t=[IO.File]::ReadAllText($env:ABS_SELF); $m=[char]35+'BEGIN-POWERSHELL'+[char]35; $i=$t.IndexOf($m); if($i -lt 0){Write-Host 'Script body not found.' -ForegroundColor Red; exit 1}; Invoke-Expression $t.Substring($i) } finally { Stop-Transcript | Out-Null }"
 if errorlevel 1 (
   echo.
   echo The script ended with an error.
-  pause
 )
+echo.
+echo Log: %KIT_LOG%
+pause
 endlocal
 exit /b
 #BEGIN-POWERSHELL#

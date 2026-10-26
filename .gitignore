@@ -63,3 +63,29 @@ __pycache__/
 
 ### Converted scripture text — copyrighted content, never committed (CLAUDE.md section 7) ###
 /bible/
+### Safety net (2026-10-26): keys, secrets and copyrighted media never go to GitHub ###
+.env
+.env.*
+*.env
+keys.properties
+*.jks
+*.keystore
+*.p12
+private/
+*.epub
+*.cbz
+*.cbr
+*.pdf
+*.mp4
+*.mkv
+*.avi
+*.m4v
+*.m4a
+*.m4b
+*.mp3
+*.flac
+*.apk
+releases/*.apk
+
+### Leftover setup files for Faith and the dropped Go app (kept on this PC only) ###
+Claude outputs/

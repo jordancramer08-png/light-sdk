@@ -1,0 +1,155 @@
+WATCH (Light Phone 3) - HOW TO USE THE DOUBLE-CLICK FILES
+========================================================
+Written 26 October 2026. You only need File Explorer and your phone's USB cable.
+
+HOW TO OPEN A .CMD FILE
+  1. Open File Explorer.
+  2. Go to Documents, then lp3-watch (and then scripts, for the tools
+     marked "scripts\").
+  3. Double-click the file.
+  A black window opens. Read what it says. When it ends it says
+  "Press any key to continue". Press any key and the window closes.
+
+BEFORE ANYTHING THAT USES THE PHONE
+  1. Plug the Light Phone into the PC with its USB cable.
+  2. Unlock the phone.
+  3. If the phone asks "Allow USB debugging?", tap Allow.
+  Unplug the tablet first.
+
+IF A WINDOW SHOWS AN ERROR
+  - Red lines say what went wrong in plain words. Do what they say, then
+    double-click the file again.
+  - "MISSING: ..." or "ffmpeg is not installed" means a program is not on
+    this PC. The line says how to get it.
+  - "No phone": plug in and unlock the phone, then try again.
+  - Every run writes a log in Documents\lp3-watch\logs. The window shows
+    its name on the last lines.
+  - Your movie folders (D:\Movies, D:\TV, D:\Marvel Entertainment) are never
+    changed by any of these tools. Converting happens on copies.
+
+
+-------------------------------------------------------------------------
+FILES AT THE TOP OF THE lp3-watch FOLDER
+-------------------------------------------------------------------------
+
+Back Up Phone Data.cmd
+  What: copies Watch's saved places, watched marks, watchlist and settings
+        (/sdcard/Watch/.state) and the app's own files off the phone.
+        Not the videos: those are copies of your D: folders.
+        It only reads from the phone. Watch is closed while it copies.
+  When: before installing an update, and now and then to be safe.
+  Steps:
+    1. Plug in and unlock the phone.
+    2. Double-click "Back Up Phone Data.cmd".
+    3. Wait for "Backup saved in: ...". Press any key.
+  The backup goes to Documents\App Backups\Watch\<date and time>.
+
+Restore Phone Data.cmd
+  What: puts one of those backups back. It first makes a fresh backup of
+        what the phone has now, so it can be undone.
+  Steps:
+    1. Plug in and unlock the phone.
+    2. Double-click "Restore Phone Data.cmd".
+    3. Type the number of the backup you want and press Enter
+       (just Enter = 1, the newest).
+    4. Type YES (capitals) and press Enter.
+    5. Wait for "Done". Open Watch on the phone and check.
+
+Install on Phone.cmd
+  What: installs the APK saved in the releases folder as an UPDATE (your
+        data is kept; it never uninstalls). Then it switches on "All files
+        access" so Watch can see its videos.
+  When: if Watch is missing or broken, or after "Rebuild App.cmd".
+  Steps:
+    1. Back up first.
+    2. Plug in and unlock the phone.
+    3. Double-click "Install on Phone.cmd".
+    4. Check the version it shows. Type YES (capitals) and press Enter.
+    5. When it asks to restart the phone, type Y and press Enter.
+  If it says "DIFFERENT KEY": stop. Do NOT uninstall (that erases your
+  data). Keep the log.
+
+Rebuild App.cmd
+  What: builds Watch from the code on this PC and saves the new APK in
+        releases with today's date. Never installs. Warns you if the new APK
+        has a different signing key than the app on your phone.
+  When: only if the saved APK is lost or damaged. Needs internet the first
+        time. Takes several minutes.
+  Steps:
+    1. (Optional) plug in the phone, so it can compare keys with the app.
+    2. Double-click "Rebuild App.cmd".
+    3. Wait. At the end look for "Saved:" and "Same key as ...".
+
+Renew TMDB Key.cmd
+  What: Watch-Phone-Sync gets posters and movie details from TMDB, using a
+        free key saved in private\tmdb-key.txt. If TMDB ever cancels that
+        key, titles still send, just without posters and details. This tests
+        your key and lets you paste a new one. It only saves a key TMDB
+        accepts, and keeps the old one.
+  When: Watch-Phone-Sync says "No TMDB key", or posters stop appearing.
+  To only test your key: open a Command Prompt here and type
+        "Renew TMDB Key.cmd" /check
+  Steps to get and save a new key:
+    1. In your browser go to www.themoviedb.org and sign in.
+    2. Click your picture (top right), then Settings, then API.
+    3. Copy the "API Key" (the short one).
+    4. Double-click "Renew TMDB Key.cmd".
+    5. Right-click in the window to paste the key (it is not shown), then
+       press Enter.
+    6. Wait for "Saved. TMDB accepted the new key."
+    7. Copy private\tmdb-key.txt to Documents\HANDOFF\keys (rename it
+       watch_tmdb-key.txt) and to your USB stick.
+
+Any of the four kit files can be tried without changing anything: in a
+Command Prompt in this folder, type for example:   "Install on Phone.cmd" /preview
+
+
+-------------------------------------------------------------------------
+FILES IN lp3-watch\scripts (the tools you already had)
+-------------------------------------------------------------------------
+
+Watch-Phone-Sync.cmd
+  What: the main tool. Picks titles from D:\Movies, D:\Marvel Entertainment
+        and D:\TV, makes copies the phone can play (converting with ffmpeg
+        when needed), adds TMDB posters, and sends them. Keeps to a 50 GB cap.
+  Steps:
+    1. Plug in the D: drive. Plug in and unlock the phone.
+    2. Double-click "Watch-Phone-Sync.cmd".
+    3. Type a number and press Enter:
+         1 Send titles to the phone      2 Remove titles from the phone
+         3 Back up saved places          4 Restore saved places
+         5 Give Watch access to its files (after a fresh install)
+         6 Pre-convert titles on this PC (no phone needed)
+         Q Quit
+    4. Follow the questions. Type Q and press Enter when done.
+  With no phone it offers to pre-convert (option 6) instead; answer N to stop.
+  Its own backups (option 3) go to Documents\Watch-Backups.
+
+Watch-Library-Report.cmd
+  What: a read-only report of your whole video library: which titles are
+        ready for the phone, which need fixing, sizes and times. Opens in
+        your browser (saved in phone_day\library-report.html).
+  Steps: plug in the D: drive, double-click, wait, the report opens.
+
+Watch-Why-Wont-It-Play.cmd
+  What: checks one title that won't play: the original file and the copy
+        on the phone. Says what is wrong and, if you agree, fixes and resends.
+  Steps:
+    1. Plug in the D: drive (and the phone, to check the phone's copy).
+    2. Double-click it.
+    3. Type words from the title to search, type its number to pick it,
+       then D and Enter. (Q quits.)
+    4. Answer the questions.
+
+Watch-Smoke-Test.cmd
+  What: a test: cuts 20-second clips of 7 kinds of file, converts them and
+        sends them to the phone, then prints a checklist to try on the phone.
+  When: after changing anything, to check playback quickly.
+  Steps: plug in the D: drive and the phone, double-click, then follow the
+        checklist (also saved as phone_day\smoke-test.txt).
+
+The .ps1 files in scripts are the engines behind these. Don't run them
+directly. scripts\tests holds their tests.
+
+Known open issue: converting with the AMD graphics card fails (driver
+error 43), so conversions use the processor and are slower. That's fine.

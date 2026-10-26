@@ -165,8 +165,11 @@ function Invoke-Backup([string]$label = '') {
     [void](Adb shell am force-stop $Pkg)
 
     # 1) the app's private storage (works because these are debug builds)
-    $probe = (Adb shell run-as $Pkg id) -join ' '
-    if ($probe -match 'not debuggable|unknown package|run-as:') {
+    # PrivateData = $false in app.psd1: everything worth keeping is in shared storage.
+    $probe = if ($Cfg.PrivateData -eq $false) { '' } else { (Adb shell run-as $Pkg id) -join ' ' }
+    if ($Cfg.PrivateData -eq $false) {
+        Say "  App-private storage skipped: $($Cfg.AppName) keeps your data in shared storage."
+    } elseif ($probe -match 'not debuggable|unknown package|run-as:') {
         Bad "  The device will not let this PC read the app's private data ($probe)."
     } else {
         $files = Adb shell run-as $Pkg find . -type f | ForEach-Object { $_.Trim() } | Where-Object { $_ -like './*' }
@@ -362,7 +365,10 @@ switch ($Action) {
     'install' { Invoke-Install }
     'backup'  {
         Step "Back up $($Cfg.AppName) data from the $($Cfg.Device)"
-        Say "  Copies: the app's private storage$(if (@($Cfg.SharedDirs) -join '') { ' and ' + (@($Cfg.SharedDirs) -join ', ') })"
+        $what = @()
+        if ($Cfg.PrivateData -ne $false) { $what += "the app's private storage" }
+        $what += @($Cfg.SharedDirs | Where-Object { $_ })
+        Say "  Copies: $($what -join ' and ')"
         Say "  To:     $BackupRoot\<date and time>"
         Say '  It only reads from the device.'
         if ($Preview) { Say 'PREVIEW: stopping here.'; break }

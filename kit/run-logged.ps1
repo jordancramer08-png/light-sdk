@@ -35,7 +35,10 @@ if ($missing) {
 }
 Start-Transcript -LiteralPath $Log | Out-Null
 try {
-    & $Script @Rest
+    # "-Name" words become switches for the tool; everything else (dropped files) stays as is.
+    $named = @{}; $plain = @()
+    foreach ($a in @($Rest)) { if ("$a" -match '^-(\w+)$') { $named[$Matches[1]] = $true } elseif ($null -ne $a) { $plain += $a } }
+    & $Script @named @plain
     $code = $LASTEXITCODE
 } finally {
     Stop-Transcript | Out-Null

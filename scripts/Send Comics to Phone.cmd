@@ -6,6 +6,8 @@ rem                   (tip: filter on a folder name, then Ctrl+A picks that whol
 rem   Drag and drop:  drop comics or folders (subfolders included) onto this file
 rem   Note files (.txt) in the same folders go too. .cbr files are repacked as .cbz, and
 rem   pages can be shrunk to phone size - on copies only; nothing in D:\Comics is changed.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0send-comics.ps1" %*
+rem Hand-off kit: checks for the programs it needs and keeps a log in logs\.
+set "PSModulePath="
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0..\kit\run-logged.ps1" -Needs adb,java "%~dp0send-comics.ps1" %*
 echo.
 pause

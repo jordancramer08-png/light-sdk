@@ -90,3 +90,6 @@ private/
 *.flac
 *.apk
 releases/*.apk
+
+### Hand-off kit logs (stay on this PC) ###
+logs/

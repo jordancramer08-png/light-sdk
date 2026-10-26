@@ -1,0 +1,155 @@
+READER (Light Phone 3) - HOW TO USE THE DOUBLE-CLICK FILES
+=========================================================
+Written 26 October 2026. You only need File Explorer and your phone's USB cable.
+
+HOW TO OPEN A .CMD FILE
+  1. Open File Explorer.
+  2. Go to Documents, then reader.
+  3. Double-click the file named below.
+  A black window opens. Read what it says. When it ends it says
+  "Press any key to continue". Press any key and the window closes.
+
+BEFORE ANYTHING THAT USES THE PHONE
+  1. Plug the Light Phone into the PC with its USB cable.
+  2. Unlock the phone.
+  3. If the phone asks "Allow USB debugging?", tap Allow.
+  Unplug the tablet first. These tools refuse to work if the tablet
+  (or more than one device) is plugged in.
+
+IF A WINDOW SHOWS AN ERROR
+  - Red lines say what went wrong in plain words. Do what they say,
+    then double-click the file again.
+  - "MISSING: ..." means a program is not on this PC. The line says
+    which one and how to get it.
+  - "No device is connected": plug in and unlock the phone, then try again.
+  - Every run writes a log in Documents\reader\logs. The window shows
+    its name on the last lines. Keep it if you want someone to look later.
+
+
+-------------------------------------------------------------------------
+FILES AT THE TOP OF THE reader FOLDER
+-------------------------------------------------------------------------
+
+Back Up Phone Data.cmd
+  What: copies Reader's data off the phone: your reading places, lists,
+        reading status and settings (comic places and settings too).
+        It does NOT copy the books and comics themselves; those are copies
+        of your PC files, and you can send them again.
+        It only reads from the phone. Reader is closed while it copies.
+  When: before installing an update, and now and then to be safe.
+  Steps:
+    1. Plug in and unlock the phone.
+    2. Double-click "Back Up Phone Data.cmd".
+    3. Wait for "Backup saved in: ...".
+    4. Press any key.
+  The backup goes to Documents\App Backups\Reader\<date and time>.
+
+Restore Phone Data.cmd
+  What: puts one of those backups back on the phone. It first makes a
+        fresh backup of what the phone has now, so it can be undone.
+  When: after something went wrong and your places or lists are gone.
+  Steps:
+    1. Plug in and unlock the phone.
+    2. Double-click "Restore Phone Data.cmd".
+    3. A numbered list of backups appears (1 is the newest).
+       Type the number you want and press Enter (just Enter = 1).
+    4. Type YES (capitals) and press Enter.
+    5. Wait for "Done". Open Reader on the phone and check.
+
+Install on Phone.cmd
+  What: installs the APK saved in the releases folder, as an UPDATE.
+        Your data on the phone is kept. It never uninstalls anything.
+  When: if Reader is missing or broken on the phone, or after
+        "Rebuild App.cmd" made a new APK.
+  Steps:
+    1. Run "Back Up Phone Data.cmd" first (see above).
+    2. Plug in and unlock the phone.
+    3. Double-click "Install on Phone.cmd".
+    4. It shows which APK and version it will install.
+       Type YES (capitals) and press Enter.
+    5. When it says "Installed", it asks to restart the phone.
+       Type Y and press Enter. (The Light Phone only shows a new or
+       updated app after a restart.)
+  If it says "DIFFERENT KEY": stop. Do NOT uninstall Reader (that would
+  erase your places and lists). Keep the log.
+
+Rebuild App.cmd
+  What: builds Reader again from the code on this PC and saves the new APK
+        in the releases folder with today's date. It never installs.
+        It warns you if the new APK is signed with a different key than
+        the app on your phone (then it could not be installed as an update).
+  When: only if the saved APK is lost or damaged. Needs internet the
+        first time. Takes several minutes.
+  Steps:
+    1. (Optional) plug in the phone, so it can compare the key with the
+       app on the phone. Without the phone it compares with the last
+       saved APK.
+    2. Double-click "Rebuild App.cmd".
+    3. Wait. Lots of lines scroll by. At the end look for "Saved:" and
+       "Same key as ...".
+    4. Press any key.
+  If it says "The build FAILED": nothing was saved; your old APK is still
+  in releases. Keep the log.
+
+Every one of these four can be tried without changing anything: open a
+Command Prompt in the reader folder and type, for example:
+    "Install on Phone.cmd" /preview
+
+
+-------------------------------------------------------------------------
+FILES IN reader\scripts (the tools you already had)
+-------------------------------------------------------------------------
+
+Send Books to Phone.cmd
+  What: copies .epub books from D:\Reading\Digital Books to Reader.
+        Nothing on the PC is changed.
+  When: whenever you want new books on the phone.
+  Steps:
+    1. Plug in and unlock the phone.
+    2. Double-click "Send Books to Phone.cmd" (in reader\scripts).
+    3. A window lists your books. Type in the filter box to search.
+       Hold Ctrl and click to pick several. Click OK.
+    4. Wait until it lists the books now on the phone. Press any key.
+  Or: drag .epub files or a folder and drop them onto the file.
+  Errors: "No phone found" = plug in and unlock. "Library folder not
+  found" = the D: drive is not plugged in.
+
+Send Comics to Phone.cmd
+  What: copies comics (.cbz, .cbr) from D:\Comics to Reader, in the same
+        folders. It can shrink pages, crop margins and clean up scans,
+        but only on copies. Nothing in D:\Comics is changed. Needs Java.
+  When: whenever you want comics on the phone.
+  Steps:
+    1. Plug in the D: drive, and plug in and unlock the phone.
+    2. Double-click "Send Comics to Phone.cmd".
+    3. Pick comics in the window (filter on a folder name, then Ctrl+A
+       picks the whole folder). Click OK.
+    4. Answer each question. Just pressing Enter takes the answer in
+       capitals, e.g. (Y/n) means Enter = Yes.
+    5. It shows the sizes, then asks "Send these? (Y/N)". Type Y, Enter.
+    6. Wait for the end. Press any key.
+
+Remove Books from Phone.cmd
+  What: removes books, comics and comic notes from the phone. Your places,
+        lists and status are kept, so anything sent again opens where you
+        stopped.
+  When: when the phone is getting full, or you've finished something.
+  Steps:
+    1. Plug in and unlock the phone.
+    2. Double-click "Remove Books from Phone.cmd".
+    3. Pick what to remove in the window. Click OK.
+    4. Type Y and press Enter to confirm.
+    5. For comics it asks "Also forget my place and settings?". Just
+       Enter = No (keeps them).
+
+Build and Install Reader.cmd
+  What: the older all-in-one tool: builds Reader from the code, installs
+        it and offers to restart. It does not check which device is
+        plugged in. Prefer "Rebuild App.cmd" then "Install on Phone.cmd".
+  Steps:
+    1. Back up first (Back Up Phone Data.cmd).
+    2. Plug in and unlock the phone (only the phone).
+    3. Double-click "Build and Install Reader.cmd". Wait several minutes.
+    4. When asked "Reboot the phone now", press Y.
+
+This app uses no passwords or keys that can expire.

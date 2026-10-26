@@ -173,17 +173,22 @@ function Invoke-Backup([string]$label = '') {
         Bad "  The device will not let this PC read the app's private data ($probe)."
     } else {
         $files = Adb shell run-as $Pkg find . -type f | ForEach-Object { $_.Trim() } | Where-Object { $_ -like './*' }
+        $bad = 0
         foreach ($f in $files) {
             $rel = $f.Substring(2)
             if (@($Cfg.SkipPrivate) | Where-Object { $_ -and ($rel -eq $_ -or $rel.StartsWith("$_/")) }) { continue }
             $local = Join-Path (Join-Path $out 'private') ($rel -replace '/', '\')
             [void](New-Item -ItemType Directory -Path (Split-Path $local -Parent) -Force)
             # cmd does the redirect so binary files are copied byte for byte
-            & cmd /c "`"$script:AdbExe`" exec-out run-as $Pkg cat '$rel' > `"$local`" 2>nul"
+            # Plain double quotes: adb quotes the name for the device itself (single quotes became part of the name).
+            & cmd /c "`"$script:AdbExe`" exec-out run-as $Pkg cat `"$rel`" > `"$local`" 2>nul"
             Log "private: $rel ($((Get-Item -LiteralPath $local).Length) bytes)"
+            $head = [IO.File]::ReadAllBytes($local) | Select-Object -First 5
+            if ((-join [char[]]$head) -eq 'cat: ') { Bad "  NOT COPIED: $rel ($(Get-Content -LiteralPath $local -TotalCount 1))"; $bad++ }
             $count++
         }
         Say "  App-private files copied: $count"
+        if ($bad) { Bad "  $bad file(s) could not be copied. This backup is NOT complete." }
     }
     # 2) folders in shared storage (/sdcard)
     foreach ($dir in @($Cfg.SharedDirs)) {

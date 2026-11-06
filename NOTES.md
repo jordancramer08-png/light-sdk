@@ -164,8 +164,13 @@ Session 9 work. On 2026-11-06 `.\gradlew.bat :tool:assembleRelease` failed once 
 captured, and new `hs_err` files suggest Java crashed. A second try was stopped for critically low
 memory (814 MB of 7.8 GB free) during shrinking. Close other apps before trying again.
 
-Next: finish that build, then check the new APK's permissions. Then Session 10, install on the phone
-and test. Follow "Installing on the phone" below.
+**Order from here (Jordan's decision):**
+
+1. Sessions 11-16, the Bestiary mod.
+2. Finish Session 9's pending final APK build, then check the new APK's permissions.
+3. Session 10, install on the phone and test. Follow "Installing on the phone" below.
+
+**Do not build an APK until Session 16 is done.** Laptop tests are still fine to run.
 
 How the new parts work:
 
@@ -352,4 +357,8 @@ use the SDK dev key, `sdk\keys\lightsdk-dev.jks`.
 - [x] Session 8: Game shelf and add-games script (not yet seen on the phone)
 - [ ] Session 9: Settings, safety and a full test run (all done except the final APK build)
 - [ ] Session 10: Install on the phone and test
+
+Work these in the order given under Status: Sessions 11-16 first, then Session 9's APK build, then
+Session 10.
+
 - [ ] Sessions 11-16: Bestiary mod

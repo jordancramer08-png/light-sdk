@@ -32,6 +32,7 @@ data class GameUiState(
     val status: ZStatusLine? = null,
     val upperRows: List<TextLine> = emptyList(),
     val waitingForInput: Boolean = false,
+    val waitingForKey: Boolean = false,
     val commandsTaken: Int = 0,
     val finished: Boolean = false,
 )

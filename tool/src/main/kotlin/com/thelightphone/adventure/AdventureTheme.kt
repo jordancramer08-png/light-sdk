@@ -17,6 +17,10 @@ object AdventureTheme {
     val statusText = Color(0xFFFFD58A)
     val inputBackground = Color(0xFF1C222B)
     val hintText = Color(0xFF8A93A0)
+    val buttonBackground = Color(0xFF2A323D)
+    val quickText = Color(0xFF9CC9F5)
+    val verbText = Color(0xFFFFD58A)
+    val suggestionText = Color(0xFFF0A8C8)
 
     /** Colors for the SDK's own parts: the top bar, buttons and keyboard. */
     val lightColors = LightColors(

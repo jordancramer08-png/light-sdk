@@ -7,6 +7,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,9 +16,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.foundation.text.input.clearText
-import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -25,14 +23,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -40,6 +39,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import com.thelightphone.adventure.engine.ZStatusLine
@@ -66,6 +66,7 @@ enum class BundledGame(val title: String, val asset: String) {
 }
 
 private val TEXT_SIZE_KEY = intPreferencesKey("text_size")
+private val QUICK_ROW_KEY = booleanPreferencesKey("quick_row_shown")
 
 /** Plays one game: status band on top, story in the middle, input line at the bottom. */
 class GameScreen(sealedActivity: SealedLightActivity, private val game: BundledGame) :
@@ -85,11 +86,22 @@ class GameScreen(sealedActivity: SealedLightActivity, private val game: BundledG
 
     @Composable
     override fun Content() {
-        val state by viewModel.state.collectAsState()
         val store = lightContext.dataStore
-        val savedSize by remember { store.data.map { it[TEXT_SIZE_KEY] ?: TextSizes.DEFAULT } }
+        val textSize by remember { store.data.map { it[TEXT_SIZE_KEY] ?: TextSizes.DEFAULT } }
             .collectAsState(TextSizes.DEFAULT)
+        val quickRowShown by remember { store.data.map { it[QUICK_ROW_KEY] ?: true } }
+            .collectAsState(true)
         val scope = rememberCoroutineScope()
+        val settings = Settings(
+            textSize = textSize,
+            quickRowShown = quickRowShown,
+            onNextTextSize = {
+                scope.launch { store.edit { it[TEXT_SIZE_KEY] = TextSizes.next(textSize) } }
+            },
+            onToggleQuickRow = {
+                scope.launch { store.edit { it[QUICK_ROW_KEY] = !quickRowShown } }
+            },
+        )
 
         LightTheme(colors = AdventureTheme.lightColors) {
             Column(Modifier.fillMaxSize().background(AdventureTheme.background)) {
@@ -97,42 +109,78 @@ class GameScreen(sealedActivity: SealedLightActivity, private val game: BundledG
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
                     center = LightTopBarCenter.Text(game.title),
                     rightButton = LightBarButton.Text(
-                        text = "Aa",
-                        contentDescription = "Change text size",
-                        onClick = {
-                            scope.launch { store.edit { it[TEXT_SIZE_KEY] = TextSizes.next(savedSize) } }
-                        },
+                        text = "Settings",
+                        onClick = { viewModel.typing.togglePanel(GamePanel.SETTINGS) },
                     ),
                 )
-                GameBody(state, savedSize, viewModel::send)
+                GameBody(viewModel, settings)
             }
         }
     }
 }
 
+/** The saved settings, and what to do when the player changes them. */
+private class Settings(
+    val textSize: Int,
+    val quickRowShown: Boolean,
+    val onNextTextSize: () -> Unit,
+    val onToggleQuickRow: () -> Unit,
+)
+
 @Composable
-private fun GameBody(state: GameUiState, textSize: Int, onSend: (String) -> Unit) {
-    val input = rememberTextFieldState()
+private fun GameBody(game: GameViewModel, settings: Settings) {
+    val state by game.state.collectAsState()
+    val typing by game.typing.state.collectAsState()
     var keyboardOpen by remember { mutableStateOf(false) }
-    val send = {
-        if (state.waitingForInput) {
-            onSend(input.text.toString())
-            input.clearText()
-        }
-    }
 
     Column(Modifier.fillMaxSize()) {
         state.status?.let { StatusBar(it) }
         if (state.upperRows.isNotEmpty()) UpperBand(state.upperRows)
-        StoryText(
-            lines = state.lines,
-            textSize = textSize,
-            keyboardOpen = keyboardOpen,
-            onTap = { keyboardOpen = false },
-            modifier = Modifier.weight(1f),
+        MiddleArea(game, state, typing.panel, typing.history, settings, keyboardOpen) { keyboardOpen = false }
+        if (settings.quickRowShown) QuickRow(state.waitingForInput, game::send)
+        VerbOrSuggestionRow(typing.suggestions, game.typing::addWord, game.typing::complete)
+        InputLine(
+            typed = typing.text,
+            state = state,
+            textSize = settings.textSize,
+            onTap = { keyboardOpen = true },
+            onHistory = { game.typing.togglePanel(GamePanel.HISTORY) },
+            onSend = game::submit,
         )
-        InputLine(input, state, textSize, onTap = { keyboardOpen = true }, onSend = send)
-        if (keyboardOpen) GameKeyboard(input, send)
+        if (keyboardOpen) GameKeyboard(game)
+    }
+}
+
+/** The story, or the history or settings in its place. */
+@Composable
+private fun ColumnScope.MiddleArea(
+    game: GameViewModel,
+    state: GameUiState,
+    panel: GamePanel,
+    history: List<String>,
+    settings: Settings,
+    keyboardOpen: Boolean,
+    onCloseKeyboard: () -> Unit,
+) {
+    val fill = Modifier.weight(1f)
+    when (panel) {
+        GamePanel.HISTORY ->
+            HistoryPanel(history, settings.textSize, game.typing::pickFromHistory, fill)
+        GamePanel.SETTINGS -> SettingsPanel(
+            settings.textSize,
+            settings.quickRowShown,
+            settings.onNextTextSize,
+            settings.onToggleQuickRow,
+            fill,
+        )
+        GamePanel.NONE -> StoryText(
+            lines = state.lines,
+            textSize = settings.textSize,
+            keyboardOpen = keyboardOpen,
+            onWord = game.typing::addWord,
+            onTap = onCloseKeyboard,
+            modifier = fill,
+        )
     }
 }
 
@@ -182,6 +230,7 @@ private fun StoryText(
     lines: List<TextLine>,
     textSize: Int,
     keyboardOpen: Boolean,
+    onWord: (String) -> Unit,
     onTap: () -> Unit,
     modifier: Modifier,
 ) {
@@ -200,13 +249,33 @@ private fun StoryText(
             .padding(horizontal = 10.dp)
             .pointerInput(Unit) { detectTapGestures { onTap() } },
     ) {
-        itemsIndexed(lines) { _, line ->
-            BasicText(
-                text = styled(line) { AdventureTheme.storyColorFor(it.kind) to Color.Transparent },
-                style = style,
-            )
-        }
+        itemsIndexed(lines) { _, line -> StoryLine(line, style, onWord, onTap) }
     }
+}
+
+/** One paragraph. A tap on a word adds it to the input line; a tap elsewhere is [onTap]. */
+@Composable
+private fun StoryLine(line: TextLine, style: TextStyle, onWord: (String) -> Unit, onTap: () -> Unit) {
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val text = styled(line) { AdventureTheme.storyColorFor(it.kind) to Color.Transparent }
+    BasicText(
+        text = text,
+        style = style,
+        onTextLayout = { layout = it },
+        modifier = Modifier.fillMaxWidth().pointerInput(text) {
+            detectTapGestures { position ->
+                val word = layout?.let { tappedWord(it, text.text, position) }
+                if (word != null) onWord(word) else onTap()
+            }
+        },
+    )
+}
+
+/** The word under a tap. Past the end of a line there is no word, whatever is nearest. */
+private fun tappedWord(layout: TextLayoutResult, text: String, position: Offset): String? {
+    val row = layout.getLineForVerticalPosition(position.y)
+    if (position.x > layout.getLineRight(row)) return null
+    return wordAt(text, layout.getOffsetForPosition(position))
 }
 
 /** Turns spans into drawable text. [themeColors] gives a span's text and background colors. */
@@ -220,14 +289,14 @@ private fun styled(line: TextLine, themeColors: (StorySpan) -> Pair<Color, Color
 
 @Composable
 private fun InputLine(
-    input: TextFieldState,
+    typed: String,
     state: GameUiState,
     textSize: Int,
     onTap: () -> Unit,
+    onHistory: () -> Unit,
     onSend: () -> Unit,
 ) {
     val hint = if (state.finished) "The game has ended" else "Tap to type"
-    val typed = input.text.toString()
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -246,6 +315,11 @@ private fun InputLine(
             modifier = Modifier.weight(1f).clickable(onClick = onTap),
         )
         BasicText(
+            text = "HISTORY",
+            style = TextStyle(color = AdventureTheme.quickText, fontSize = 16.sp),
+            modifier = Modifier.clickable(onClick = onHistory).padding(start = 14.dp),
+        )
+        BasicText(
             text = "SEND",
             style = TextStyle(
                 color = if (state.waitingForInput) AdventureTheme.commandText else AdventureTheme.hintText,
@@ -257,12 +331,11 @@ private fun InputLine(
 }
 
 @Composable
-private fun GameKeyboard(input: TextFieldState, onReturn: () -> Unit) {
+private fun GameKeyboard(game: GameViewModel) {
     val options = rememberKeyboardOptions()
-    val latestOnReturn by rememberUpdatedState(onReturn) // The keyboard outlives each redraw.
-    val keyboard = remember(input) {
+    val keyboard = remember(game) {
         EnQwertyLp3KeyboardViewModel<Unit>(
-            InputLineKeys(input) { latestOnReturn() },
+            InputLineKeys(game.typing, game::submit),
             keyboardOptionsFlow = options,
             optionsForLayout = { LayoutOptions(!it.isRootLayout) },
         )

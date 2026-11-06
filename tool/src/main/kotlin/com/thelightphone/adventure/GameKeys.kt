@@ -1,9 +1,6 @@
 package com.thelightphone.adventure
 
 import android.view.KeyEvent
-import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.foundation.text.input.delete
-import androidx.compose.ui.text.TextRange
 import com.thelightphone.lp3Keyboard.ui.SpecialKey
 import com.thelightphone.lp3Keyboard.ui.viewmodel.Lp3RepeatableKeyboardCallback
 
@@ -19,50 +16,35 @@ object GameKeys {
 }
 
 /** Sends the on-screen keyboard's presses to the input line. Return sends the command. */
-class InputLineKeys(
-    private val state: TextFieldState,
-    private val onReturn: () -> Unit,
-) : Lp3RepeatableKeyboardCallback {
+class InputLineKeys(private val typing: TypingAids, private val onReturn: () -> Unit) :
+    Lp3RepeatableKeyboardCallback {
     override fun onKeyPressed(code: Int) = Unit
 
-    override fun onKeyReleased(code: Int) = insert(buildString { appendCodePoint(code) })
+    override fun onKeyReleased(code: Int) = typing.type(buildString { appendCodePoint(code) })
 
     override fun onKeyLongPressed(code: Int) = Unit
 
-    override fun onKeyRepeated(code: Int) = insert(buildString { appendCodePoint(code) })
+    override fun onKeyRepeated(code: Int) = typing.type(buildString { appendCodePoint(code) })
 
     override fun onSpecialKeyPressed(key: SpecialKey) {
-        if (key == SpecialKey.Space) insert(" ")
+        if (key == SpecialKey.Space) typing.type(" ")
     }
 
     override fun onSpecialKeyReleased(key: SpecialKey) {
         when (key) {
-            SpecialKey.Backspace -> deleteLast()
+            SpecialKey.Backspace -> typing.backspace()
             SpecialKey.Return -> onReturn()
             else -> Unit
         }
     }
 
     override fun onSpecialKeyLongPressed(key: SpecialKey) {
-        if (key == SpecialKey.Backspace) state.edit { delete(0, length) }
+        if (key == SpecialKey.Backspace) typing.clear()
     }
 
     override fun onSpecialKeyRepeated(specialKey: SpecialKey) {
-        if (specialKey == SpecialKey.Space) insert(" ")
+        if (specialKey == SpecialKey.Space) typing.type(" ")
     }
 
-    override fun onSubmitWord(word: CharSequence) = insert(word.toString())
-
-    private fun insert(text: String) {
-        state.edit {
-            append(text)
-            selection = TextRange(length)
-        }
-    }
-
-    private fun deleteLast() {
-        state.edit {
-            if (length > 0) delete(length - 1, length)
-        }
-    }
+    override fun onSubmitWord(word: CharSequence) = typing.type(word.toString())
 }

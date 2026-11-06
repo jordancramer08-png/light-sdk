@@ -35,6 +35,9 @@ class Dictionary(
     /** The word stored at an entry, cut to the dictionary's key length. */
     fun word(index: Int): String = text.decode(entryAddress(index)).text
 
+    /** Every word, each cut to the dictionary's key length. */
+    fun words(): List<String> = (0 until size).map(::word)
+
     /** The entry address for a word, or 0 if it is not in the dictionary. */
     fun lookup(word: String): Int {
         val key = text.encodeDictionaryWord(word).flatMap { listOf(it shr 8, it and 0xFF) }

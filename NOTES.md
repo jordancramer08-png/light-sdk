@@ -140,6 +140,7 @@ Finished:
 - Session 3: instruction decoding, the opcode set, the version 3 status line and the console
   player.
 - Session 4: Quetzal save and restore, replay tests and the gap log.
+- Session 6: typing aids. All rules are in `TypingAids.kt`, tested without a screen.
 - Session 5: game screen, temporary home screen and view model tests. **The screen has only been
   compiled. It has never been drawn or used**, because there is no emulator; the view model
   tests cover everything below the drawing.
@@ -152,7 +153,8 @@ Finished:
   changes. Its code is under `tool/src/test` too.
 - Nothing has been installed on the phone.
 
-Next: try the game screen on the phone, then Session 6, typing aids.
+Next: Session 7, saving and the game menu. Jordan will install on the phone at the very end, so
+the screen stays unseen until then.
 
 How the new parts work:
 
@@ -164,6 +166,9 @@ How the new parts work:
 - **Keyboard:** the SDK's text editor is full-screen and hides the story, so `GameScreen` embeds
   `LightEmbeddedLp3Keyboard` with its own `InputLineKeys`. Tap the input line to open it and the
   story to close it. Return or SEND sends.
+- **Typing aids:** direction and command buttons send at once. Verbs, tapped story words and
+  suggestions add to the input line. Suggestions replace the verb row while a word is being
+  typed. History and Settings swap into the story area. The Settings button replaces `Aa`.
 - **Keys:** `GameKeys` ignores 27, 80 and 319, as Listen does. Wheel turns reach LightOS.
 - **Phone files:** saves are `filesDir/saves/<game>.qzl`, gaps are `filesDir/gaps.txt`.
 - **Saves:** `Quetzal.kt` reads and writes the files. `ZIo` picks a slot, then `writeSave` and
@@ -179,7 +184,7 @@ How the new parts work:
 Game screen:
 
 - Nothing on it has been seen: layout, colors, keyboard fit, scrolling, key handling and the
-  `Aa` text size button all need checking on the phone.
+  text size setting all need checking on the phone.
 - Each game has one save slot, with no prompt, until the save menu in Session 7. A new save
   replaces the old one.
 - Pressing back ends the game with no autosave, so unsaved progress is lost.
@@ -189,6 +194,19 @@ Game screen:
 - `erase_window` clears the scrollback as well as the screen.
 - Text sizes are 15, 18 (default), 21 and 25 sp. These are guesses until seen on the phone.
 - Only the three Zork games can be started until the game shelf in Session 8.
+
+Typing aids:
+
+- Suggestions come from the game's whole dictionary, so they can reveal words a player has not
+  met yet, such as magic words, and the odd internal word. Zork's `intnum` is one.
+- `advent.z8` and `adv550.z8` have empty dictionaries, so they get no suggestions.
+- A truncated word stays cut short (`mailbo`) until the game has printed the full word. It still
+  works, because games compare only the stored letters.
+- `Again` sends the word `again`. A game without that command will just reject it.
+- History lasts only while the game is open and leaves out repeats in a row.
+- The input line has no movable cursor: typing and backspace work at the end only.
+- With the keyboard open, the two rows leave little room for the story. Check on the phone, where
+  hiding the quick row in Settings is the first fix to try.
 
 Saves:
 
@@ -255,7 +273,7 @@ Worth knowing:
 - [x] Session 3: Running the game in PowerShell
 - [x] Session 4: Saving, undo and a game test
 - [x] Session 5: The game screen (not yet seen on the phone)
-- [ ] Session 6: Typing aids
+- [x] Session 6: Typing aids (not yet seen on the phone)
 - [ ] Session 7: Saving and the game menu
 - [ ] Session 8: Game shelf and add-games script
 - [ ] Session 9: Settings, safety and a full test run

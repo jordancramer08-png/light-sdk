@@ -43,13 +43,27 @@ class GameViewModel(
 
     val state: StateFlow<GameUiState> = mutableState.asStateFlow()
 
+    /** The input line, suggestions, history and open panel. All their rules are in here. */
+    val typing = TypingAids()
+
     init {
         scope.launch { runGame() }
     }
 
-    /** Passes on a typed command. Ignored unless the game is waiting for one. */
+    /** Passes on a command. Ignored unless the game is waiting for one. */
     fun send(command: String) {
-        if (mutableState.value.waitingForInput) typed.put(Typed.Line(command))
+        val game = mutableState.value
+        if (!game.waitingForInput) return
+        if (!game.waitingForKey) typing.rememberCommand(command)
+        typing.closePanel()
+        typed.put(Typed.Line(command))
+    }
+
+    /** Sends what is in the input line, and empties it if the game took it. */
+    fun submit() {
+        if (!mutableState.value.waitingForInput) return
+        send(typing.state.value.text.trim())
+        typing.clear()
     }
 
     /** Ends the game's coroutine. Called when the screen closes. */
@@ -63,7 +77,9 @@ class GameViewModel(
     private fun runGame() {
         val io = GameIo()
         try {
-            ZMachine(Story(storyBytes), io, seed).run()
+            val story = Story(storyBytes)
+            typing.useDictionary(dictionaryWords(story), story.text.dictionaryZChars)
+            ZMachine(story, io, seed).run()
             io.publish(finished = true)
         } catch (stopped: GameStopped) {
             // The player left; nothing more to show.
@@ -71,6 +87,13 @@ class GameViewModel(
             io.print("\n[This game cannot run: ${error.message}]\n")
             io.publish(finished = true)
         }
+    }
+
+    /** A damaged dictionary only costs the suggestions, not the game. */
+    private fun dictionaryWords(story: Story): List<String> = try {
+        story.dictionary.words()
+    } catch (error: ZMachineError) {
+        emptyList()
     }
 
     private sealed interface Typed {
@@ -98,13 +121,14 @@ class GameViewModel(
         private var status: ZStatusLine? = null
         private var commandsTaken = 0
 
-        fun publish(waiting: Boolean = false, finished: Boolean = false) {
+        fun publish(waiting: Boolean = false, forKey: Boolean = false, finished: Boolean = false) {
             mutableState.update {
                 it.copy(
                     lines = log.snapshot(),
                     status = status,
                     upperRows = upper.snapshot(),
                     waitingForInput = waiting,
+                    waitingForKey = forKey,
                     commandsTaken = commandsTaken,
                     finished = finished,
                 )
@@ -113,11 +137,12 @@ class GameViewModel(
 
         override fun print(text: String) {
             if (inUpper) upper.write(text, look) else log.append(text, look)
+            typing.notePrinted(text)
         }
 
         /** Waits for the player. Returns null if [timeoutTenths] runs out first. */
-        private fun nextTyped(timeoutTenths: Int): String? {
-            publish(waiting = true)
+        private fun nextTyped(timeoutTenths: Int, forKey: Boolean = false): String? {
+            publish(waiting = true, forKey = forKey)
             val item = if (timeoutTenths > 0) {
                 typed.poll(timeoutTenths * 100L, TimeUnit.MILLISECONDS)
             } else {
@@ -140,7 +165,7 @@ class GameViewModel(
 
         /** A key press is a Send on this screen: the first letter, or Return if empty. */
         override fun readChar(timeoutTenths: Int): Int? {
-            val line = nextTyped(timeoutTenths) ?: return null
+            val line = nextTyped(timeoutTenths, forKey = true) ?: return null
             commandsTaken++
             publish()
             return line.firstOrNull()?.code ?: ZSCII_RETURN

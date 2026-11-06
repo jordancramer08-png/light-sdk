@@ -10,7 +10,7 @@ class PlayGameTest {
     private fun play(file: File, commands: List<String>): RecordingIo {
         val io = RecordingIo(commands)
         try {
-            ZMachine(Story(file.readBytes()), io, seed = 42).run()
+            ZMachine(Story(storyFromBlorb(file.readBytes())), io, seed = 42).run()
         } catch (finished: ScriptFinished) {
             // The commands ran out, which is the normal end of a test.
         }
@@ -35,7 +35,7 @@ class PlayGameTest {
     fun everyGameStartsWithoutEngineErrors() {
         val folders = listOf(File("src/main/assets"), File("../story-files"))
         val stories = folders.flatMap { it.listFiles()?.toList() ?: emptyList() }
-            .filter { it.extension in setOf("dat", "z5", "z8") }
+            .filter { it.extension in setOf("dat", "z5", "z8", "zblorb") }
         val problems = stories.flatMap { story ->
             val commands = listOf(" ", " ", " ", "look", "inventory", "examine me", "wait", "undo", "n")
             play(story, commands).failures.map { "${story.name}: $it" }

@@ -2,6 +2,7 @@ package com.thelightphone.adventure.cli
 
 import com.thelightphone.adventure.engine.Story
 import com.thelightphone.adventure.engine.ZMachineError
+import com.thelightphone.adventure.engine.storyFromBlorb
 import java.io.File
 import kotlin.system.exitProcess
 
@@ -22,7 +23,7 @@ fun main(args: Array<String>) {
         exitProcess(2)
     }
     try {
-        storyInfo(Story(File(args[0]).readBytes())).forEach(::println)
+        storyInfo(Story(storyFromBlorb(File(args[0]).readBytes()))).forEach(::println)
     } catch (error: ZMachineError) {
         println("Cannot read ${args[0]}: ${error.message}")
         exitProcess(1)

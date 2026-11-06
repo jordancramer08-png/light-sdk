@@ -8,6 +8,7 @@ import com.thelightphone.adventure.engine.ZIo
 import com.thelightphone.adventure.engine.ZMachine
 import com.thelightphone.adventure.engine.ZMachineError
 import com.thelightphone.adventure.engine.ZStatusLine
+import com.thelightphone.adventure.engine.storyFromBlorb
 import java.io.BufferedReader
 import java.io.File
 import java.io.FileDescriptor
@@ -212,7 +213,7 @@ fun main(args: Array<String>) {
     val reader = BufferedReader(InputStreamReader(System.`in`))
     val io = ConsoleIo(reader, out, echoInput = piped, saveFolder = File("saves"), storyName = storyName)
     try {
-        val machine = ZMachine(Story(File(args[0]).readBytes()), io, seedFrom(args))
+        val machine = ZMachine(Story(storyFromBlorb(File(args[0]).readBytes())), io, seedFrom(args))
         try {
             machine.run()
         } catch (end: EndOfInput) {

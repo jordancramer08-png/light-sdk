@@ -287,7 +287,8 @@ Worth knowing:
 - Object counts are calculated, because story files do not store them.
 - Only object names and dictionary words have been decoded from real games so far.
 - Without `story-files`, tests cover only the Zork files and print a note instead of failing.
-- `story-info` calls a `.zblorb` file "version 70" rather than explaining it is a bundle.
+- `.zblorb` files work everywhere: `storyFromBlorb` takes the ZCOD chunk. Pictures and sounds in
+  them are ignored.
 - Builds take about 6 minutes and this laptop has under 8 GB of memory. Close other apps first.
 - The APK lists `INTERNET` and `CAMERA` because of SDK libraries, not our code.
 - A clean Listen rebuild is untested since 2026-10-02. See the Build section.

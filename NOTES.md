@@ -130,7 +130,7 @@ Follow Listen: `/sdcard` with `MANAGE_EXTERNAL_STORAGE`, granted by the laptop `
 That permission is not on the stock allow-list, so the SDK plugin needs the same one-line addition
 Listen made to `LightToolMetadata.kt`. Not done yet; it belongs in the sync session.
 
-## Status (end of Session 4, 2026-11-06)
+## Status (end of Session 5, 2026-11-06)
 
 Finished:
 
@@ -140,6 +140,9 @@ Finished:
 - Session 3: instruction decoding, the opcode set, the version 3 status line and the console
   player.
 - Session 4: Quetzal save and restore, replay tests and the gap log.
+- Session 5: game screen, temporary home screen and view model tests. **The screen has only been
+  compiled. It has never been drawn or used**, because there is no emulator; the view model
+  tests cover everything below the drawing.
 - `.\tools\play.ps1 tool\src\main\assets\zork1.dat` plays a game in PowerShell. Add `-Build`
   after engine changes, `-Seed 42` for repeatable randomness, `-Commands file.txt` to script it.
   `gradlew run` does not exist because `:tool` is an Android module. The player's code is under
@@ -149,10 +152,20 @@ Finished:
   changes. Its code is under `tool/src/test` too.
 - Nothing has been installed on the phone.
 
-Next: Session 5, the game screen.
+Next: try the game screen on the phone, then Session 6, typing aids.
 
 How the new parts work:
 
+- **Game screen:** `GameScreen` draws and `GameViewModel` runs the engine on a background
+  coroutine. Its private `GameIo` is the only link to the engine. `GameUiState` is plain data.
+  There is no `LightScreenViewModel`: it is `LightScreen<Unit, GameViewModel>`.
+- **Theme:** all colors and text sizes are in `AdventureTheme.kt`. Colors a game sets are kept on
+  each `StorySpan`; `ZColor.DEFAULT` means "use the theme".
+- **Keyboard:** the SDK's text editor is full-screen and hides the story, so `GameScreen` embeds
+  `LightEmbeddedLp3Keyboard` with its own `InputLineKeys`. Tap the input line to open it and the
+  story to close it. Return or SEND sends.
+- **Keys:** `GameKeys` ignores 27, 80 and 319, as Listen does. Wheel turns reach LightOS.
+- **Phone files:** saves are `filesDir/saves/<game>.qzl`, gaps are `filesDir/gaps.txt`.
 - **Saves:** `Quetzal.kt` reads and writes the files. `ZIo` picks a slot, then `writeSave` and
   `readSave` move the bytes. A bad or wrong-story file is refused and the game carries on.
 - **Replays:** command files are in `tool/src/test/replays/`. `hashes.txt` holds a fingerprint of
@@ -162,6 +175,20 @@ How the new parts work:
   `stub:` (left out on purpose) or `unusual:` (odd, but handled). `ZIo.log` gets each one once.
 
 ## Known gaps
+
+Game screen:
+
+- Nothing on it has been seen: layout, colors, keyboard fit, scrolling, key handling and the
+  `Aa` text size button all need checking on the phone.
+- Each game has one save slot, with no prompt, until the save menu in Session 7. A new save
+  replaces the old one.
+- Pressing back ends the game with no autosave, so unsaved progress is lost.
+- Games are told the screen is 40 columns by 24 lines. The upper band scales to fit 40 columns.
+- Keyboard presses have no haptic click: the SDK helper needs `LocalContext`, which is blocked.
+- `read_char` is a Send: the first letter typed, or Return if the line is empty.
+- `erase_window` clears the scrollback as well as the screen.
+- Text sizes are 15, 18 (default), 21 and 25 sp. These are guesses until seen on the phone.
+- Only the three Zork games can be started until the game shelf in Session 8.
 
 Saves:
 
@@ -175,15 +202,16 @@ Input and output:
 
 - Stream 2 calls `ZIo.transcript`, which does nothing in the console, so `script` writes no file.
 - Stream 4 (command record) and input stream 1 (commands from a file) are logged stubs.
-- Timed input has never run in a real game: the console waits forever and does not claim support.
-  Text typed before a timeout is lost, because `readLine` returns only null.
+- Timed input has never run in a real game. The phone view model supports it and keeps typed
+  text in the input line; the console waits forever and does not claim support.
 - Read terminators other than Enter are ignored (the header's terminating characters table).
 - Sound, pictures, `set_true_colour` and fonts other than 1 and 4 are logged stubs.
-- Colors and text styles reach `ZIo`, but the console shows neither. The phone screen must.
+- The console shows neither colors nor text styles. The game screen is written to.
 - The console shows the upper window as `|` lines before each prompt, not as a real screen.
 - Curses: the second status row is missing after one `inventory`, repeatably, with three blank
   lines, `look`, `inventory` and seed 42. The same command elsewhere shows both rows. Cause not
-  found; it could be the console or the engine, so recheck it on the game screen in Session 5.
+  found; it could be the console or the engine. Curses is not on the temporary home screen, so
+  recheck it after the game shelf in Session 8.
 - Characters beyond the 16-bit range cannot be typed into a buffer correctly.
 
 Engine:
@@ -226,7 +254,7 @@ Worth knowing:
 - [x] Session 2: Memory, text and objects
 - [x] Session 3: Running the game in PowerShell
 - [x] Session 4: Saving, undo and a game test
-- [ ] Session 5: The game screen
+- [x] Session 5: The game screen (not yet seen on the phone)
 - [ ] Session 6: Typing aids
 - [ ] Session 7: Saving and the game menu
 - [ ] Session 8: Game shelf and add-games script

@@ -1,0 +1,22 @@
+open mailbox
+take leaflet
+read leaflet
+drop leaflet
+south
+east
+open window
+enter window
+take all
+west
+take lamp
+move rug
+open trap door
+turn on lamp
+save
+replay
+down
+restore
+replay
+look
+inventory
+score

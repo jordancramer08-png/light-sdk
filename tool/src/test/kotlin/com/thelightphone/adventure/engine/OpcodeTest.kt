@@ -139,12 +139,13 @@ class OpcodeTest {
     }
 
     @Test
-    fun objectZeroMeansNothingAndLogsNoError() {
+    fun objectZeroMeansNothingAndIsNotedAsUnusual() {
         val io = RecordingIo()
         // test_attr 0 1 ?~next: false, so the branch-on-false is taken and skips "store g0 9".
         val code = listOf(0x0A, 0, 1, 0x45, 0x0D, 0x10, 9, quit)
         val machine = run(5, code, io)
-        assertEquals(emptyList(), io.logs)
+        assertEquals(emptyList(), io.failures)
+        assertTrue(io.logs.single().startsWith("unusual: object 0"), io.logs.toString())
         assertEquals(0, machine.global(0))
     }
 
@@ -162,6 +163,41 @@ class OpcodeTest {
         val machine = run(3, listOf(0xB5, 0xC5, 0x0D, 0x10, 9, quit), io)
         assertEquals(1, io.slotRequests)
         assertEquals(0, machine.global(0))
+    }
+
+    @Test
+    fun encodeTextMakesADictionaryKey() {
+        // encode_text 0x600 3 0 0x610
+        val machine = run(5, listOf(0xFC, 0x14, 0x06, 0x00, 3, 0, 0x06, 0x10, quit)) {
+            "abc".forEachIndexed { index, char -> it[0x600 + index] = char.code.toByte() }
+        }
+        assertEquals((6 shl 10) or (7 shl 5) or 8, machine.memory.readWord(0x610))
+        assertEquals((5 shl 10) or (5 shl 5) or 5, machine.memory.readWord(0x612))
+        assertEquals(0x8000 or (5 shl 10) or (5 shl 5) or 5, machine.memory.readWord(0x614))
+    }
+
+    @Test
+    fun getCursorWritesLineAndColumn() {
+        val machine = run(5, listOf(0xF0, 0x3F, 0x06, 0x00, quit))
+        assertEquals(1, machine.memory.readWord(0x600))
+        assertEquals(1, machine.memory.readWord(0x602))
+    }
+
+    @Test
+    fun printTablePrintsRows() {
+        val io = RecordingIo()
+        // print_table 0x600 2 2
+        run(5, listOf(0xFE, 0x17, 0x06, 0x00, 2, 2, quit), io) {
+            "abcd".forEachIndexed { index, char -> it[0x600 + index] = char.code.toByte() }
+        }
+        assertEquals("ab\ncd", io.output.toString())
+    }
+
+    @Test
+    fun eraseLineOnlyActsOnOne() {
+        val io = RecordingIo()
+        run(5, listOf(0xEE, 0x7F, 1, 0xEE, 0x7F, 2, quit), io)
+        assertEquals(1, io.eraseLineCalls)
     }
 
     private companion object {

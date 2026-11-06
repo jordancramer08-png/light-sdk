@@ -1,0 +1,25 @@
+
+
+
+look
+inventory
+x me
+x pants
+x torch
+listen
+smell
+x moon
+x farm
+north
+look
+south
+east
+west
+take stone
+undo
+save
+replay
+wait
+restore
+replay
+inventory

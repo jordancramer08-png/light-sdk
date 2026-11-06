@@ -1,0 +1,24 @@
+
+
+
+look
+inventory
+x ring
+x umbrella
+x door
+knock on door
+open door
+southeast
+look
+search trash
+x wall
+northwest
+west
+look
+undo
+save
+replay
+wait
+restore
+replay
+i

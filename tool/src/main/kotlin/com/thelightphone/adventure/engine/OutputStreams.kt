@@ -9,6 +9,7 @@ class OutputStreams(
     private val memory: StoryMemory,
     private val text: ZText,
     private val io: ZIo,
+    private val gaps: GapLog,
 ) {
     private class MemoryTable(val address: Int) {
         var count = 0
@@ -56,7 +57,7 @@ class OutputStreams(
             -2 -> setTranscript(false)
             3 -> openTable(tableAddress)
             -3 -> closeTable()
-            // Stream 4 records commands. Nothing reads it yet, so selecting it changes nothing.
+            4, -4 -> gaps.note("stub: output stream 4 (command record)", 0)
         }
     }
 

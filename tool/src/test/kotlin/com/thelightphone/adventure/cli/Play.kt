@@ -25,6 +25,8 @@ class ConsoleIo(
     private val input: BufferedReader,
     private val out: PrintStream,
     private val echoInput: Boolean,
+    private val saveFolder: File,
+    private val storyName: String,
 ) : ZIo {
     override val capabilities = ZCapabilities(screenWidth = WIDTH, screenHeight = HEIGHT)
 
@@ -147,19 +149,36 @@ class ConsoleIo(
 
     override fun setColors(foreground: ZColor, background: ZColor) = Unit
 
-    override fun chooseSaveSlot(): String? = askSlot("Save to slot (nothing is stored yet): ")
+    override fun chooseSaveSlot(): String? = askSlot("Save to slot: ")
 
-    override fun chooseRestoreSlot(): String? = askSlot("Restore slot (nothing is loaded yet): ")
+    override fun chooseRestoreSlot(): String? = askSlot("Restore slot: ")
 
     private fun askSlot(prompt: String): String? {
         printLower(prompt)
         return nextLine().trim().ifEmpty { null }
     }
 
-    override fun log(message: String) {
-        flushPartial()
-        System.err.println("[engine] $message")
+    private fun saveFile(slot: String): File {
+        val safeName = slot.replace(Regex("[^A-Za-z0-9_-]"), "_")
+        return File(saveFolder, "$storyName-$safeName.qzl")
     }
+
+    override fun writeSave(slot: String, data: ByteArray): Boolean = try {
+        saveFolder.mkdirs()
+        saveFile(slot).writeBytes(data)
+        true
+    } catch (error: IOException) {
+        false
+    }
+
+    override fun readSave(slot: String): ByteArray? = try {
+        saveFile(slot).readBytes()
+    } catch (error: IOException) {
+        null
+    }
+
+    /** Gaps are for the developer, so they go to the report file and not the game text. */
+    override fun log(message: String) = Unit
 
     private companion object {
         const val WIDTH = 80
@@ -172,6 +191,15 @@ private fun seedFrom(args: Array<String>): Long? {
     return if (index >= 0) args.getOrNull(index + 1)?.toLongOrNull() else null
 }
 
+/** Adds this session's gaps to logs\<story>-gaps.txt and says how many there were. */
+private fun writeGapReport(lines: List<String>, storyName: String, out: PrintStream) {
+    if (lines.isEmpty()) return
+    val file = File("logs", "$storyName-gaps.txt")
+    file.parentFile.mkdirs()
+    file.appendText("--- ${java.time.LocalDateTime.now()}\n" + lines.joinToString("\n") + "\n")
+    out.println("[${lines.size} engine gaps noted in ${file.path}]")
+}
+
 /** Laptop-only program. It lives under src/test so it never ships in the APK. */
 fun main(args: Array<String>) {
     if (args.isEmpty()) {
@@ -180,11 +208,17 @@ fun main(args: Array<String>) {
     }
     val out = PrintStream(FileOutputStream(FileDescriptor.out), true, "UTF-8")
     val piped = System.console() == null
-    val io = ConsoleIo(BufferedReader(InputStreamReader(System.`in`)), out, echoInput = piped)
+    val storyName = File(args[0]).nameWithoutExtension
+    val reader = BufferedReader(InputStreamReader(System.`in`))
+    val io = ConsoleIo(reader, out, echoInput = piped, saveFolder = File("saves"), storyName = storyName)
     try {
-        ZMachine(Story(File(args[0]).readBytes()), io, seedFrom(args)).run()
-    } catch (end: EndOfInput) {
-        out.println()
+        val machine = ZMachine(Story(File(args[0]).readBytes()), io, seedFrom(args))
+        try {
+            machine.run()
+        } catch (end: EndOfInput) {
+            out.println()
+        }
+        writeGapReport(machine.gaps.report(), storyName, out)
     } catch (error: ZMachineError) {
         println("Cannot play ${args[0]}: ${error.message}")
         exitProcess(1)

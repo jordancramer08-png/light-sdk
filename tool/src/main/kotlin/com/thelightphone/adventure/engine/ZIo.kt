@@ -77,6 +77,12 @@ interface ZIo {
     /** Asks what to restore. Returns a slot name, or null if the player cancelled. */
     fun chooseRestoreSlot(): String?
 
+    /** Stores a Quetzal saved game in a slot. Returns false if that failed. */
+    fun writeSave(slot: String, data: ByteArray): Boolean
+
+    /** Returns the saved game in a slot, or null if there is none or it cannot be read. */
+    fun readSave(slot: String): ByteArray?
+
     /** Receives text sent to output stream 2, the transcript. Ignored by default. */
     fun transcript(text: String) {}
 

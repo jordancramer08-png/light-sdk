@@ -130,37 +130,77 @@ Follow Listen: `/sdcard` with `MANAGE_EXTERNAL_STORAGE`, granted by the laptop `
 That permission is not on the stock allow-list, so the SDK plugin needs the same one-line addition
 Listen made to `LightToolMetadata.kt`. Not done yet; it belongs in the sync session.
 
-## Status (end of Session 3, 2026-11-06)
+## Status (end of Session 4, 2026-11-06)
 
 Finished:
 
 - Sessions 0 and 1: project created, tool renamed, story files collected and checked.
 - Session 2: engine memory, header, packed addresses, text decoding, object table, dictionary and
   the `ZIo` interface, in `tool/src/main/kotlin/com/thelightphone/adventure/engine/`.
-- Session 3: instruction decoding and the opcode set, the version 3 status line, undo, restart
-  and the console player.
+- Session 3: instruction decoding, the opcode set, the version 3 status line and the console
+  player.
+- Session 4: Quetzal save and restore, replay tests and the gap log.
 - `.\tools\play.ps1 tool\src\main\assets\zork1.dat` plays a game in PowerShell. Add `-Build`
   after engine changes, `-Seed 42` for repeatable randomness, `-Commands file.txt` to script it.
   `gradlew run` does not exist because `:tool` is an Android module. The player's code is under
   `tool/src/test`, so it does not ship in the APK.
+- The console keeps saves in `saves\` and gap reports in `logs\<story>-gaps.txt`. Git ignores both.
 - `.\tools\story-info.ps1 <story file>` prints a story's summary. Add `-Build` after engine
   changes. Its code is under `tool/src/test` too.
 - Nothing has been installed on the phone.
 
-Next: Session 4, saving, undo and a game test.
+Next: Session 5, the game screen.
 
-Session 3 limits, on purpose:
+How the new parts work:
 
-- **Save and restore are stubs.** They ask `ZIo` for a slot and report success, and nothing is
-  stored or loaded. Games say "Ok." and carry on from where they are.
-- `ZIo.save(data)` and `ZIo.restore()` were replaced by `chooseSaveSlot()` and
-  `chooseRestoreSlot()`. Session 4 decides how the data itself moves.
-- Stream 2 calls `ZIo.transcript`, which does nothing in the console, so `script` writes no
-  file. Stream 4 is accepted and ignored.
-- The console waits forever for input, so timed input never fires there. The engine side is
-  written but no real game has tested it.
-- Sound and pictures do nothing. Fonts 1 and 4 are accepted, and other fonts are refused.
-- Object 0 means "nothing" with no log message, because Curses and So Far use it every turn.
+- **Saves:** `Quetzal.kt` reads and writes the files. `ZIo` picks a slot, then `writeSave` and
+  `readSave` move the bytes. A bad or wrong-story file is refused and the game carries on.
+- **Replays:** command files are in `tool/src/test/replays/`. `hashes.txt` holds a fingerprint of
+  each output, not the text, because game text is copyrighted. After an intended output change,
+  read the transcript, then replace the fingerprint with the one the failed test shows.
+- **Gap log:** `GapLog.kt` counts each different gap. Lines begin `unimplemented opcode`, `error:`,
+  `stub:` (left out on purpose) or `unusual:` (odd, but handled). `ZIo.log` gets each one once.
+
+## Known gaps
+
+Saves:
+
+- Loading files from other interpreters has only been tested with hand-built files written from
+  the Quetzal specification. No other interpreter or real foreign save was on this laptop.
+- Our saves have not been loaded by another interpreter either.
+- Auxiliary files (`save` and `restore` with operands) are refused and logged as a stub.
+- Restoring clears the undo history. Undo keeps the last 10 turns and does not survive quitting.
+
+Input and output:
+
+- Stream 2 calls `ZIo.transcript`, which does nothing in the console, so `script` writes no file.
+- Stream 4 (command record) and input stream 1 (commands from a file) are logged stubs.
+- Timed input has never run in a real game: the console waits forever and does not claim support.
+  Text typed before a timeout is lost, because `readLine` returns only null.
+- Read terminators other than Enter are ignored (the header's terminating characters table).
+- Sound, pictures, `set_true_colour` and fonts other than 1 and 4 are logged stubs.
+- Colors and text styles reach `ZIo`, but the console shows neither. The phone screen must.
+- The console shows the upper window as `|` lines before each prompt, not as a real screen.
+- Curses: the second status row is missing after one `inventory`, repeatably, with three blank
+  lines, `look`, `inventory` and seed 42. The same command elsewhere shows both rows. Cause not
+  found; it could be the console or the engine, so recheck it on the game screen in Session 5.
+- Characters beyond the 16-bit range cannot be typed into a buffer correctly.
+
+Engine:
+
+- An instruction that fails stores 0, counts its test as false, and the game carries on. That
+  keeps games alive but may hide a wrong result, so check `logs\` if a game misbehaves.
+- The engine stops only if the program counter leaves the story.
+- `restart` does not reset the font number or the upper-window flag held in `Opcodes`.
+
+Testing:
+
+- The Standard and Quetzal documents were not open while writing, and no conformance suite
+  (Czech, Praxix) was available. Running those would be the best next check.
+- Keyboard play has not been tried by hand; all runs used `-Commands`.
+- Colossal Cave and Vespers were played for only about 40 and 25 commands. No game has been
+  played to its end.
+- `.zblorb` games (Galatea, Savoir-Faire) cannot load until Session 8.
 
 Worth knowing:
 
@@ -185,7 +225,7 @@ Worth knowing:
 - [x] Session 1: Collect story files
 - [x] Session 2: Memory, text and objects
 - [x] Session 3: Running the game in PowerShell
-- [ ] Session 4: Saving, undo and a game test
+- [x] Session 4: Saving, undo and a game test
 - [ ] Session 5: The game screen
 - [ ] Session 6: Typing aids
 - [ ] Session 7: Saving and the game menu

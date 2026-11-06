@@ -18,6 +18,8 @@ class Instruction(
     val store: Int?,
     val branch: Branch?,
     val nextAddress: Int,
+    /** Where the store byte or branch data begins. Quetzal saves record this address. */
+    val resultAddress: Int,
 )
 
 /** Reads instructions from memory (Standard section 4). */
@@ -75,9 +77,17 @@ class InstructionDecoder(private val memory: StoryMemory, private val version: I
 
     private fun finish(address: Int, op: Int, kind: OpKind, number: Int, types: IntArray): Instruction {
         val values = IntArray(types.size) { if (types[it] == LARGE) nextWord() else nextByte() }
+        val resultAddress = at
         val store = if (OpcodeShape.stores(kind, number, version)) nextByte() else null
         val branch = if (OpcodeShape.branches(kind, number, version)) readBranch() else null
-        return Instruction(address, op, kind, number, types, values, store, branch, at)
+        return Instruction(address, op, kind, number, types, values, store, branch, at, resultAddress)
+    }
+
+    /** Reads branch data on its own, and gives it with the address after it. */
+    fun branchAt(address: Int): Pair<Branch, Int> {
+        at = address
+        val branch = readBranch()
+        return branch to at
     }
 
     private fun readBranch(): Branch {

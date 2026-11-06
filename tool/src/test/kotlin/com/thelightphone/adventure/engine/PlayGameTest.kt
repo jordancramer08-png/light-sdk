@@ -22,7 +22,7 @@ class PlayGameTest {
         val commands = listOf("open the mailbox", "take the leaflet", "read it", "inventory", "go north")
         val io = play(File("src/main/assets/zork1.dat"), commands)
         val text = io.output.toString()
-        assertEquals(emptyList(), io.logs)
+        assertEquals(emptyList(), io.failures)
         assertTrue("Opening the small mailbox reveals a leaflet." in text, text)
         assertTrue("Taken." in text, text)
         assertTrue("WELCOME TO ZORK!" in text, text)
@@ -38,7 +38,7 @@ class PlayGameTest {
             .filter { it.extension in setOf("dat", "z5", "z8") }
         val problems = stories.flatMap { story ->
             val commands = listOf(" ", " ", " ", "look", "inventory", "examine me", "wait", "undo", "n")
-            play(story, commands).logs.map { "${story.name}: $it" }
+            play(story, commands).failures.map { "${story.name}: $it" }
         }
         assertEquals(emptyList(), problems)
     }

@@ -17,12 +17,17 @@ class ZMachine(val story: Story, private val io: ZIo, private val seed: Long? = 
 
     internal val memory = story.memory
     internal val header = story.header
-    internal val streams = OutputStreams(memory, story.text, io)
+
+    /** Everything the engine could not do or found odd, for developers to read. */
+    val gaps = GapLog(io)
+
+    internal val streams = OutputStreams(memory, story.text, io, gaps)
     internal val lineInput = LineInput(memory, story.text, header.version, story.dictionary)
     internal val stack = CallStack()
     internal var pc = 0
 
     private val decoder = InstructionDecoder(memory, header.version)
+    private val quetzal = Quetzal(memory)
     private val opcodes = Opcodes(this, io)
     private val undoStates = ArrayDeque<UndoState>()
     private var random = newRandom()
@@ -100,7 +105,7 @@ class ZMachine(val story: Story, private val io: ZIo, private val seed: Long? = 
         try {
             opcodes.execute(instruction, resolveOperands(instruction))
         } catch (error: ZMachineError) {
-            io.log("error at 0x${instruction.address.toString(16)}: ${error.message}")
+            gaps.note("error: ${error.message}", instruction.address)
             finishWithNothing(instruction)
         }
     }
@@ -112,7 +117,7 @@ class ZMachine(val story: Story, private val io: ZIo, private val seed: Long? = 
     }
 
     private fun stop(reason: String) {
-        io.log(reason)
+        gaps.note(reason, pc)
         halted = true
     }
 
@@ -162,7 +167,10 @@ class ZMachine(val story: Story, private val io: ZIo, private val seed: Long? = 
 
     internal fun branch(instruction: Instruction, condition: Boolean) {
         val branch = instruction.branch ?: return
-        if (condition != branch.onTrue) return
+        if (condition == branch.onTrue) takeBranch(branch)
+    }
+
+    private fun takeBranch(branch: Branch) {
         when (branch.offset) {
             0 -> returnFromRoutine(0)
             1 -> returnFromRoutine(1)
@@ -222,11 +230,49 @@ class ZMachine(val story: Story, private val io: ZIo, private val seed: Long? = 
 
     /** Starts over. Only the transcript and fixed-pitch bits survive (Standard section 6.1.3). */
     internal fun restart() {
-        val keptFlags = memory.readByte(0x11) and 0x03
-        memory.resetDynamic()
-        memory.writeByte(0x11, (memory.readByte(0x11) and 0x03.inv()) or keptFlags)
+        replaceMemory { memory.resetDynamic() }
         undoStates.clear()
         start()
+    }
+
+    /** Swaps dynamic memory, keeping the flags and header bytes that belong to the interpreter. */
+    private fun replaceMemory(replace: () -> Unit) {
+        val keptFlags = memory.readByte(0x11) and 0x03
+        replace()
+        memory.writeByte(0x11, (memory.readByte(0x11) and 0x03.inv()) or keptFlags)
+        writeHeader()
+    }
+
+    /** The game as a Quetzal file, ready to resume at this save instruction's result. */
+    internal fun saveGame(instruction: Instruction): ByteArray =
+        quetzal.write(stack, instruction.resultAddress)
+
+    /** Loads a Quetzal file and resumes there. False, with nothing changed, if it is unusable. */
+    internal fun restoreGame(data: ByteArray, address: Int): Boolean {
+        val saved = try {
+            quetzal.read(data)
+        } catch (error: ZMachineError) {
+            gaps.note("unusual: save file refused: ${error.message}", address)
+            return false
+        }
+        replaceMemory { memory.restoreDynamic(saved.memory) }
+        stack.load(saved.frames, saved.values)
+        undoStates.clear()
+        pc = saved.pc
+        finishRestoredSave()
+        return true
+    }
+
+    /** The save instruction now finishes: version 3 branches as if true, others store 2. */
+    private fun finishRestoredSave() {
+        if (header.version == 3) {
+            val (branch, next) = decoder.branchAt(pc)
+            pc = next
+            if (branch.onTrue) takeBranch(branch)
+        } else {
+            val variable = memory.readByte(pc++)
+            writeVariable(variable, 2)
+        }
     }
 
     /** Remembers this moment for restore_undo, which resumes just after this instruction. */

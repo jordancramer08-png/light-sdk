@@ -64,6 +64,17 @@ class CallStack {
         if (values.size <= current.stackBase) throw ZMachineError("Stack underflow")
     }
 
+    fun frameList(): List<Frame> = frames
+
+    fun valueList(): List<Int> = values
+
+    /** Replaces everything with frames and values read from a saved game. */
+    fun load(savedFrames: List<Frame>, savedValues: List<Int>) {
+        clear()
+        frames += savedFrames
+        values += savedValues
+    }
+
     fun copy(): CallStack {
         val copy = CallStack()
         copy.restoreFrom(this)

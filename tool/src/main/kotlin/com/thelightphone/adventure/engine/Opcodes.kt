@@ -12,7 +12,9 @@ internal class Opcodes(private val m: ZMachine, private val io: ZIo) {
 
     fun execute(ins: Instruction, a: IntArray) {
         if (a[0] == 0 && actsOnObject(ins)) {
-            m.finishWithNothing(ins) // Real games do this: Curses and So Far, every turn.
+            // Real games do this: Curses and So Far, every turn.
+            m.gaps.note("unusual: object 0 used by ${ins.kind}:${ins.number}", ins.address)
+            m.finishWithNothing(ins)
             return
         }
         when (ins.kind) {
@@ -34,7 +36,7 @@ internal class Opcodes(private val m: ZMachine, private val io: ZIo) {
 
     private fun unimplemented(ins: Instruction) {
         val name = "${ins.kind}:${ins.number} (0x${ins.opcodeByte.toString(16)})"
-        io.log("unimplemented opcode $name at 0x${ins.address.toString(16)}")
+        m.gaps.note("unimplemented opcode $name", ins.address)
     }
 
     private fun signed(value: Int) = value.toShort().toInt()
@@ -121,8 +123,8 @@ internal class Opcodes(private val m: ZMachine, private val io: ZIo) {
             2 -> printInline()
             3 -> printInlineAndReturn()
             4 -> Unit // nop
-            5 -> if (version < 5) legacySave(ins, io.chooseSaveSlot(), 1) else unimplemented(ins)
-            6 -> if (version < 5) legacySave(ins, io.chooseRestoreSlot(), 2) else unimplemented(ins)
+            5 -> if (version < 5) saveGame(ins) else unimplemented(ins)
+            6 -> if (version < 5) restoreGame(ins) else unimplemented(ins)
             7 -> m.restart()
             8 -> m.returnFromRoutine(m.stack.pop())
             9 -> if (version < 5) m.stack.pop() else m.store(ins, m.stack.depth) // pop, catch
@@ -147,9 +149,20 @@ internal class Opcodes(private val m: ZMachine, private val io: ZIo) {
         m.returnFromRoutine(1)
     }
 
-    /** Save and restore only pick a slot for now. Version 3 branches; version 4 stores. */
-    private fun legacySave(ins: Instruction, slot: String?, success: Int) {
-        if (version == 3) m.branch(ins, slot != null) else m.store(ins, if (slot != null) success else 0)
+    private fun saveGame(ins: Instruction) {
+        val slot = io.chooseSaveSlot()
+        reportSave(ins, slot != null && io.writeSave(slot, m.saveGame(ins)))
+    }
+
+    /** A successful restore continues from the saved game, so only failure comes back here. */
+    private fun restoreGame(ins: Instruction) {
+        val data = io.chooseRestoreSlot()?.let(io::readSave)
+        if (data == null || !m.restoreGame(data, ins.address)) reportSave(ins, false)
+    }
+
+    /** Version 3 branches on success; later versions store 1, or 0 for failure. */
+    private fun reportSave(ins: Instruction, success: Boolean) {
+        if (version == 3) m.branch(ins, success) else m.store(ins, if (success) 1 else 0)
     }
 
     /** Sends the status line from globals 0-2 (Standard section 8.2). Version 3 only. */
@@ -187,8 +200,8 @@ internal class Opcodes(private val m: ZMachine, private val io: ZIo) {
             17 -> io.setTextStyle(a[0])
             18 -> io.setBufferMode(a[0] != 0)
             19 -> m.streams.select(signed(a[0]), a[1])
-            20 -> Unit // input_stream: only the keyboard exists.
-            21 -> Unit // sound_effect: sound is not supported.
+            20 -> if (a[0] != 0) stub(ins, "input stream ${a[0]}")
+            21 -> stub(ins, "sound_effect")
             22 -> readChar(ins, a)
             23 -> scanTable(ins, a)
             24 -> m.store(ins, a[0].inv()) // not
@@ -221,6 +234,7 @@ internal class Opcodes(private val m: ZMachine, private val io: ZIo) {
     private fun read(ins: Instruction, a: IntArray) {
         if (version == 3) showStatus()
         val timed = version >= 4 && a[2] != 0 && a[3] != 0
+        if (timed) noteTimedInput(ins)
         val line = waitFor(if (timed) a[2] else 0, a[3]) { tenths ->
             io.readLine(m.lineInput.roomLeft(a[0]), tenths)
         }
@@ -236,7 +250,16 @@ internal class Opcodes(private val m: ZMachine, private val io: ZIo) {
 
     private fun readChar(ins: Instruction, a: IntArray) {
         val timed = a[1] != 0 && a[2] != 0
+        if (timed) noteTimedInput(ins)
         m.store(ins, waitFor(if (timed) a[1] else 0, a[2]) { io.readChar(it) } ?: 0)
+    }
+
+    private fun noteTimedInput(ins: Instruction) {
+        if (!io.capabilities.timedInput) stub(ins, "timed input on a screen without it")
+    }
+
+    private fun stub(ins: Instruction, feature: String) {
+        m.gaps.note("stub: $feature", ins.address)
     }
 
     /** Repeats [input] until it gives a value, the routine says stop, or the game ends. */
@@ -294,18 +317,18 @@ internal class Opcodes(private val m: ZMachine, private val io: ZIo) {
 
     private fun extOp(ins: Instruction, a: IntArray) {
         when (ins.number) {
-            0 -> saveOrRestore(ins, io::chooseSaveSlot, 1)
-            1 -> saveOrRestore(ins, io::chooseRestoreSlot, 2)
+            0 -> if (noAuxiliaryFile(ins)) saveGame(ins)
+            1 -> if (noAuxiliaryFile(ins)) restoreGame(ins)
             2 -> m.store(ins, logShift(a[0], signed(a[1])))
             3 -> m.store(ins, arithmeticShift(a[0], signed(a[1])))
             4 -> m.store(ins, setFont(a[0]))
-            5, 7, 28 -> Unit // draw_picture, erase_picture, picture_table: no pictures.
-            6 -> m.branch(ins, false) // picture_data: no picture exists.
+            5, 7, 28 -> stub(ins, "pictures")
+            6 -> pictureData(ins)
             9 -> saveUndo(ins)
             10 -> if (!m.restoreUndo()) m.store(ins, 0)
             11 -> printUnicode(a[0])
             12 -> m.store(ins, checkUnicode(a[0]))
-            13 -> Unit // set_true_colour: the standard colors are all that is supported.
+            13 -> stub(ins, "set_true_colour")
             else -> unimplemented(ins)
         }
     }
@@ -315,10 +338,17 @@ internal class Opcodes(private val m: ZMachine, private val io: ZIo) {
         m.store(ins, 1)
     }
 
-    /** Extended save and restore. Operands mean an auxiliary file, which is not supported. */
-    private fun saveOrRestore(ins: Instruction, chooseSlot: () -> String?, success: Int) {
-        val slot = if (ins.operandValues.isEmpty()) chooseSlot() else null
-        m.store(ins, if (slot != null) success else 0)
+    private fun pictureData(ins: Instruction) {
+        stub(ins, "pictures")
+        m.branch(ins, false)
+    }
+
+    /** Extended save and restore with operands use an auxiliary file, which is not supported. */
+    private fun noAuxiliaryFile(ins: Instruction): Boolean {
+        if (ins.operandValues.isEmpty()) return true
+        stub(ins, "auxiliary save files")
+        m.store(ins, 0)
+        return false
     }
 
     private fun logShift(value: Int, places: Int) =
@@ -335,7 +365,10 @@ internal class Opcodes(private val m: ZMachine, private val io: ZIo) {
                 font = requested
                 previous
             }
-            else -> 0
+            else -> {
+                m.gaps.note("stub: font $requested", m.pc)
+                0
+            }
         }
     }
 

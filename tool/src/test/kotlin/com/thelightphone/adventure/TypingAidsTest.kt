@@ -154,7 +154,7 @@ class TypingAidsTest {
     @Test
     fun panelsToggleAndReplaceEachOther() {
         val typing = aids()
-        typing.togglePanel(GamePanel.SETTINGS)
+        typing.togglePanel(GamePanel.MENU)
         typing.togglePanel(GamePanel.HISTORY)
         assertEquals(GamePanel.HISTORY, typing.state.value.panel)
         typing.togglePanel(GamePanel.HISTORY)

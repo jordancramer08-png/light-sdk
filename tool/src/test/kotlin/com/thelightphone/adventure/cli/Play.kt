@@ -114,7 +114,12 @@ class ConsoleIo(
     }
 
     override fun splitWindow(lines: Int) {
-        while (upper.size > lines) upper.removeAt(upper.size - 1)
+        val dropped = ArrayList<String>()
+        while (upper.size > lines) {
+            val text = upper.removeAt(upper.size - 1).toString().trim()
+            if (text.isNotEmpty() && lines > 0) dropped.add(0, text)
+        }
+        dropped.forEach { printLower("\n$it\n") }
         while (upper.size < lines) upper.add(StringBuilder())
     }
 

@@ -131,7 +131,7 @@ SDK plugin's allowlist in `LightToolMetadata.kt` has the same addition Listen ma
 matches Listen's exactly). `Adventure Games.cmd` in the project root copies games over with adb and
 grants the permission. Unlike Listen's sync file, it does not read `local.properties` to find adb.
 
-## Status (end of Session 8, 2026-11-06)
+## Status (end of Session 9, 2026-11-06)
 
 Finished:
 
@@ -141,6 +141,8 @@ Finished:
 - Session 3: instruction decoding, the opcode set, the version 3 status line and the console
   player.
 - Session 4: Quetzal save and restore, replay tests and the gap log.
+- Session 9: Settings screen, three color themes, plain error messages, stuck-game handling and
+  fixes for the gaps that affected the test games.
 - Session 8: game shelf, Licenses screen, Blorb unwrapping and `Adventure Games.cmd`.
 - Session 7: game menu, five save slots per game, automatic save and resume.
 - Session 6: typing aids. All rules are in `TypingAids.kt`, tested without a screen.
@@ -156,8 +158,14 @@ Finished:
   changes. Its code is under `tool/src/test` too.
 - Nothing has been installed on the phone.
 
-Next: Session 9, settings, safety and a full test run. Jordan will install on the phone at the very end, so
-the screen stays unseen until then.
+**Session 9's final APK build is still pending.** All 145 tests pass, but
+`tool\build\outputs\apk\release\tool-release.apk` is an old build from Session 8 and has none of the
+Session 9 work. On 2026-11-06 `.\gradlew.bat :tool:assembleRelease` failed once with its error not
+captured, and new `hs_err` files suggest Java crashed. A second try was stopped for critically low
+memory (814 MB of 7.8 GB free) during shrinking. Close other apps before trying again.
+
+Next: finish that build, then check the new APK's permissions. Then Session 10, install on the phone
+and test. Follow "Installing on the phone" below.
 
 How the new parts work:
 
@@ -176,6 +184,17 @@ How the new parts work:
 - **Phone files:** saves are in `filesDir/saves/r<release>-<serial>-<checksum>/`, as `slot1.qzl`
   to `slot5.qzl` with `slotN.txt` (time and label), and `auto.qzl` with `auto.txt` (recent text).
   Gaps are in `filesDir/gaps.txt`.
+- **Settings:** `SettingsScreen.kt` holds the screen and `AppSettings`, kept in the SDK data store.
+  The three themes are in `ThemePalettes` in `AdventureTheme.kt`.
+- **Errors:** `GameUiState.problem` replaces the game with a plain message and a way back to the
+  shelf. The technical reason goes in `gaps.txt`. Only `ZMachine.quitByGame` clears the automatic
+  save. An instruction that fails is still logged and the game carries on.
+- **Stuck games:** the engine runs on its own thread, and text reaches the screen every 100 ms even
+  if the game never asks for input. Leaving calls `requestStop`, which allows 1.5 seconds to reach a
+  prompt, so a finishing turn is still saved. A stuck game then stops without an automatic save.
+- **Quote boxes:** when the upper window shrinks, cut-off rows move into the story as plain lines.
+  Curses shows its quotes this way. Its status band loses row 2 until the next turn, as on any
+  interpreter, which is what the old "missing row" note was.
 - **Shelf:** `Shelf.kt` holds the rules, in `ShelfViewModel`. Custom names and play dates are in
   `filesDir/shelf/<game key>.txt`; `last.txt` names the game for Continue.
 - **Saving at a prompt:** Quetzal can only resume from a `save` instruction, so menu saves, automatic
@@ -200,15 +219,16 @@ Game screen:
   text size setting all need checking on the phone.
 - An automatic save only happens at a prompt. If the app is killed while a turn is running, or
   while the game's own slot picker is open, the previous automatic save stays.
-- After resuming, the story shows the last 40 lines without colors or command highlighting, and
-  the upper band stays empty until the next turn. History and menu Undo start empty.
+- After resuming, the story shows the last 40 lines without colors or command highlighting, and the
+  upper band returns without its colors. History and menu Undo start empty.
+- A game stuck in a loop stops without saving, so it resumes from the last automatic save.
+- With automatic save off, an older automatic save is kept but ignored.
 - Restoring a slot does not put back the story text; it adds a note to what is on screen.
 - Games are told the screen is 40 columns by 24 lines. The upper band scales to fit 40 columns.
 - Keyboard presses have no haptic click: the SDK helper needs `LocalContext`, which is blocked.
 - `read_char` is a Send: the first letter typed, or Return if the line is empty.
 - `erase_window` clears the scrollback as well as the screen.
 - Text sizes are 15, 18 (default), 21 and 25 sp. These are guesses until seen on the phone.
-- Only the three Zork games can be started until the game shelf in Session 8.
 
 Shelf and phone script:
 
@@ -250,22 +270,19 @@ Input and output:
 - Stream 4 (command record) and input stream 1 (commands from a file) are logged stubs.
 - Timed input has never run in a real game. The phone view model supports it and keeps typed
   text in the input line; the console waits forever and does not claim support.
-- Read terminators other than Enter are ignored (the header's terminating characters table).
+- Read terminators other than Enter are ignored. No test game is affected: all their tables are
+  empty or absent (checked 2026-11-06).
 - Sound, pictures, `set_true_colour` and fonts other than 1 and 4 are logged stubs.
 - The console shows neither colors nor text styles. The game screen is written to.
 - The console shows the upper window as `|` lines before each prompt, not as a real screen.
-- Curses: the second status row is missing after one `inventory`, repeatably, with three blank
-  lines, `look`, `inventory` and seed 42. The same command elsewhere shows both rows. Cause not
-  found; it could be the console or the engine. Curses is not on the temporary home screen, so
-  recheck it after the game shelf in Session 8.
 - Characters beyond the 16-bit range cannot be typed into a buffer correctly.
 
 Engine:
 
 - An instruction that fails stores 0, counts its test as false, and the game carries on. That
   keeps games alive but may hide a wrong result, so check `logs\` if a game misbehaves.
-- The engine stops only if the program counter leaves the story.
-- `restart` does not reset the font number or the upper-window flag held in `Opcodes`.
+- The engine stops only if the program counter leaves the story, a game returns from its main
+  routine, or recovery from an error itself fails. Each shows the plain message.
 
 Testing:
 
@@ -293,6 +310,35 @@ Worth knowing:
 - The APK lists `INTERNET` and `CAMERA` because of SDK libraries, not our code.
 - A clean Listen rebuild is untested since 2026-10-02. See the Build section.
 
+## Known issue: permissions from the SDK
+
+`tool/lighttool.toml` asks only for `MANAGE_EXTERNAL_STORAGE`. The Session 8 APK also lists these
+(recheck once the Session 9 APK is built),
+all added by SDK libraries and not by our code: `INTERNET`, `ACCESS_NETWORK_STATE`, `CAMERA`,
+`FOREGROUND_SERVICE`, `RECEIVE_BOOT_COMPLETED`, `VIBRATE` and `WAKE_LOCK`. They have not been removed
+by hand. No location permission is present. Our code has no network or location calls, and
+`FinishingTest` fails if any are added.
+
+## Installing on the phone
+
+Copied from how Listen is installed (`listen\HOW TO USE.txt` and `listen\kit\kit.ps1`). Adventure has
+no install `.cmd` of its own, so these are the same commands typed by hand. Run them from PowerShell
+in the project root. Nothing has been installed yet.
+
+1. Build the APK: `.\gradlew.bat :tool:assembleRelease`
+2. Plug in and unlock the phone with a data USB cable. Check it is listed: `adb devices`
+   If adb is not on the PATH, use its full path. Tap "Allow" on the phone if it asks.
+3. Install as an update, which keeps data and never uninstalls:
+   `adb install -r tool\build\outputs\apk\release\tool-release.apk`
+4. Give Adventure storage access. Either use option 4 in `Adventure Games.cmd`, or:
+   `adb shell appops set com.thelightphone.adventure MANAGE_EXTERNAL_STORAGE allow`
+5. Restart the phone, because the launcher only shows a new tool after a restart: `adb reboot`
+6. Add games with `Adventure Games.cmd`, option 2.
+
+If the install reports `UPDATE_INCOMPATIBLE` or that signatures do not match, stop. Do not uninstall
+Adventure, because that erases its saves. Keep the error and work out which key signed each APK. Builds
+use the SDK dev key, `sdk\keys\lightsdk-dev.jks`.
+
 ## Sessions
 
 - [x] Session 0: Create the project
@@ -304,6 +350,6 @@ Worth knowing:
 - [x] Session 6: Typing aids (not yet seen on the phone)
 - [x] Session 7: Saving and the game menu (not yet seen on the phone)
 - [x] Session 8: Game shelf and add-games script (not yet seen on the phone)
-- [ ] Session 9: Settings, safety and a full test run
+- [ ] Session 9: Settings, safety and a full test run (all done except the final APK build)
 - [ ] Session 10: Install on the phone and test
 - [ ] Sessions 11-16: Bestiary mod

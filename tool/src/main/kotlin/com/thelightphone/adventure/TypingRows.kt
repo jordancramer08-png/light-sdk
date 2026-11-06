@@ -141,21 +141,7 @@ private fun SlotRow(slot: SlotInfo, confirming: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-fun SettingsPanel(
-    textSize: Int,
-    quickRowShown: Boolean,
-    onNextTextSize: () -> Unit,
-    onToggleQuickRow: () -> Unit,
-    modifier: Modifier,
-) {
-    Column(modifier = modifier.fillMaxWidth().padding(horizontal = 10.dp)) {
-        SettingRow("Text size", textSize.toString(), onNextTextSize)
-        SettingRow("Quick buttons", if (quickRowShown) "On" else "Off", onToggleQuickRow)
-    }
-}
-
-@Composable
-private fun SettingRow(label: String, value: String, onClick: () -> Unit) {
+fun SettingRow(label: String, value: String, onClick: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,

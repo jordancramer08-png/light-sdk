@@ -37,6 +37,7 @@ class LicensesScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Un
 
     @Composable
     override fun Content() {
+        rememberAppSettings(lightContext.dataStore)
         LightTheme(colors = AdventureTheme.lightColors) {
             Column(Modifier.fillMaxSize().background(AdventureTheme.background)) {
                 LightTopBar(

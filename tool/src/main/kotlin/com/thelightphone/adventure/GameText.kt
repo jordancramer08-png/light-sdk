@@ -35,6 +35,7 @@ data class GameUiState(
     val waitingForKey: Boolean = false,
     val commandsTaken: Int = 0,
     val finished: Boolean = false,
+    val problem: String? = null,
 )
 
 /** The right side of the status bar. */
@@ -62,6 +63,8 @@ class StoryLog {
     }
 
     private fun addToLastLine(span: StorySpan) {
+        // A game printing forever with no new line must not grow one line without limit.
+        if (lines.last().sumOf { it.text.length } + span.text.length > MAX_LINE_LENGTH) startLine()
         val line = lines.last()
         val previous = line.lastOrNull()
         if (previous != null && previous.copy(text = "") == span.copy(text = "")) {
@@ -77,6 +80,7 @@ class StoryLog {
 
     private companion object {
         const val MAX_LINES = 1500
+        const val MAX_LINE_LENGTH = 4000
     }
 }
 
@@ -89,10 +93,25 @@ class UpperWindow(private val width: Int) {
     var column = 1
         private set
 
-    fun resize(lineCount: Int) {
-        while (rows.size > lineCount) rows.removeAt(rows.size - 1)
+    /**
+     * Returns the text of rows that were cut off. On a real screen it stays visible in the lower
+     * window, which is how games like Curses show quote boxes. Closing the window entirely
+     * returns nothing, because then it is only the status line going away.
+     */
+    fun resize(lineCount: Int): List<String> {
+        val dropped = ArrayList<String>()
+        while (rows.size > lineCount) {
+            val text = rowText(rows.removeAt(rows.size - 1))
+            if (text.isNotEmpty() && lineCount > 0) dropped.add(0, text)
+        }
         while (rows.size < lineCount) rows += arrayOfNulls<StorySpan>(width)
+        return dropped
     }
+
+    private fun rowText(row: Array<StorySpan?>) = row.joinToString("") { it?.text ?: " " }.trim()
+
+    /** Each row as plain text, for the automatic save. */
+    fun plainRows(): List<String> = rows.map(::rowText)
 
     fun moveCursor(newLine: Int, newColumn: Int) {
         line = newLine

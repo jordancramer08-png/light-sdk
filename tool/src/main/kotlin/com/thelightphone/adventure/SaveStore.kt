@@ -37,6 +37,7 @@ class SaveStore(root: File, key: String, private val clock: () -> Long = System:
     private val folder = File(root, "saves/$key")
     private val autoSave = File(folder, "auto.qzl")
     private val autoText = File(folder, "auto.txt")
+    private val autoUpper = File(folder, "auto-upper.txt")
 
     private fun slotFile(number: Int) = File(folder, "slot$number.qzl")
 
@@ -62,18 +63,23 @@ class SaveStore(root: File, key: String, private val clock: () -> Long = System:
 
     fun read(number: Int): ByteArray? = readOrNull(slotFile(number))
 
-    /** [text] is the end of the story so far, to show again on resuming. */
-    fun writeAuto(data: ByteArray, text: String): Boolean =
-        replace(autoSave, data) && replace(autoText, text.toByteArray())
+    /** [text] and [upperRows] are what was on screen, to show again on resuming. */
+    fun writeAuto(data: ByteArray, text: String, upperRows: List<String>): Boolean =
+        replace(autoSave, data) && replace(autoText, text.toByteArray()) &&
+            replace(autoUpper, upperRows.joinToString("\n").toByteArray())
 
     fun readAuto(): ByteArray? = readOrNull(autoSave)
 
     fun readAutoText(): String = readOrNull(autoText)?.toString(Charsets.UTF_8) ?: ""
 
+    fun readAutoUpperRows(): List<String> =
+        readOrNull(autoUpper)?.toString(Charsets.UTF_8)?.split('\n') ?: emptyList()
+
     /** A game that has ended has nothing to resume. */
     fun clearAuto() {
         autoSave.delete()
         autoText.delete()
+        autoUpper.delete()
     }
 
     /** Removes every save for this game. */

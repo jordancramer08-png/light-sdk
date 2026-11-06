@@ -42,13 +42,36 @@ class ZMachine(val story: Story, private val io: ZIo, private val seed: Long? = 
     var halted = false
         private set
 
+    /** Why the engine had to stop, or null if it did not. A game that quits is not a failure. */
+    var failure: String? = null
+        private set
+
+    /** True if the game itself ended with the quit opcode. */
+    var quitByGame = false
+        private set
+
+    @Volatile
+    private var stopDeadline = Long.MAX_VALUE
+
     init {
         start()
     }
 
-    /** Runs until the game quits. */
+    /** Runs until the game quits, or [requestStop]'s time runs out. */
     fun run() {
-        while (!halted) step()
+        var steps = 0
+        while (!halted) {
+            step()
+            if (++steps and STOP_CHECK_MASK == 0 && System.nanoTime() > stopDeadline) return
+        }
+    }
+
+    /**
+     * Ends [run] from another thread. A game that is only finishing a turn gets a moment to reach
+     * its next prompt, so that turn can be saved. One stuck in a loop is then stopped.
+     */
+    fun requestStop() {
+        stopDeadline = System.nanoTime() + STOP_GRACE_NANOS
     }
 
     private fun start() {
@@ -111,9 +134,18 @@ class ZMachine(val story: Story, private val io: ZIo, private val seed: Long? = 
             opcodes.execute(instruction, resolveOperands(instruction))
         } catch (error: ZMachineError) {
             gaps.note("error: ${error.message}", instruction.address)
-            finishWithNothing(instruction)
+            recover(instruction)
         } catch (cancelled: ZInputCancelled) {
             // The game was replaced while waiting for input, and carries on from its new state.
+        }
+    }
+
+    /** Carries on after a failed instruction, or stops if even that is impossible. */
+    private fun recover(instruction: Instruction) {
+        try {
+            finishWithNothing(instruction)
+        } catch (error: ZMachineError) {
+            stop("cannot recover at 0x${instruction.address.toString(16)}: ${error.message}")
         }
     }
 
@@ -125,6 +157,7 @@ class ZMachine(val story: Story, private val io: ZIo, private val seed: Long? = 
 
     private fun stop(reason: String) {
         gaps.note(reason, pc)
+        failure = reason
         halted = true
     }
 
@@ -232,6 +265,7 @@ class ZMachine(val story: Story, private val io: ZIo, private val seed: Long? = 
     }
 
     internal fun quit() {
+        quitByGame = true
         halted = true
     }
 
@@ -239,6 +273,7 @@ class ZMachine(val story: Story, private val io: ZIo, private val seed: Long? = 
     internal fun restart() {
         replaceMemory { memory.resetDynamic() }
         undoStates.clear()
+        opcodes.reset()
         start()
     }
 
@@ -334,5 +369,7 @@ class ZMachine(val story: Story, private val io: ZIo, private val seed: Long? = 
         const val INTERPRETER_NUMBER = 6 // IBM PC, a neutral choice among the Standard's list.
         const val MIN_OPERANDS = 8
         const val MAX_UNDO = 10
+        const val STOP_CHECK_MASK = 0xFFFF
+        const val STOP_GRACE_NANOS = 1_500_000_000L
     }
 }

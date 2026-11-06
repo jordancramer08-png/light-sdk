@@ -137,7 +137,16 @@ class ObjectTable(
      */
     fun propertyNumbers(obj: Int): List<Int> = properties(obj).map { it.number }
 
-    private fun find(obj: Int, number: Int) = properties(obj).firstOrNull { it.number == number }
+    /** Walks the list without building it, because games look up properties constantly. */
+    private fun find(obj: Int, number: Int): Property? {
+        val table = propertyTable(obj)
+        var address = table + 1 + 2 * memory.readByte(table)
+        while (true) {
+            val property = propertyAt(address) ?: return null
+            if (property.number == number) return property
+            address = property.dataAddress + property.size
+        }
+    }
 
     /** The `get_prop` value: the object's own value, or the default for that property. */
     fun getProperty(obj: Int, number: Int): Int {

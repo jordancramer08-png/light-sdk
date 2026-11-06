@@ -34,11 +34,20 @@ import kotlinx.coroutines.launch
  * [dataFolder] holds saves and the gap log. Saves are in a folder made from the game's identity.
  */
 class GameViewModel(
-    private val storyBytes: ByteArray,
+    private val loadStory: () -> ByteArray,
     private val dataFolder: File,
     private val seed: Long? = null,
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val autosaveEnabled: () -> Boolean = { true },
 ) : LightViewModel<Unit>() {
+    constructor(
+        storyBytes: ByteArray,
+        dataFolder: File,
+        seed: Long? = null,
+        dispatcher: CoroutineDispatcher = Dispatchers.IO,
+        autosaveEnabled: () -> Boolean = { true },
+    ) : this({ storyBytes }, dataFolder, seed, dispatcher, autosaveEnabled)
+
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
     private val typed = LinkedBlockingQueue<Typed>()
     private val mutableState = MutableStateFlow(GameUiState())
@@ -46,6 +55,9 @@ class GameViewModel(
 
     @Volatile
     private var saves: SaveStore? = null
+
+    @Volatile
+    private var machine: ZMachine? = null
 
     val state: StateFlow<GameUiState> = mutableState.asStateFlow()
 
@@ -82,6 +94,7 @@ class GameViewModel(
     fun stop() {
         autosave()
         typed.put(Typed.Stop)
+        machine?.requestStop()
         scope.cancel()
     }
 
@@ -145,20 +158,33 @@ class GameViewModel(
     private fun runGame() {
         val io = GameIo()
         try {
-            val story = Story(storyFromBlorb(storyBytes))
+            val story = Story(storyFromBlorb(loadStory()))
             val store = SaveStore(dataFolder, gameKey(story))
             saves = store
             typing.useDictionary(dictionaryWords(story), story.text.dictionaryZChars)
-            val machine = ZMachine(story, io, seed)
-            io.begin(machine, store)
-            machine.run()
-            store.clearAuto()
-            io.publish(finished = true)
+            val running = ZMachine(story, io, seed)
+            machine = running
+            io.begin(running, store)
+            running.run()
+            finishGame(running, store, io)
         } catch (stopped: GameStopped) {
             // The player left; nothing more to show.
         } catch (error: ZMachineError) {
-            io.print("\n[This game cannot run: ${error.message}]\n")
-            io.publish(finished = true)
+            io.fail(if (machine == null) CANNOT_OPEN else STOPPED, error)
+        } catch (error: Throwable) {
+            // Nothing the engine does may take the app down. The automatic save is left alone.
+            io.fail(STOPPED, error)
+        }
+    }
+
+    /** Only a game that really quit loses its automatic save. */
+    private fun finishGame(running: ZMachine, store: SaveStore, io: GameIo) {
+        when {
+            running.failure != null -> io.fail(STOPPED, null)
+            running.quitByGame -> {
+                store.clearAuto()
+                io.publish(finished = true)
+            }
         }
     }
 
@@ -205,13 +231,31 @@ class GameViewModel(
         /** One save per recent turn, oldest first, for the menu's Undo. */
         private val turns = ArrayDeque<ByteArray>()
         private var lastTurnKept = -1
+        private var lastPublished = 0L
 
         /** Connects the running game, and resumes from the automatic save if there is one. */
         fun begin(machine: ZMachine, store: SaveStore) {
             this.machine = machine
             this.store = store
+            if (!autosaveEnabled()) return
             val saved = store.readAuto() ?: return
-            if (machine.loadSaved(saved)) log.append(store.readAutoText(), StorySpan(""))
+            if (machine.loadSaved(saved)) showResumedScreen()
+        }
+
+        private fun showResumedScreen() {
+            log.append(store.readAutoText(), StorySpan(""))
+            val rows = store.readAutoUpperRows()
+            upper.resize(rows.size)
+            rows.forEachIndexed { index, row ->
+                upper.moveCursor(index + 1, 1)
+                upper.write(row, StorySpan(""))
+            }
+        }
+
+        /** Shows a plain message, keeping the technical reason for the gap log. */
+        fun fail(message: String, cause: Throwable?) {
+            if (cause != null) log("error: stopped by $cause")
+            mutableState.update { it.copy(problem = message, waitingForInput = false) }
         }
 
         fun publish(waiting: Boolean = false, forKey: Boolean = false, finished: Boolean = false) {
@@ -231,6 +275,15 @@ class GameViewModel(
         override fun print(text: String) {
             if (inUpper) upper.write(text, look) else log.append(text, look)
             typing.notePrinted(text)
+            showWhileRunning()
+        }
+
+        /** A game that prints without stopping for input must still reach the screen. */
+        private fun showWhileRunning() {
+            val now = System.nanoTime()
+            if (now - lastPublished < PUBLISH_GAP_NANOS) return
+            lastPublished = now
+            publish()
         }
 
         /** Waits for the player, doing any menu actions. Null if [timeoutTenths] runs out. */
@@ -271,9 +324,11 @@ class GameViewModel(
         }
 
         private fun saveAutomatically() {
+            if (!autosaveEnabled()) return
             val data = machine.saveAtInput() ?: return
             val recent = log.snapshot().takeLast(RESUME_LINES)
-            store.writeAuto(data, recent.joinToString("\n") { line -> line.joinToString("") { it.text } })
+            val text = recent.joinToString("\n") { line -> line.joinToString("") { it.text } }
+            store.writeAuto(data, text, upper.plainRows())
         }
 
         private fun note(message: String) {
@@ -360,7 +415,9 @@ class GameViewModel(
             this.status = status
         }
 
-        override fun splitWindow(lines: Int) = upper.resize(lines)
+        override fun splitWindow(lines: Int) {
+            upper.resize(lines).forEach { log.append("\n$it\n", StorySpan("")) }
+        }
 
         override fun setWindow(window: Int) {
             inUpper = window == 1
@@ -368,8 +425,8 @@ class GameViewModel(
         }
 
         override fun eraseWindow(window: Int) {
-            if (window == -1) upper.resize(0)
             if (window == 1 || window < 0) upper.clear()
+            if (window == -1) upper.resize(0)
             if (window == 0 || window < 0) log.clear()
         }
 
@@ -412,6 +469,11 @@ class GameViewModel(
     }
 
     companion object {
+        const val CANNOT_OPEN =
+            "This game could not be opened. The file may be damaged, or it may be a kind this app does not support."
+        const val STOPPED =
+            "The game stopped because of a problem. Your automatic save has been kept."
+
         /** Columns games are told about. The upper band scales its font to fit them. */
         const val UPPER_COLUMNS = 40
         private const val SCREEN_LINES = 24
@@ -419,5 +481,6 @@ class GameViewModel(
         private const val MAX_UNDO_TURNS = 10
         private const val RESUME_LINES = 40
         private const val MAX_LABEL = 32
+        private const val PUBLISH_GAP_NANOS = 100_000_000L
     }
 }

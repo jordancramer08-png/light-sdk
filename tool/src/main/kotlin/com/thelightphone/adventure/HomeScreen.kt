@@ -56,13 +56,13 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
 
     private fun open(entry: ShelfEntry) {
         viewModel.markPlayed(entry)
-        val bytes = viewModel.storyBytes(entry)
-        navigateTo({ GameScreen(it, entry.title, bytes) })
+        navigateTo({ GameScreen(it, entry.title) { viewModel.storyBytes(entry) } })
     }
 
     @Composable
     override fun Content() {
         val state by viewModel.state.collectAsState()
+        rememberAppSettings(lightContext.dataStore)
         LightTheme(colors = AdventureTheme.lightColors) {
             val renaming = state.renaming
             if (renaming != null) RenameEditor(renaming) else ShelfList(state)
@@ -88,8 +88,8 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
             LightTopBar(
                 center = LightTopBarCenter.Text("Adventure"),
                 rightButton = LightBarButton.Text(
-                    text = "Licenses",
-                    onClick = { navigateTo({ LicensesScreen(it) }) },
+                    text = "Settings",
+                    onClick = { navigateTo({ SettingsScreen(it) }) },
                 ),
             )
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 10.dp)) {
@@ -98,6 +98,7 @@ class HomeScreen(sealedActivity: SealedLightActivity) :
                 }
                 items(state.entries, key = { it.key }) { entry -> GameRow(entry, state.removing) }
                 item { ShelfNotes(state) }
+                item { Actions("Licenses" to { navigateTo({ LicensesScreen(it) }) }) }
             }
         }
     }

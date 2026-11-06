@@ -22,7 +22,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,9 +38,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.datastore.preferences.core.booleanPreferencesKey
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.intPreferencesKey
 import com.thelightphone.adventure.engine.ZStatusLine
 import com.thelightphone.lp3Keyboard.ui.LayoutOptions
 import com.thelightphone.lp3Keyboard.ui.viewmodel.EnQwertyLp3KeyboardViewModel
@@ -55,24 +51,23 @@ import com.thelightphone.sdk.ui.LightThemeTokens
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.keyboard.LightEmbeddedLp3Keyboard
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.launch
-
-private val TEXT_SIZE_KEY = intPreferencesKey("text_size")
-private val QUICK_ROW_KEY = booleanPreferencesKey("quick_row_shown")
 
 /** Plays one game: status band on top, story in the middle, input line at the bottom. */
 class GameScreen(
     sealedActivity: SealedLightActivity,
     private val title: String,
-    private val storyBytes: ByteArray,
+    private val loadStory: () -> ByteArray,
 ) :
     LightScreen<Unit, GameViewModel>(sealedActivity) {
 
     override val viewModelClass = GameViewModel::class.java
 
     override fun createViewModel() =
-        GameViewModel(storyBytes, lightContext.filesDir)
+        GameViewModel(
+            loadStory = loadStory,
+            dataFolder = lightContext.filesDir,
+            autosaveEnabled = { AppSettings.latest.autosave },
+        )
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent) = GameKeys.isIgnored(keyCode)
 
@@ -83,23 +78,7 @@ class GameScreen(
 
     @Composable
     override fun Content() {
-        val store = lightContext.dataStore
-        val textSize by remember { store.data.map { it[TEXT_SIZE_KEY] ?: TextSizes.DEFAULT } }
-            .collectAsState(TextSizes.DEFAULT)
-        val quickRowShown by remember { store.data.map { it[QUICK_ROW_KEY] ?: true } }
-            .collectAsState(true)
-        val scope = rememberCoroutineScope()
-        val settings = Settings(
-            textSize = textSize,
-            quickRowShown = quickRowShown,
-            onNextTextSize = {
-                scope.launch { store.edit { it[TEXT_SIZE_KEY] = TextSizes.next(textSize) } }
-            },
-            onToggleQuickRow = {
-                scope.launch { store.edit { it[QUICK_ROW_KEY] = !quickRowShown } }
-            },
-        )
-
+        val settings = rememberAppSettings(lightContext.dataStore)
         LightTheme(colors = AdventureTheme.lightColors) {
             Column(Modifier.fillMaxSize().background(AdventureTheme.background)) {
                 LightTopBar(
@@ -110,27 +89,34 @@ class GameScreen(
                         onClick = { viewModel.typing.togglePanel(GamePanel.MENU) },
                     ),
                 )
-                GameBody(viewModel, settings, onLeave = { goBack() })
+                GameBody(
+                    game = viewModel,
+                    settings = settings,
+                    onSettings = { navigateTo({ SettingsScreen(it) }) },
+                    onLeave = { goBack() },
+                )
             }
         }
     }
 }
 
-/** The saved settings, and what to do when the player changes them. */
-private class Settings(
-    val textSize: Int,
-    val quickRowShown: Boolean,
-    val onNextTextSize: () -> Unit,
-    val onToggleQuickRow: () -> Unit,
-)
-
 @Composable
-private fun GameBody(game: GameViewModel, settings: Settings, onLeave: () -> Unit) {
+private fun GameBody(
+    game: GameViewModel,
+    settings: AppSettings,
+    onSettings: () -> Unit,
+    onLeave: () -> Unit,
+) {
     val state by game.state.collectAsState()
     val picker by game.picker.collectAsState()
     val typing by game.typing.state.collectAsState()
     var keyboardOpen by remember { mutableStateOf(false) }
 
+    val problem = state.problem
+    if (problem != null) {
+        ProblemPanel(problem, onLeave)
+        return
+    }
     Column(Modifier.fillMaxSize()) {
         state.status?.let { StatusBar(it) }
         if (state.upperRows.isNotEmpty()) UpperBand(state.upperRows)
@@ -138,9 +124,11 @@ private fun GameBody(game: GameViewModel, settings: Settings, onLeave: () -> Uni
         if (openPicker != null) {
             SlotPanel(openPicker, game::pickSlot, game::cancelPicker, Modifier.weight(1f))
         } else {
-            MiddleArea(game, state, typing, settings, keyboardOpen, onLeave) { keyboardOpen = false }
+            MiddleArea(game, state, typing, settings.textSize, keyboardOpen, onSettings, onLeave) {
+                keyboardOpen = false
+            }
         }
-        if (settings.quickRowShown) QuickRow(state.waitingForInput, game::send)
+        if (settings.quickRow) QuickRow(state.waitingForInput, game::send)
         VerbOrSuggestionRow(typing.suggestions, game.typing::addWord, game.typing::complete)
         InputLine(
             typed = typing.text,
@@ -154,40 +142,46 @@ private fun GameBody(game: GameViewModel, settings: Settings, onLeave: () -> Uni
     }
 }
 
-/** The story, or the history or settings in its place. */
+/** A plain message in place of the game, with the way back to the shelf. */
+@Composable
+private fun ProblemPanel(message: String, onLeave: () -> Unit) {
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        BasicText(message, style = TextStyle(color = AdventureTheme.storyText, fontSize = 18.sp))
+        BasicText(
+            text = "Back to shelf",
+            style = TextStyle(color = AdventureTheme.quickText, fontSize = 18.sp),
+            modifier = Modifier.clickable(onClick = onLeave).padding(vertical = 18.dp),
+        )
+    }
+}
+
+/** The story, or the history or menu in its place. */
 @Composable
 private fun ColumnScope.MiddleArea(
     game: GameViewModel,
     state: GameUiState,
     typing: TypingState,
-    settings: Settings,
+    textSize: Int,
     keyboardOpen: Boolean,
+    onSettings: () -> Unit,
     onLeave: () -> Unit,
     onCloseKeyboard: () -> Unit,
 ) {
     val fill = Modifier.weight(1f)
     when (typing.panel) {
-        GamePanel.HISTORY ->
-            HistoryPanel(typing.history, settings.textSize, game.typing::pickFromHistory, fill)
+        GamePanel.HISTORY -> HistoryPanel(typing.history, textSize, game.typing::pickFromHistory, fill)
         GamePanel.MENU -> MenuPanel(
             onSave = { game.openPicker(SlotMode.SAVE) },
             onRestore = { game.openPicker(SlotMode.RESTORE) },
             onUndo = game::undo,
             onRestart = game::restart,
-            onSettings = { game.typing.togglePanel(GamePanel.SETTINGS) },
+            onSettings = onSettings,
             onLeave = onLeave,
             modifier = fill,
         )
-        GamePanel.SETTINGS -> SettingsPanel(
-            settings.textSize,
-            settings.quickRowShown,
-            settings.onNextTextSize,
-            settings.onToggleQuickRow,
-            fill,
-        )
         GamePanel.NONE -> StoryText(
             lines = state.lines,
-            textSize = settings.textSize,
+            textSize = textSize,
             keyboardOpen = keyboardOpen,
             onWord = game.typing::addWord,
             onTap = onCloseKeyboard,
@@ -308,7 +302,11 @@ private fun InputLine(
     onHistory: () -> Unit,
     onSend: () -> Unit,
 ) {
-    val hint = if (state.finished) "The game has ended" else "Tap to type"
+    val hint = when {
+        state.finished -> "The game has ended"
+        state.waitingForInput -> "Tap to type"
+        else -> "The game is working..."
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()

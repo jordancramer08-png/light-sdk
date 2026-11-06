@@ -34,7 +34,7 @@ object QuickButtons {
 }
 
 /** What fills the story area instead of the story. */
-enum class GamePanel { NONE, HISTORY, SETTINGS, MENU }
+enum class GamePanel { NONE, HISTORY, MENU }
 
 /** The input line and everything that helps fill it. History is newest first. */
 data class TypingState(

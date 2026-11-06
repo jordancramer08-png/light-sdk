@@ -10,6 +10,12 @@ internal class Opcodes(private val m: ZMachine, private val io: ZIo) {
     private var font = 1
     private var currentWindowIsUpper = false
 
+    /** Back to how a new game starts. */
+    fun reset() {
+        font = 1
+        currentWindowIsUpper = false
+    }
+
     fun execute(ins: Instruction, a: IntArray) {
         if (a[0] == 0 && actsOnObject(ins)) {
             // Real games do this: Curses and So Far, every turn.

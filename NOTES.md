@@ -130,26 +130,44 @@ Follow Listen: `/sdcard` with `MANAGE_EXTERNAL_STORAGE`, granted by the laptop `
 That permission is not on the stock allow-list, so the SDK plugin needs the same one-line addition
 Listen made to `LightToolMetadata.kt`. Not done yet; it belongs in the sync session.
 
-## Status (end of Session 2, 2026-11-06)
+## Status (end of Session 3, 2026-11-06)
 
 Finished:
 
 - Sessions 0 and 1: project created, tool renamed, story files collected and checked.
 - Session 2: engine memory, header, packed addresses, text decoding, object table, dictionary and
   the `ZIo` interface, in `tool/src/main/kotlin/com/thelightphone/adventure/engine/`.
-- 28 laptop tests pass, and the release APK builds (24.4 MB) with Zork I-III inside.
+- Session 3: instruction decoding and the opcode set, the version 3 status line, undo, restart
+  and the console player.
+- `.\tools\play.ps1 tool\src\main\assets\zork1.dat` plays a game in PowerShell. Add `-Build`
+  after engine changes, `-Seed 42` for repeatable randomness, `-Commands file.txt` to script it.
+  `gradlew run` does not exist because `:tool` is an Android module. The player's code is under
+  `tool/src/test`, so it does not ship in the APK.
 - `.\tools\story-info.ps1 <story file>` prints a story's summary. Add `-Build` after engine
-  changes. Its code is under `tool/src/test`, so it does not ship in the APK.
+  changes. Its code is under `tool/src/test` too.
 - Nothing has been installed on the phone.
 
-Next: Session 3, running the game in PowerShell.
+Next: Session 4, saving, undo and a game test.
+
+Session 3 limits, on purpose:
+
+- **Save and restore are stubs.** They ask `ZIo` for a slot and report success, and nothing is
+  stored or loaded. Games say "Ok." and carry on from where they are.
+- `ZIo.save(data)` and `ZIo.restore()` were replaced by `chooseSaveSlot()` and
+  `chooseRestoreSlot()`. Session 4 decides how the data itself moves.
+- Stream 2 calls `ZIo.transcript`, which does nothing in the console, so `script` writes no
+  file. Stream 4 is accepted and ignored.
+- The console waits forever for input, so timed input never fires there. The engine side is
+  written but no real game has tested it.
+- Sound and pictures do nothing. Fonts 1 and 4 are accepted, and other fonts are refused.
+- Object 0 means "nothing" with no log message, because Curses and So Far use it every turn.
 
 Worth knowing:
 
-- `advent.z8` and `adv550.z8` have 4 objects and an empty dictionary, so they must handle typed
-  commands their own way. Expect them to need attention in Session 3.
-- Curses object 448 lists property 11 twice. `nextProperty` would loop forever on it, and the
-  `get_next_prop` opcode has that risk. Our own code should use `propertyNumbers`.
+- `advent.z8` and `adv550.z8` have 4 objects and an empty dictionary, so they handle typed
+  commands their own way.
+- Curses object 448 lists property 11 twice. `nextProperty` now moves on from the last match,
+  so `get_next_prop` cannot loop on it.
 - Lost Pig dictionary entry 0 is `$#$`, cut off mid-character, and displays as `$#`.
 - The engine was written from knowledge of the Standard without the document open, and nothing
   was ported from JSZM or ifvms.js. Check it against the document if a game misbehaves.
@@ -166,7 +184,7 @@ Worth knowing:
 - [x] Session 0: Create the project
 - [x] Session 1: Collect story files
 - [x] Session 2: Memory, text and objects
-- [ ] Session 3: Running the game in PowerShell
+- [x] Session 3: Running the game in PowerShell
 - [ ] Session 4: Saving, undo and a game test
 - [ ] Session 5: The game screen
 - [ ] Session 6: Typing aids

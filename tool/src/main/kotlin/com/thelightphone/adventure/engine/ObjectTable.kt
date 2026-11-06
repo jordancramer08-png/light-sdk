@@ -132,8 +132,8 @@ class ObjectTable(
     }
 
     /**
-     * Every property number in stored order. Safer than repeating [nextProperty], which looks
-     * up by number: Curses object 448 lists property 11 twice, so that walk would never end.
+     * Every property number in stored order. Curses object 448 lists property 11 twice, so
+     * this shows the repeat, while walking with [nextProperty] skips it.
      */
     fun propertyNumbers(obj: Int): List<Int> = properties(obj).map { it.number }
 
@@ -183,7 +183,8 @@ class ObjectTable(
     fun nextProperty(obj: Int, number: Int): Int {
         val all = properties(obj)
         if (number == 0) return all.firstOrNull()?.number ?: 0
-        val index = all.indexOfFirst { it.number == number }
+        // The last match, so a property listed twice (Curses object 448) cannot loop forever.
+        val index = all.indexOfLast { it.number == number }
         if (index < 0) throw ZMachineError("Object $obj has no property $number")
         return all.getOrNull(index + 1)?.number ?: 0
     }

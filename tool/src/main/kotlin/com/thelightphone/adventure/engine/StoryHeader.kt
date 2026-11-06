@@ -54,11 +54,11 @@ class StoryHeader(private val memory: StoryMemory) {
         else -> 8
     }
 
-    /** Sum of the bytes after the header, as the `verify` opcode computes it. */
+    /** Sum of the file's bytes after the header, as the `verify` opcode computes it. */
     fun computeChecksum(): Int {
         val end = if (fileLength == 0) memory.size else minOf(fileLength, memory.size)
         var sum = 0
-        for (address in StoryMemory.HEADER_SIZE until end) sum += memory.readByte(address)
+        for (address in StoryMemory.HEADER_SIZE until end) sum += memory.originalByte(address)
         return sum and 0xFFFF
     }
 

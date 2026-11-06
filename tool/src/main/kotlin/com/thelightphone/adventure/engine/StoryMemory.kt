@@ -10,6 +10,7 @@ class ZMachineError(message: String) : RuntimeException(message)
  */
 class StoryMemory(story: ByteArray) {
     private val bytes = story.copyOf()
+    private val original = story.copyOf()
 
     init {
         if (bytes.size < HEADER_SIZE) throw ZMachineError("Story file is too short to have a header")
@@ -39,6 +40,25 @@ class StoryMemory(story: ByteArray) {
         writeByte(address, value shr 8)
         writeByte(address + 1, value)
     }
+
+    /** A byte as it was in the file, whatever the game has changed since. */
+    fun originalByte(address: Int): Int {
+        check(address)
+        return original[address].toInt() and 0xFF
+    }
+
+    /** A copy of dynamic memory, for undo. */
+    fun copyDynamic(): ByteArray = bytes.copyOf(dynamicSize)
+
+    /** Puts back a copy made by [copyDynamic]. */
+    fun restoreDynamic(saved: ByteArray) {
+        saved.copyInto(bytes, endIndex = dynamicSize)
+    }
+
+    /** Returns dynamic memory to how the file had it, for `restart`. */
+    fun resetDynamic() = restoreDynamic(original)
+
+    private val dynamicSize: Int get() = minOf(staticBase, bytes.size)
 
     private fun check(address: Int) {
         if (address < 0 || address >= bytes.size) {

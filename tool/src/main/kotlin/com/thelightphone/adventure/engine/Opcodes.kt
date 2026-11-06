@@ -235,9 +235,11 @@ internal class Opcodes(private val m: ZMachine, private val io: ZIo) {
         if (version == 3) showStatus()
         val timed = version >= 4 && a[2] != 0 && a[3] != 0
         if (timed) noteTimedInput(ins)
+        m.inputPoint = ZMachine.InputPoint(ins, a)
         val line = waitFor(if (timed) a[2] else 0, a[3]) { tenths ->
             io.readLine(m.lineInput.roomLeft(a[0]), tenths)
         }
+        m.inputPoint = null
         if (line == null) {
             m.store(ins, 0)
             return
@@ -251,7 +253,10 @@ internal class Opcodes(private val m: ZMachine, private val io: ZIo) {
     private fun readChar(ins: Instruction, a: IntArray) {
         val timed = a[1] != 0 && a[2] != 0
         if (timed) noteTimedInput(ins)
-        m.store(ins, waitFor(if (timed) a[1] else 0, a[2]) { io.readChar(it) } ?: 0)
+        m.inputPoint = ZMachine.InputPoint(ins, a)
+        val key = waitFor(if (timed) a[1] else 0, a[2]) { io.readChar(it) }
+        m.inputPoint = null
+        m.store(ins, key ?: 0)
     }
 
     private fun noteTimedInput(ins: Instruction) {

@@ -25,6 +25,12 @@ data class ZCapabilities(
 )
 
 /**
+ * Thrown by a ZIo from inside readLine or readChar after changing the game with
+ * [ZMachine.loadSaved] or [ZMachine.restartNow]. It drops the input that was being waited for.
+ */
+class ZInputCancelled : RuntimeException()
+
+/**
  * Everything the engine asks of the outside world. The engine never touches a screen, keyboard
  * or file itself: the phone and the laptop tests each supply their own ZIo.
  */

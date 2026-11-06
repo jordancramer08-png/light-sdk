@@ -27,7 +27,7 @@ class TypingAidsTest {
 
     private fun TypingAids.text() = state.value.text
 
-    private fun zork() = GameViewModel(File("src/main/assets/zork1.dat").readBytes(), folder, "test", 42)
+    private fun zork() = GameViewModel(File("src/main/assets/zork1.dat").readBytes(), folder, seed = 42)
         .also { running += it }
 
     private fun awaitTurn(game: GameViewModel, commands: Int) = runBlocking {

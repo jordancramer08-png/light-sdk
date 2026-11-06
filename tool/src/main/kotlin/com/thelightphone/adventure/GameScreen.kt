@@ -75,7 +75,7 @@ class GameScreen(sealedActivity: SealedLightActivity, private val game: BundledG
     override val viewModelClass = GameViewModel::class.java
 
     override fun createViewModel() =
-        GameViewModel(lightContext.readAsset(game.asset), lightContext.filesDir, game.name.lowercase())
+        GameViewModel(lightContext.readAsset(game.asset), lightContext.filesDir)
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent) = GameKeys.isIgnored(keyCode)
 
@@ -109,11 +109,11 @@ class GameScreen(sealedActivity: SealedLightActivity, private val game: BundledG
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
                     center = LightTopBarCenter.Text(game.title),
                     rightButton = LightBarButton.Text(
-                        text = "Settings",
-                        onClick = { viewModel.typing.togglePanel(GamePanel.SETTINGS) },
+                        text = "Menu",
+                        onClick = { viewModel.typing.togglePanel(GamePanel.MENU) },
                     ),
                 )
-                GameBody(viewModel, settings)
+                GameBody(viewModel, settings, onLeave = { goBack() })
             }
         }
     }
@@ -128,15 +128,21 @@ private class Settings(
 )
 
 @Composable
-private fun GameBody(game: GameViewModel, settings: Settings) {
+private fun GameBody(game: GameViewModel, settings: Settings, onLeave: () -> Unit) {
     val state by game.state.collectAsState()
+    val picker by game.picker.collectAsState()
     val typing by game.typing.state.collectAsState()
     var keyboardOpen by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
         state.status?.let { StatusBar(it) }
         if (state.upperRows.isNotEmpty()) UpperBand(state.upperRows)
-        MiddleArea(game, state, typing.panel, typing.history, settings, keyboardOpen) { keyboardOpen = false }
+        val openPicker = picker
+        if (openPicker != null) {
+            SlotPanel(openPicker, game::pickSlot, game::cancelPicker, Modifier.weight(1f))
+        } else {
+            MiddleArea(game, state, typing, settings, keyboardOpen, onLeave) { keyboardOpen = false }
+        }
         if (settings.quickRowShown) QuickRow(state.waitingForInput, game::send)
         VerbOrSuggestionRow(typing.suggestions, game.typing::addWord, game.typing::complete)
         InputLine(
@@ -156,16 +162,25 @@ private fun GameBody(game: GameViewModel, settings: Settings) {
 private fun ColumnScope.MiddleArea(
     game: GameViewModel,
     state: GameUiState,
-    panel: GamePanel,
-    history: List<String>,
+    typing: TypingState,
     settings: Settings,
     keyboardOpen: Boolean,
+    onLeave: () -> Unit,
     onCloseKeyboard: () -> Unit,
 ) {
     val fill = Modifier.weight(1f)
-    when (panel) {
+    when (typing.panel) {
         GamePanel.HISTORY ->
-            HistoryPanel(history, settings.textSize, game.typing::pickFromHistory, fill)
+            HistoryPanel(typing.history, settings.textSize, game.typing::pickFromHistory, fill)
+        GamePanel.MENU -> MenuPanel(
+            onSave = { game.openPicker(SlotMode.SAVE) },
+            onRestore = { game.openPicker(SlotMode.RESTORE) },
+            onUndo = game::undo,
+            onRestart = game::restart,
+            onSettings = { game.typing.togglePanel(GamePanel.SETTINGS) },
+            onLeave = onLeave,
+            modifier = fill,
+        )
         GamePanel.SETTINGS -> SettingsPanel(
             settings.textSize,
             settings.quickRowShown,

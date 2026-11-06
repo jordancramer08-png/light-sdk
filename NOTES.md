@@ -130,7 +130,7 @@ Follow Listen: `/sdcard` with `MANAGE_EXTERNAL_STORAGE`, granted by the laptop `
 That permission is not on the stock allow-list, so the SDK plugin needs the same one-line addition
 Listen made to `LightToolMetadata.kt`. Not done yet; it belongs in the sync session.
 
-## Status (end of Session 5, 2026-11-06)
+## Status (end of Session 7, 2026-11-06)
 
 Finished:
 
@@ -140,6 +140,7 @@ Finished:
 - Session 3: instruction decoding, the opcode set, the version 3 status line and the console
   player.
 - Session 4: Quetzal save and restore, replay tests and the gap log.
+- Session 7: game menu, five save slots per game, automatic save and resume.
 - Session 6: typing aids. All rules are in `TypingAids.kt`, tested without a screen.
 - Session 5: game screen, temporary home screen and view model tests. **The screen has only been
   compiled. It has never been drawn or used**, because there is no emulator; the view model
@@ -153,7 +154,7 @@ Finished:
   changes. Its code is under `tool/src/test` too.
 - Nothing has been installed on the phone.
 
-Next: Session 7, saving and the game menu. Jordan will install on the phone at the very end, so
+Next: Session 8, game shelf and add-games script. Jordan will install on the phone at the very end, so
 the screen stays unseen until then.
 
 How the new parts work:
@@ -170,7 +171,15 @@ How the new parts work:
   suggestions add to the input line. Suggestions replace the verb row while a word is being
   typed. History and Settings swap into the story area. The Settings button replaces `Aa`.
 - **Keys:** `GameKeys` ignores 27, 80 and 319, as Listen does. Wheel turns reach LightOS.
-- **Phone files:** saves are `filesDir/saves/<game>.qzl`, gaps are `filesDir/gaps.txt`.
+- **Phone files:** saves are in `filesDir/saves/r<release>-<serial>-<checksum>/`, as `slot1.qzl`
+  to `slot5.qzl` with `slotN.txt` (time and label), and `auto.qzl` with `auto.txt` (recent text).
+  Gaps are in `filesDir/gaps.txt`.
+- **Saving at a prompt:** Quetzal can only resume from a `save` instruction, so menu saves, automatic
+  saves and Undo use `ZMachine.saveAtInput`. It saves the waiting read instruction and adds a chunk
+  of our own, `LPin`, so that loading runs the read again. `GameIo` does this on the game's thread,
+  then throws `ZInputCancelled` if the game was replaced.
+- **Menu Undo:** `GameIo` keeps a save from each of the last 10 turns, so it works in version 3
+  games too. The `undo` command a game has of its own is separate.
 - **Saves:** `Quetzal.kt` reads and writes the files. `ZIo` picks a slot, then `writeSave` and
   `readSave` move the bytes. A bad or wrong-story file is refused and the game carries on.
 - **Replays:** command files are in `tool/src/test/replays/`. `hashes.txt` holds a fingerprint of
@@ -185,9 +194,11 @@ Game screen:
 
 - Nothing on it has been seen: layout, colors, keyboard fit, scrolling, key handling and the
   text size setting all need checking on the phone.
-- Each game has one save slot, with no prompt, until the save menu in Session 7. A new save
-  replaces the old one.
-- Pressing back ends the game with no autosave, so unsaved progress is lost.
+- An automatic save only happens at a prompt. If the app is killed while a turn is running, or
+  while the game's own slot picker is open, the previous automatic save stays.
+- After resuming, the story shows the last 40 lines without colors or command highlighting, and
+  the upper band stays empty until the next turn. History and menu Undo start empty.
+- Restoring a slot does not put back the story text; it adds a note to what is on screen.
 - Games are told the screen is 40 columns by 24 lines. The upper band scales to fit 40 columns.
 - Keyboard presses have no haptic click: the SDK helper needs `LocalContext`, which is blocked.
 - `read_char` is a Send: the first letter typed, or Return if the line is empty.
@@ -213,6 +224,8 @@ Saves:
 - Loading files from other interpreters has only been tested with hand-built files written from
   the Quetzal specification. No other interpreter or real foreign save was on this laptop.
 - Our saves have not been loaded by another interpreter either.
+- Saves from the menu and automatic saves carry the `LPin` chunk and **will not work elsewhere**.
+  Only saves made with the game's own `save` command are plain Quetzal.
 - Auxiliary files (`save` and `restore` with operands) are refused and logged as a stub.
 - Restoring clears the undo history. Undo keeps the last 10 turns and does not survive quitting.
 
@@ -274,7 +287,7 @@ Worth knowing:
 - [x] Session 4: Saving, undo and a game test
 - [x] Session 5: The game screen (not yet seen on the phone)
 - [x] Session 6: Typing aids (not yet seen on the phone)
-- [ ] Session 7: Saving and the game menu
+- [x] Session 7: Saving and the game menu (not yet seen on the phone)
 - [ ] Session 8: Game shelf and add-games script
 - [ ] Session 9: Settings, safety and a full test run
 - [ ] Session 10: Install on the phone and test

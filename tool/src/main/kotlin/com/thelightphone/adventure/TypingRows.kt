@@ -12,6 +12,10 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -72,6 +76,66 @@ fun HistoryPanel(history: List<String>, textSize: Int, onPick: (String) -> Unit,
                 style = style,
                 modifier = Modifier.fillMaxWidth().clickable { onPick(command) }.padding(vertical = 9.dp),
             )
+        }
+    }
+}
+
+/** The game menu. Restart needs a second tap, because it throws the current game away. */
+@Composable
+fun MenuPanel(
+    onSave: () -> Unit,
+    onRestore: () -> Unit,
+    onUndo: () -> Unit,
+    onRestart: () -> Unit,
+    onSettings: () -> Unit,
+    onLeave: () -> Unit,
+    modifier: Modifier,
+) {
+    var restartArmed by remember { mutableStateOf(false) }
+    Column(modifier = modifier.fillMaxWidth().padding(horizontal = 10.dp)) {
+        MenuRow("Save", onSave)
+        MenuRow("Restore", onRestore)
+        MenuRow("Undo", onUndo)
+        MenuRow(if (restartArmed) "Tap again to restart" else "Restart") {
+            if (restartArmed) onRestart() else restartArmed = true
+        }
+        MenuRow("Settings", onSettings)
+        MenuRow("Back to shelf", onLeave)
+    }
+}
+
+@Composable
+private fun MenuRow(label: String, onClick: () -> Unit) {
+    BasicText(
+        text = label,
+        style = TextStyle(color = AdventureTheme.storyText, fontSize = 18.sp),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp),
+    )
+}
+
+/** The five slots, each with its label and time. */
+@Composable
+fun SlotPanel(picker: SlotPicker, onPick: (Int) -> Unit, onCancel: () -> Unit, modifier: Modifier) {
+    val title = if (picker.mode == SlotMode.SAVE) "Save to which slot?" else "Restore which slot?"
+    LazyColumn(modifier = modifier.fillMaxWidth().padding(horizontal = 10.dp)) {
+        item { BasicText(title, style = TextStyle(color = AdventureTheme.statusText, fontSize = 18.sp)) }
+        items(picker.slots) { slot -> SlotRow(slot, picker.confirming == slot.number) { onPick(slot.number) } }
+        item { MenuRow("Cancel", onCancel) }
+    }
+}
+
+@Composable
+private fun SlotRow(slot: SlotInfo, confirming: Boolean, onClick: () -> Unit) {
+    val time = slot.savedAt?.let(::slotTime) ?: ""
+    val detail = if (confirming) "Tap again to overwrite" else time
+    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 7.dp)) {
+        BasicText(
+            text = "${slot.number}. ${slot.label}",
+            style = TextStyle(color = AdventureTheme.storyText, fontSize = 17.sp),
+        )
+        if (detail.isNotEmpty()) {
+            val color = if (confirming) AdventureTheme.statusText else AdventureTheme.hintText
+            BasicText(detail, style = TextStyle(color = color, fontSize = 14.sp))
         }
     }
 }

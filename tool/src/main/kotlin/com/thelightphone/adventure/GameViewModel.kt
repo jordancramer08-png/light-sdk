@@ -4,11 +4,13 @@ import com.thelightphone.adventure.engine.Story
 import com.thelightphone.adventure.engine.ZCapabilities
 import com.thelightphone.adventure.engine.ZColor
 import com.thelightphone.adventure.engine.ZCursor
+import com.thelightphone.adventure.engine.ZInputCancelled
 import com.thelightphone.adventure.engine.ZIo
 import com.thelightphone.adventure.engine.ZMachine
 import com.thelightphone.adventure.engine.ZMachineError
 import com.thelightphone.adventure.engine.ZStatusLine
 import com.thelightphone.sdk.LightViewModel
+import com.thelightphone.sdk.SimpleLightScreen
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.LinkedBlockingQueue
@@ -28,27 +30,31 @@ import kotlinx.coroutines.launch
  * Runs one game on a background coroutine. The screen reads [state] and calls [send]; the
  * engine only ever sees [GameIo], so the two never touch each other directly.
  *
- * [dataFolder] holds saves and the gap log. [gameId] names this game's save slot.
+ * [dataFolder] holds saves and the gap log. Saves are in a folder made from the game's identity.
  */
 class GameViewModel(
     private val storyBytes: ByteArray,
     private val dataFolder: File,
-    private val gameId: String,
     private val seed: Long? = null,
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : LightViewModel<Unit>() {
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
     private val typed = LinkedBlockingQueue<Typed>()
     private val mutableState = MutableStateFlow(GameUiState())
+    private val mutablePicker = MutableStateFlow<SlotPicker?>(null)
+
+    @Volatile
+    private var saves: SaveStore? = null
 
     val state: StateFlow<GameUiState> = mutableState.asStateFlow()
+
+    /** The slot picker, while it is open. */
+    val picker: StateFlow<SlotPicker?> = mutablePicker.asStateFlow()
 
     /** The input line, suggestions, history and open panel. All their rules are in here. */
     val typing = TypingAids()
 
-    init {
-        scope.launch { runGame() }
-    }
+    private val gameJob = scope.launch { runGame() }
 
     /** Passes on a command. Ignored unless the game is waiting for one. */
     fun send(command: String) {
@@ -66,20 +72,86 @@ class GameViewModel(
         typing.clear()
     }
 
-    /** Ends the game's coroutine. Called when the screen closes. */
+    /** Saves automatically, the next time the game is waiting for input. */
+    fun autosave() {
+        typed.put(Typed.AutoSave)
+    }
+
+    /** Saves automatically, then ends the game's coroutine. Called when the screen closes. */
     fun stop() {
+        autosave()
         typed.put(Typed.Stop)
         scope.cancel()
     }
 
+    /** Waits for the game's coroutine to end after [stop]. */
+    suspend fun awaitEnd() = gameJob.join()
+
     override fun onCleared() = stop()
+
+    override fun onAppPause() = autosave()
+
+    override fun onScreenHide(screen: SimpleLightScreen<Unit>) = autosave()
+
+    /** Opens the slot picker from the menu. Needs the game to be waiting for input. */
+    fun openPicker(mode: SlotMode) {
+        if (!mutableState.value.waitingForInput) return
+        typing.closePanel()
+        mutablePicker.value = SlotPicker(mode, saves?.slots() ?: emptyList())
+    }
+
+    /** A tap on a slot. Empty slots cannot be restored; filled ones ask before overwriting. */
+    fun pickSlot(number: Int) {
+        val picker = mutablePicker.value ?: return
+        val filled = picker.slots.firstOrNull { it.number == number }?.savedAt != null
+        when {
+            picker.mode == SlotMode.RESTORE && !filled -> Unit
+            picker.mode == SlotMode.SAVE && filled && picker.confirming != number ->
+                mutablePicker.value = picker.copy(confirming = number)
+            else -> finishPicking(picker, number)
+        }
+    }
+
+    private fun finishPicking(picker: SlotPicker, number: Int) {
+        mutablePicker.value = null
+        typed.put(
+            when {
+                picker.askedByGame -> Typed.SlotChoice(number)
+                picker.mode == SlotMode.SAVE -> Typed.SaveTo(number)
+                else -> Typed.RestoreFrom(number)
+            },
+        )
+    }
+
+    /** Closes the picker. A game that asked for a slot is told the player cancelled. */
+    fun cancelPicker() {
+        val picker = mutablePicker.value ?: return
+        mutablePicker.value = null
+        if (picker.askedByGame) typed.put(Typed.SlotChoice(null))
+    }
+
+    /** Goes back one turn. Works in every game, including those with no undo of their own. */
+    fun undo() {
+        typing.closePanel()
+        if (mutableState.value.waitingForInput) typed.put(Typed.Undo)
+    }
+
+    fun restart() {
+        typing.closePanel()
+        if (mutableState.value.waitingForInput) typed.put(Typed.Restart)
+    }
 
     private fun runGame() {
         val io = GameIo()
         try {
             val story = Story(storyBytes)
+            val store = SaveStore(dataFolder, gameKey(story))
+            saves = store
             typing.useDictionary(dictionaryWords(story), story.text.dictionaryZChars)
-            ZMachine(story, io, seed).run()
+            val machine = ZMachine(story, io, seed)
+            io.begin(machine, store)
+            machine.run()
+            store.clearAuto()
             io.publish(finished = true)
         } catch (stopped: GameStopped) {
             // The player left; nothing more to show.
@@ -99,6 +171,12 @@ class GameViewModel(
     private sealed interface Typed {
         data class Line(val text: String) : Typed
         data object Stop : Typed
+        data object AutoSave : Typed
+        data object Undo : Typed
+        data object Restart : Typed
+        data class SaveTo(val slot: Int) : Typed
+        data class RestoreFrom(val slot: Int) : Typed
+        data class SlotChoice(val slot: Int?) : Typed
     }
 
     private class GameStopped : RuntimeException()
@@ -120,6 +198,20 @@ class GameViewModel(
         private var inUpper = false
         private var status: ZStatusLine? = null
         private var commandsTaken = 0
+        private lateinit var machine: ZMachine
+        private lateinit var store: SaveStore
+
+        /** One save per recent turn, oldest first, for the menu's Undo. */
+        private val turns = ArrayDeque<ByteArray>()
+        private var lastTurnKept = -1
+
+        /** Connects the running game, and resumes from the automatic save if there is one. */
+        fun begin(machine: ZMachine, store: SaveStore) {
+            this.machine = machine
+            this.store = store
+            val saved = store.readAuto() ?: return
+            if (machine.loadSaved(saved)) log.append(store.readAutoText(), StorySpan(""))
+        }
 
         fun publish(waiting: Boolean = false, forKey: Boolean = false, finished: Boolean = false) {
             mutableState.update {
@@ -140,18 +232,110 @@ class GameViewModel(
             typing.notePrinted(text)
         }
 
-        /** Waits for the player. Returns null if [timeoutTenths] runs out first. */
+        /** Waits for the player, doing any menu actions. Null if [timeoutTenths] runs out. */
         private fun nextTyped(timeoutTenths: Int, forKey: Boolean = false): String? {
-            publish(waiting = true, forKey = forKey)
-            val item = if (timeoutTenths > 0) {
-                typed.poll(timeoutTenths * 100L, TimeUnit.MILLISECONDS)
-            } else {
-                typed.take()
+            keepTurnForUndo()
+            while (true) {
+                publish(waiting = true, forKey = forKey)
+                val item = if (timeoutTenths > 0) {
+                    typed.poll(timeoutTenths * 100L, TimeUnit.MILLISECONDS)
+                } else {
+                    typed.take()
+                }
+                when (item) {
+                    null -> return null
+                    is Typed.Line -> return item.text
+                    else -> doMenuAction(item)
+                }
             }
-            return when (item) {
-                null -> null
+        }
+
+        private fun keepTurnForUndo() {
+            if (lastTurnKept == commandsTaken) return
+            lastTurnKept = commandsTaken
+            machine.saveAtInput()?.let(turns::addLast)
+            if (turns.size > MAX_UNDO_TURNS) turns.removeFirst()
+        }
+
+        private fun doMenuAction(action: Typed) {
+            when (action) {
                 is Typed.Stop -> throw GameStopped()
-                is Typed.Line -> item.text
+                is Typed.AutoSave -> saveAutomatically()
+                is Typed.SaveTo -> saveToSlot(action.slot)
+                is Typed.RestoreFrom -> restoreSlot(action.slot)
+                is Typed.Undo -> undoTurn()
+                is Typed.Restart -> restartGame()
+                else -> Unit
+            }
+        }
+
+        private fun saveAutomatically() {
+            val data = machine.saveAtInput() ?: return
+            val recent = log.snapshot().takeLast(RESUME_LINES)
+            store.writeAuto(data, recent.joinToString("\n") { line -> line.joinToString("") { it.text } })
+        }
+
+        private fun note(message: String) {
+            log.append("\n$message\n", StorySpan(""))
+        }
+
+        private fun saveToSlot(slot: Int) {
+            val saved = machine.saveAtInput()?.let { store.write(slot, it, slotLabel()) } == true
+            note(if (saved) "[Saved in slot $slot.]" else "[Could not save.]")
+        }
+
+        private fun slotLabel(): String {
+            val upperText = upper.snapshot().firstOrNull()?.joinToString("") { it.text }
+            val text = status?.location ?: upperText?.trim()?.replace(Regex(" {2,}"), ", ")
+            return text?.ifEmpty { null }?.take(MAX_LABEL) ?: "Saved game"
+        }
+
+        private fun restoreSlot(slot: Int) {
+            val data = store.read(slot)
+            if (data == null || !machine.loadSaved(data)) {
+                note("[Could not restore slot $slot.]")
+                return
+            }
+            note("[Restored slot $slot.]")
+            replacedGame()
+        }
+
+        private fun undoTurn() {
+            if (turns.size < 2) {
+                note("[Nothing to undo.]")
+                return
+            }
+            turns.removeLast()
+            val earlier = turns.removeLast()
+            machine.loadSaved(earlier)
+            note("[Undone.]")
+            lastTurnKept = -1
+            throw ZInputCancelled()
+        }
+
+        private fun restartGame() {
+            log.clear()
+            machine.restartNow()
+            replacedGame()
+        }
+
+        /** After the whole game changes, older turns can no longer be undone. */
+        private fun replacedGame() {
+            turns.clear()
+            lastTurnKept = -1
+            throw ZInputCancelled()
+        }
+
+        /** Shows the slot picker because the game itself asked, and waits for the answer. */
+        private fun askForSlot(mode: SlotMode): String? {
+            mutablePicker.value = SlotPicker(mode, store.slots(), askedByGame = true)
+            publish()
+            while (true) {
+                when (val item = typed.take()) {
+                    is Typed.Stop -> throw GameStopped()
+                    is Typed.SlotChoice -> return item.slot?.toString()
+                    else -> Unit
+                }
             }
         }
 
@@ -207,34 +391,19 @@ class GameViewModel(
             )
         }
 
-        // The save menu comes in Session 7. Until then each game has one slot.
-        override fun chooseSaveSlot(): String = gameId
+        override fun chooseSaveSlot(): String? = askForSlot(SlotMode.SAVE)
 
-        override fun chooseRestoreSlot(): String = gameId
+        override fun chooseRestoreSlot(): String? = askForSlot(SlotMode.RESTORE)
 
-        private fun saveFile(slot: String) = File(dataFolder, "saves/$slot.qzl")
+        override fun writeSave(slot: String, data: ByteArray): Boolean =
+            store.write(slot.toInt(), data, slotLabel())
 
-        /** Writes a new file first, so a failed save cannot damage the last good one. */
-        override fun writeSave(slot: String, data: ByteArray): Boolean = try {
-            val file = saveFile(slot)
-            file.parentFile?.mkdirs()
-            val temporary = File(file.path + ".new")
-            temporary.writeBytes(data)
-            temporary.renameTo(file)
-        } catch (error: IOException) {
-            false
-        }
-
-        override fun readSave(slot: String): ByteArray? = try {
-            saveFile(slot).readBytes()
-        } catch (error: IOException) {
-            null
-        }
+        override fun readSave(slot: String): ByteArray? = store.read(slot.toInt())
 
         override fun log(message: String) {
             try {
                 dataFolder.mkdirs()
-                File(dataFolder, "gaps.txt").appendText("$gameId: $message\n")
+                File(dataFolder, "gaps.txt").appendText("$message\n")
             } catch (error: IOException) {
                 // The gap log must never stop a game.
             }
@@ -246,5 +415,8 @@ class GameViewModel(
         const val UPPER_COLUMNS = 40
         private const val SCREEN_LINES = 24
         private const val ZSCII_RETURN = 13
+        private const val MAX_UNDO_TURNS = 10
+        private const val RESUME_LINES = 40
+        private const val MAX_LABEL = 32
     }
 }

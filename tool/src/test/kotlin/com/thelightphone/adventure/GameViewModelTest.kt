@@ -25,9 +25,9 @@ class GameViewModelTest {
     }
 
     private fun start(bytes: ByteArray) =
-        GameViewModel(bytes, folder, "test", seed = 42).also { running += it }
+        GameViewModel(bytes, folder, seed = 42).also { running += it }
 
-    private fun zork() = start(File("src/main/assets/zork1.dat").readBytes())
+    private fun zork(): GameViewModel = start(File("src/main/assets/zork1.dat").readBytes())
 
     private fun awaitState(game: GameViewModel, ready: (GameUiState) -> Boolean) = runBlocking {
         withTimeout(20_000) { game.state.first(ready) }
@@ -90,10 +90,24 @@ class GameViewModelTest {
     @Test
     fun saveThenRestoreInANewGame() {
         val first = zork()
-        val saved = play(first, "open the mailbox", "take the leaflet", "save")
+        play(first, "open the mailbox", "take the leaflet")
+        first.send("save")
+        runBlocking { withTimeout(20_000) { first.picker.first { it != null } } }
+        first.pickSlot(1)
+        val saved = awaitState(first) { it.waitingForInput && "Ok." in it.text() }
         assertTrue("Ok." in saved.text(), saved.text())
-        assertTrue(File(folder, "saves/test.qzl").length() > 0)
-        val state = play(zork(), "restore", "inventory")
+        first.send("quit")
+        awaitPrompt(first, 4)
+        first.send("y")
+        awaitState(first) { it.finished }
+
+        val second = zork()
+        awaitPrompt(second, 0)
+        second.send("restore")
+        runBlocking { withTimeout(20_000) { second.picker.first { it != null } } }
+        second.pickSlot(1)
+        awaitPrompt(second, 1)
+        val state = play(second, "inventory")
         assertTrue("A leaflet" in state.text(), state.text())
     }
 

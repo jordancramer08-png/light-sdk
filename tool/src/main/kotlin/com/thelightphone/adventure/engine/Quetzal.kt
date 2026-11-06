@@ -4,7 +4,13 @@ package com.thelightphone.adventure.engine
 import java.io.ByteArrayOutputStream
 
 /** A saved game after reading, before it is applied to the running machine. */
-class SavedGame(val memory: ByteArray, val pc: Int, val frames: List<Frame>, val values: List<Int>)
+class SavedGame(
+    val memory: ByteArray,
+    val pc: Int,
+    val frames: List<Frame>,
+    val values: List<Int>,
+    val atInput: Boolean,
+)
 
 /**
  * The Quetzal saved-game format: an IFF file of type IFZS holding IFhd (which story, and the
@@ -13,13 +19,18 @@ class SavedGame(val memory: ByteArray, val pc: Int, val frames: List<Frame>, val
 class Quetzal(private val memory: StoryMemory) {
     private val dynamicSize = minOf(memory.staticBase, memory.size)
 
-    /** [pc] is the address of the save instruction's store byte or branch data. */
-    fun write(stack: CallStack, pc: Int): ByteArray {
+    /**
+     * [pc] is the address of the save instruction's store byte or branch data. With [atInput] it
+     * is instead a read instruction to run again, marked by a chunk of our own. Other
+     * interpreters do not know that chunk, so files saved that way only load here.
+     */
+    fun write(stack: CallStack, pc: Int, atInput: Boolean = false): ByteArray {
         val body = ByteArrayOutputStream()
         body.write("IFZS".toByteArray(Charsets.US_ASCII))
         writeChunk(body, "IFhd", storyId() + threeBytes(pc))
         writeChunk(body, "CMem", compress(memory.copyDynamic()))
         writeChunk(body, "Stks", stacks(stack))
+        if (atInput) writeChunk(body, AT_INPUT_CHUNK, ByteArray(0))
         val file = ByteArrayOutputStream()
         file.write("FORM".toByteArray(Charsets.US_ASCII))
         file.write(fourBytes(body.size()))
@@ -106,7 +117,7 @@ class Quetzal(private val memory: StoryMemory) {
         }
         val stacks = chunks["Stks"] ?: throw ZMachineError("Save file has no Stks chunk")
         val values = ArrayList<Int>()
-        return SavedGame(saved, pc, readFrames(stacks, values), values)
+        return SavedGame(saved, pc, readFrames(stacks, values), values, AT_INPUT_CHUNK in chunks)
     }
 
     /** Splits the file into chunks by id. ANNO, IntD and others are kept but never used. */
@@ -197,5 +208,6 @@ class Quetzal(private val memory: StoryMemory) {
 
     private companion object {
         const val DISCARD_RESULT = 0x10
+        const val AT_INPUT_CHUNK = "LPin"
     }
 }

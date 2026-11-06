@@ -8,6 +8,9 @@ import kotlin.random.Random
  * themselves are in [Opcodes]. Give a [seed] to make random numbers repeat from run to run.
  */
 class ZMachine(val story: Story, private val io: ZIo, private val seed: Long? = null) {
+    /** The read instruction waiting for the player, with its operand values. */
+    internal class InputPoint(val instruction: Instruction, val operands: IntArray)
+
     private class UndoState(
         val memory: ByteArray,
         val stack: CallStack,
@@ -32,6 +35,8 @@ class ZMachine(val story: Story, private val io: ZIo, private val seed: Long? = 
     private val undoStates = ArrayDeque<UndoState>()
     private var random = newRandom()
     private var lastReturnValue = 0
+
+    internal var inputPoint: InputPoint? = null
 
     /** True once the game has quit or can no longer run. */
     var halted = false
@@ -107,6 +112,8 @@ class ZMachine(val story: Story, private val io: ZIo, private val seed: Long? = 
         } catch (error: ZMachineError) {
             gaps.note("error: ${error.message}", instruction.address)
             finishWithNothing(instruction)
+        } catch (cancelled: ZInputCancelled) {
+            // The game was replaced while waiting for input, and carries on from its new state.
         }
     }
 
@@ -247,6 +254,28 @@ class ZMachine(val story: Story, private val io: ZIo, private val seed: Long? = 
     internal fun saveGame(instruction: Instruction): ByteArray =
         quetzal.write(stack, instruction.resultAddress)
 
+    /**
+     * The game as a Quetzal file that resumes by waiting for this same input again. Only works
+     * while the game is waiting; null otherwise. Call it from inside readLine or readChar.
+     */
+    fun saveAtInput(): ByteArray? {
+        val point = inputPoint ?: return null
+        val copy = stack.copy()
+        val instruction = point.instruction
+        // Stack operands were popped when the read began. Running it again needs them back.
+        for (index in instruction.operandValues.indices.reversed()) {
+            val isVariable = instruction.operandTypes[index] == InstructionDecoder.VARIABLE
+            if (isVariable && instruction.operandValues[index] == 0) copy.push(point.operands[index])
+        }
+        return quetzal.write(copy, instruction.address, atInput = true)
+    }
+
+    /** Loads a saved game from outside the game's own restore. False if it is unusable. */
+    fun loadSaved(data: ByteArray): Boolean = restoreGame(data, pc)
+
+    /** Restarts from outside the game's own restart. */
+    fun restartNow() = restart()
+
     /** Loads a Quetzal file and resumes there. False, with nothing changed, if it is unusable. */
     internal fun restoreGame(data: ByteArray, address: Int): Boolean {
         val saved = try {
@@ -258,8 +287,9 @@ class ZMachine(val story: Story, private val io: ZIo, private val seed: Long? = 
         replaceMemory { memory.restoreDynamic(saved.memory) }
         stack.load(saved.frames, saved.values)
         undoStates.clear()
+        inputPoint = null
         pc = saved.pc
-        finishRestoredSave()
+        if (!saved.atInput) finishRestoredSave()
         return true
     }
 

@@ -3,7 +3,9 @@ id = "com.thelightphone.adventure"
 label = "Adventure"
 versionCode = 1
 versionName = "1.0.0"
-permissions = []
+# MANAGE_EXTERNAL_STORAGE: All files access, to read /sdcard/Adventure/Games (granted by option 4
+# of Adventure Games.cmd). The SDK plugin's allowlist has the same line Listen added.
+permissions = ["android.permission.MANAGE_EXTERNAL_STORAGE"]
 capabilities = []
 # com.lightos = LightOS system host on real LP3 hardware (verified via `pm query-services`)
 # com.thelightphone.sdk.emulator = the desktop emulator's host

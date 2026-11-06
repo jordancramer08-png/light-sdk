@@ -76,6 +76,11 @@ class SaveStore(root: File, key: String, private val clock: () -> Long = System:
         autoText.delete()
     }
 
+    /** Removes every save for this game. */
+    fun deleteAll() {
+        folder.deleteRecursively()
+    }
+
     private fun readOrNull(file: File): ByteArray? = try {
         file.readBytes()
     } catch (error: IOException) {

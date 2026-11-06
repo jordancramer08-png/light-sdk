@@ -58,24 +58,21 @@ import com.thelightphone.sdk.ui.keyboard.LightEmbeddedLp3Keyboard
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
-/** A game the tool ships with. [asset] is its file in tool/src/main/assets. */
-enum class BundledGame(val title: String, val asset: String) {
-    ZORK1("Zork I", "zork1.dat"),
-    ZORK2("Zork II", "zork2.dat"),
-    ZORK3("Zork III", "zork3.dat"),
-}
-
 private val TEXT_SIZE_KEY = intPreferencesKey("text_size")
 private val QUICK_ROW_KEY = booleanPreferencesKey("quick_row_shown")
 
 /** Plays one game: status band on top, story in the middle, input line at the bottom. */
-class GameScreen(sealedActivity: SealedLightActivity, private val game: BundledGame) :
+class GameScreen(
+    sealedActivity: SealedLightActivity,
+    private val title: String,
+    private val storyBytes: ByteArray,
+) :
     LightScreen<Unit, GameViewModel>(sealedActivity) {
 
     override val viewModelClass = GameViewModel::class.java
 
     override fun createViewModel() =
-        GameViewModel(lightContext.readAsset(game.asset), lightContext.filesDir)
+        GameViewModel(storyBytes, lightContext.filesDir)
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent) = GameKeys.isIgnored(keyCode)
 
@@ -107,7 +104,7 @@ class GameScreen(sealedActivity: SealedLightActivity, private val game: BundledG
             Column(Modifier.fillMaxSize().background(AdventureTheme.background)) {
                 LightTopBar(
                     leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
-                    center = LightTopBarCenter.Text(game.title),
+                    center = LightTopBarCenter.Text(title),
                     rightButton = LightBarButton.Text(
                         text = "Menu",
                         onClick = { viewModel.typing.togglePanel(GamePanel.MENU) },

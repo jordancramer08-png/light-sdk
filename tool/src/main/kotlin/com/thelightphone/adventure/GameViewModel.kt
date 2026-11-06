@@ -9,6 +9,7 @@ import com.thelightphone.adventure.engine.ZIo
 import com.thelightphone.adventure.engine.ZMachine
 import com.thelightphone.adventure.engine.ZMachineError
 import com.thelightphone.adventure.engine.ZStatusLine
+import com.thelightphone.adventure.engine.storyFromBlorb
 import com.thelightphone.sdk.LightViewModel
 import com.thelightphone.sdk.SimpleLightScreen
 import java.io.File
@@ -144,7 +145,7 @@ class GameViewModel(
     private fun runGame() {
         val io = GameIo()
         try {
-            val story = Story(storyBytes)
+            val story = Story(storyFromBlorb(storyBytes))
             val store = SaveStore(dataFolder, gameKey(story))
             saves = store
             typing.useDictionary(dictionaryWords(story), story.text.dictionaryZChars)

@@ -111,11 +111,11 @@ The Zork source repos are in `C:\Users\bjc38\Documents\lp3-adventure-kit\zork-so
 | bluechairs.z5 | 241152 | 5 | 2 | 041229 |
 | curses.z5 | 259072 | 5 | 16 | 951024 |
 | dreamhold.z8 | 386560 | 8 | 5 | 041231 |
-| Galatea.zblorb | 441992 | bundle, needs unwrapping in Session 8 | | |
+| Galatea.zblorb | 441992 | bundle holding a version 8 story | | |
 | huntdark.z5 | 116224 | 5 | 4 | 991119 |
 | LostPig.z8 | 285184 | 8 | 2 | 080406 |
 | photopia.z5 | 239616 | 5 | 1 | 120416 |
-| Savoir-Faire.zblorb | 442212 | bundle, needs unwrapping in Session 8 | | |
+| Savoir-Faire.zblorb | 442212 | bundle holding a version 8 story | | |
 | shade.z5 | 108544 | 5 | 3 | 001127 |
 | SoFar.z8 | 300032 | 8 | 6 | 961218 |
 | Tangle.z5 | 221184 | 5 | 4 | 980226 |
@@ -124,13 +124,14 @@ The Zork source repos are in `C:\Users\bjc38\Documents\lp3-adventure-kit\zork-so
 
 Version is header byte 0, release is bytes 2-3, and serial is bytes 18-23.
 
-## Plan for added games
+## Added games
 
-Follow Listen: `/sdcard` with `MANAGE_EXTERNAL_STORAGE`, granted by the laptop `.cmd` sync file.
-That permission is not on the stock allow-list, so the SDK plugin needs the same one-line addition
-Listen made to `LightToolMetadata.kt`. Not done yet; it belongs in the sync session.
+Games live in `/sdcard/Adventure/Games`. `MANAGE_EXTERNAL_STORAGE` is in `lighttool.toml`, and the
+SDK plugin's allowlist in `LightToolMetadata.kt` has the same addition Listen made (the file now
+matches Listen's exactly). `Adventure Games.cmd` in the project root copies games over with adb and
+grants the permission. Unlike Listen's sync file, it does not read `local.properties` to find adb.
 
-## Status (end of Session 7, 2026-11-06)
+## Status (end of Session 8, 2026-11-06)
 
 Finished:
 
@@ -140,6 +141,7 @@ Finished:
 - Session 3: instruction decoding, the opcode set, the version 3 status line and the console
   player.
 - Session 4: Quetzal save and restore, replay tests and the gap log.
+- Session 8: game shelf, Licenses screen, Blorb unwrapping and `Adventure Games.cmd`.
 - Session 7: game menu, five save slots per game, automatic save and resume.
 - Session 6: typing aids. All rules are in `TypingAids.kt`, tested without a screen.
 - Session 5: game screen, temporary home screen and view model tests. **The screen has only been
@@ -154,7 +156,7 @@ Finished:
   changes. Its code is under `tool/src/test` too.
 - Nothing has been installed on the phone.
 
-Next: Session 8, game shelf and add-games script. Jordan will install on the phone at the very end, so
+Next: Session 9, settings, safety and a full test run. Jordan will install on the phone at the very end, so
 the screen stays unseen until then.
 
 How the new parts work:
@@ -174,6 +176,8 @@ How the new parts work:
 - **Phone files:** saves are in `filesDir/saves/r<release>-<serial>-<checksum>/`, as `slot1.qzl`
   to `slot5.qzl` with `slotN.txt` (time and label), and `auto.qzl` with `auto.txt` (recent text).
   Gaps are in `filesDir/gaps.txt`.
+- **Shelf:** `Shelf.kt` holds the rules, in `ShelfViewModel`. Custom names and play dates are in
+  `filesDir/shelf/<game key>.txt`; `last.txt` names the game for Continue.
 - **Saving at a prompt:** Quetzal can only resume from a `save` instruction, so menu saves, automatic
   saves and Undo use `ZMachine.saveAtInput`. It saves the waiting read instruction and adds a chunk
   of our own, `LPin`, so that loading runs the read again. `GameIo` does this on the game's thread,
@@ -205,6 +209,17 @@ Game screen:
 - `erase_window` clears the scrollback as well as the screen.
 - Text sizes are 15, 18 (default), 21 and 25 sp. These are guesses until seen on the phone.
 - Only the three Zork games can be started until the game shelf in Session 8.
+
+Shelf and phone script:
+
+- `Adventure Games.cmd` has only been run against a fake phone, in dry-run mode and for real with a
+  stand-in adb. It has never touched the real phone.
+- Bundled games can be renamed but not removed. Their saves can only be replaced.
+- Removing a game with the `.cmd` leaves its saves in the app, because the app's storage is private.
+  They come back if the same game is added again. Remove on the phone deletes both.
+- Two files holding the same game show once, and share saves.
+- Each shelf refresh reads every added game in full. Fine for 20 games; slow for hundreds.
+- `.cmd` adds only the top level of the chosen folder, not subfolders.
 
 Typing aids:
 
@@ -259,7 +274,6 @@ Testing:
 - Keyboard play has not been tried by hand; all runs used `-Commands`.
 - Colossal Cave and Vespers were played for only about 40 and 25 commands. No game has been
   played to its end.
-- `.zblorb` games (Galatea, Savoir-Faire) cannot load until Session 8.
 
 Worth knowing:
 
@@ -288,7 +302,7 @@ Worth knowing:
 - [x] Session 5: The game screen (not yet seen on the phone)
 - [x] Session 6: Typing aids (not yet seen on the phone)
 - [x] Session 7: Saving and the game menu (not yet seen on the phone)
-- [ ] Session 8: Game shelf and add-games script
+- [x] Session 8: Game shelf and add-games script (not yet seen on the phone)
 - [ ] Session 9: Settings, safety and a full test run
 - [ ] Session 10: Install on the phone and test
 - [ ] Sessions 11-16: Bestiary mod

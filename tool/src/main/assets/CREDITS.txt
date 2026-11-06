@@ -1,0 +1,22 @@
+Bundled games: Zork I, Zork II and Zork III
+=============================================
+
+The three story files in this folder are the prebuilt files from the COMPILED folder of
+each repository below. The source code in those repositories was released by Microsoft
+(with Activision and Xbox) under the MIT License on November 20, 2025.
+
+  Zork I    https://github.com/historicalsource/zork1   (release 119, serial 880429)
+  Zork II   https://github.com/historicalsource/zork2   (release 63,  serial 860811)
+  Zork III  https://github.com/historicalsource/zork3   (release 25,  serial 860811)
+
+Original games by Infocom. The Zork I README names Marc Blank, Dave Lebling, Bruce Daniels
+and Tim Anderson as its authors.
+
+The MIT License text is in LICENSE-MIT-Microsoft.txt and must stay with these files.
+
+IMPORTANT
+- The MIT License covers the source code only. It does not grant rights to the Zork name,
+  logos, packaging or any other trademark. This app is a personal project and is not an
+  Infocom, Activision or Microsoft product.
+- Any game file you build yourself from modified source must say so, and must not be
+  titled or presented as an official Zork game.

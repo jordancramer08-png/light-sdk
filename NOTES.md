@@ -32,7 +32,7 @@ Exact command that worked (2026-11-06, about 6 minutes on a first build):
 
 Output: `tool\build\outputs\apk\debug\tool-debug.apk` (78.7 MB, label "Adventure").
 
-Laptop tests, no phone needed (1 smoke test passed):
+Laptop tests, no phone needed (28 tests passed):
 
 ```powershell
 .\gradlew.bat :tool:testDebugUnitTest
@@ -91,9 +91,38 @@ in `tool/src/test/kotlin/com/thelightphone/adventure/engine/`, Zork files in
   libraries (okhttp and `:sdk:ui`). "No network" is therefore a rule for our code, not something
   the APK enforces.
 
-## Open questions
+## Story files
 
-1. Zork's MIT release is source code. Confirm how playable story files are produced from it.
+Bundled games are in `tool/src/main/assets/` as `.dat` files, with their licence and credits. The
+three Zork files matched the kit's `SHA256SUMS.txt` (2026-11-06). Every other game is in
+`story-files/`, which Git ignores along with everything in it.
+
+The Zork source repos are in `C:\Users\bjc38\Documents\lp3-adventure-kit\zork-source`. They are
+**read-only: never edit them**.
+
+| File | Size (bytes) | Z-machine version | Release | Serial |
+|---|---:|---|---:|---|
+| zork1.dat | 86838 | 3 | 119 | 880429 |
+| zork2.dat | 92524 | 3 | 63 | 860811 |
+| zork3.dat | 87984 | 3 | 25 | 860811 |
+| adv550.z8 | 231424 | 8 | 1 | 160307 |
+| advent.z8 | 147456 | 8 | 1 | 160307 |
+| anchor.z8 | 520192 | 8 | 5 | 990206 |
+| bluechairs.z5 | 241152 | 5 | 2 | 041229 |
+| curses.z5 | 259072 | 5 | 16 | 951024 |
+| dreamhold.z8 | 386560 | 8 | 5 | 041231 |
+| Galatea.zblorb | 441992 | bundle, needs unwrapping in Session 8 | | |
+| huntdark.z5 | 116224 | 5 | 4 | 991119 |
+| LostPig.z8 | 285184 | 8 | 2 | 080406 |
+| photopia.z5 | 239616 | 5 | 1 | 120416 |
+| Savoir-Faire.zblorb | 442212 | bundle, needs unwrapping in Session 8 | | |
+| shade.z5 | 108544 | 5 | 3 | 001127 |
+| SoFar.z8 | 300032 | 8 | 6 | 961218 |
+| Tangle.z5 | 221184 | 5 | 4 | 980226 |
+| vespers.z8 | 309760 | 8 | 1 | 051128 |
+| vgame.z8 | 501760 | 8 | 1 | 990831 |
+
+Version is header byte 0, release is bytes 2-3, and serial is bytes 18-23.
 
 ## Plan for added games
 
@@ -101,38 +130,48 @@ Follow Listen: `/sdcard` with `MANAGE_EXTERNAL_STORAGE`, granted by the laptop `
 That permission is not on the stock allow-list, so the SDK plugin needs the same one-line addition
 Listen made to `LightToolMetadata.kt`. Not done yet; it belongs in the sync session.
 
-## Status (end of Session 0, 2026-11-06)
+## Status (end of Session 2, 2026-11-06)
 
 Finished:
 
-- Forked project cloned to `lp3-adventure`, branch `zmachine`. Bible code removed on this branch
-  only; it is still on `main`.
-- Tool renamed to Adventure, with a placeholder screen and one laptop smoke test. No engine code.
-- Debug and release APKs both build. Laptop test passes. Nothing installed on the phone.
-- `CLAUDE.md` rewritten for Adventure; old SDK notes moved to `docs/SDK_RECON_NOTES.md`.
+- Sessions 0 and 1: project created, tool renamed, story files collected and checked.
+- Session 2: engine memory, header, packed addresses, text decoding, object table, dictionary and
+  the `ZIo` interface, in `tool/src/main/kotlin/com/thelightphone/adventure/engine/`.
+- 28 laptop tests pass, and the release APK builds (24.4 MB) with Zork I-III inside.
+- `.\tools\story-info.ps1 <story file>` prints a story's summary. Add `-Build` after engine
+  changes. Its code is under `tool/src/test`, so it does not ship in the APK.
+- Nothing has been installed on the phone.
 
-Next: Session 1, story file loading and header, with the version check, tested on the laptop.
+Next: Session 3, running the game in PowerShell.
 
 Worth knowing:
 
+- `advent.z8` and `adv550.z8` have 4 objects and an empty dictionary, so they must handle typed
+  commands their own way. Expect them to need attention in Session 3.
+- Curses object 448 lists property 11 twice. `nextProperty` would loop forever on it, and the
+  `get_next_prop` opcode has that risk. Our own code should use `propertyNumbers`.
+- Lost Pig dictionary entry 0 is `$#$`, cut off mid-character, and displays as `$#`.
+- The engine was written from knowledge of the Standard without the document open, and nothing
+  was ported from JSZM or ifvms.js. Check it against the document if a game misbehaves.
+- Object counts are calculated, because story files do not store them.
+- Only object names and dictionary words have been decoded from real games so far.
+- Without `story-files`, tests cover only the Zork files and print a note instead of failing.
+- `story-info` calls a `.zblorb` file "version 70" rather than explaining it is a bundle.
 - Builds take about 6 minutes and this laptop has under 8 GB of memory. Close other apps first.
-- The first release build ran past 10 minutes while failing, so allow extra time.
 - The APK lists `INTERNET` and `CAMERA` because of SDK libraries, not our code.
 - A clean Listen rebuild is untested since 2026-10-02. See the Build section.
-- Zork story files are still an open question. Answer it before Session 4 needs one.
 
 ## Sessions
 
-Session 0 is from the brief. Sessions 1-10 are a proposed outline; edit freely.
-
-- [x] Session 0: Setup, SDK review, rename, notes
-- [ ] Session 1: Story file loading and header; version check
-- [ ] Session 2: Memory, text decoding, dictionary
-- [ ] Session 3: Instruction decoding and core opcodes (version 3)
-- [ ] Session 4: Objects, input and output; Zork I playable in a laptop test
-- [ ] Session 5: Versions 4, 5 and 8; conformance testing on the laptop
-- [ ] Session 6: Save, restore and undo
-- [ ] Session 7: Phone screen: game text and command input
-- [ ] Session 8: Game library; bundled Zork I-III
-- [ ] Session 9: Laptop `.cmd` sync file for added games
-- [ ] Session 10: Color, polish, first full test on the phone
+- [x] Session 0: Create the project
+- [x] Session 1: Collect story files
+- [x] Session 2: Memory, text and objects
+- [ ] Session 3: Running the game in PowerShell
+- [ ] Session 4: Saving, undo and a game test
+- [ ] Session 5: The game screen
+- [ ] Session 6: Typing aids
+- [ ] Session 7: Saving and the game menu
+- [ ] Session 8: Game shelf and add-games script
+- [ ] Session 9: Settings, safety and a full test run
+- [ ] Session 10: Install on the phone and test
+- [ ] Sessions 11-16: Bestiary mod

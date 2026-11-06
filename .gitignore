@@ -63,3 +63,5 @@ __pycache__/
 
 ### Converted scripture text — copyrighted content, never committed (CLAUDE.md section 7) ###
 /bible/
+### Story files added by hand, never committed ###
+/story-files/

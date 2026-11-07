@@ -77,6 +77,21 @@ class GameViewModelTest {
     }
 
     @Test
+    fun aSecondTapCannotSendAnEmptyCommand() {
+        val game = zork()
+        play(game)
+        game.typing.type("open mailbox")
+        game.submit()
+        // The prompt just answered must not still take input, or a second Return or SEND tap would
+        // send a blank line to it. It may already be a new prompt if the game was quick.
+        val now = game.state.value
+        assertTrue(!now.waitingForInput || now.commandsTaken == 1, "the answered prompt still takes input")
+        val state = awaitPrompt(game, 1)
+        assertTrue("Opening the small mailbox" in state.text(), state.text())
+        assertFalse("I beg your pardon?" in state.text(), state.text())
+    }
+
+    @Test
     fun sendIsIgnoredOnceTheGameHasEnded() {
         val game = zork()
         play(game, "quit")

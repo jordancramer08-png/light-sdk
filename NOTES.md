@@ -161,12 +161,41 @@ Finished:
 - The console keeps saves in `saves\` and gap reports in `logs\<story>-gaps.txt`. Git ignores both.
 - `.\tools\story-info.ps1 <story file>` prints a story's summary. Add `-Build` after engine
   changes. Its code is under `tool/src/test` too.
-- Nothing has been installed on the phone.
+- Installed on the phone in Session 10 (see below).
 
 Session 9 is fully done. On 2026-11-07 all 152 tests passed and the release APK was rebuilt with
 all Session 9 and Bestiary work (2.2 GB of memory free at the start; Gradle is capped at 2 GB).
 
-**Next step: Session 10, install on the phone and test.** Follow "Installing on the phone" below.
+Session 10 is done (2026-11-07): installed on the phone and every row of the test checklist passed.
+All 156 tests pass. **All planned sessions are done.**
+
+Session 10 fixes, found on the phone:
+
+- **Keyboard stayed up after sending.** With the keyboard open the story had no height left, so
+  replies were hidden and the story could not be tapped to close it. Return, SEND and the quick
+  buttons now close the keyboard (`GameScreen.kt`).
+- **A second tap sent a blank line** ("I beg your pardon?"). The keyboard's Return fires once
+  (checked in light-keyboard v0.0.18), but the prompt stayed open until the game thread took the
+  command, so a second Return or SEND went through empty. `GameViewModel.send` now marks the game
+  busy at once. Blank lines at a fresh prompt are still allowed: Galatea, Savoir-Faire and others
+  need them. Test: `aSecondTapCannotSendAnEmptyCommand`.
+- **Blank band under the status bar after Continue.** An empty `auto-upper` file was read back as
+  one blank upper row. `SaveStore.readAutoUpperRows` now returns no rows. Test:
+  `aResumedGameWithNoUpperWindowGetsNoBlankBand`.
+
+Session 10 notes for the checklist:
+
+- The wolf is not east of the start (the front door is boarded). Route: W, S, N, N. The bear and
+  the adder on the way attack too.
+- The color theme is one row that cycles Lantern, Parchment, Deep Sea on each tap.
+- Phone screenshots: `adb exec-out screencap -p > file.png` (density 480, so 3 px per dp).
+
+Suggestions from Session 10 (not built):
+
+- Keep command colors in the automatic save, so `>look` stays green after Continue.
+- Scroll the story by whole lines, so the top line is never cut in half.
+- Join hard-wrapped paragraphs on the Licenses screen; the phone wraps them again raggedly.
+- Hide the quick row while the keyboard is open, to give the story about three more lines.
 
 Sessions 11-16, the Bestiary mod, are done.
 
@@ -259,8 +288,7 @@ Session 16 (bundled in the app):
 
 Game screen:
 
-- Nothing on it has been seen: layout, colors, keyboard fit, scrolling, key handling and the
-  text size setting all need checking on the phone.
+- Seen on the phone in Session 10: layout, colors, keyboard, scrolling, keys and text size work.
 - An automatic save only happens at a prompt. If the app is killed while a turn is running, or
   while the game's own slot picker is open, the previous automatic save stays.
 - After resuming, the story shows the last 40 lines without colors or command highlighting, and the
@@ -272,12 +300,12 @@ Game screen:
 - Keyboard presses have no haptic click: the SDK helper needs `LocalContext`, which is blocked.
 - `read_char` is a Send: the first letter typed, or Return if the line is empty.
 - `erase_window` clears the scrollback as well as the screen.
-- Text sizes are 15, 18 (default), 21 and 25 sp. These are guesses until seen on the phone.
+- Text sizes are 15, 18 (default), 21 and 25 sp. 25 was checked on the phone and reads well.
 
 Shelf and phone script:
 
-- `Adventure Games.cmd` has only been run against a fake phone, in dry-run mode and for real with a
-  stand-in adb. It has never touched the real phone.
+- `Adventure Games.cmd` added and removed Lost Pig on the real phone in Session 10. A game added
+  this way is named from its file (`LostPig`) until renamed.
 - Bundled games can be renamed but not removed. Their saves can only be replaced.
 - Removing a game with the `.cmd` leaves its saves in the app, because the app's storage is private.
   They come back if the same game is added again. Remove on the phone deletes both.
@@ -295,8 +323,8 @@ Typing aids:
 - `Again` sends the word `again`. A game without that command will just reject it.
 - History lasts only while the game is open and leaves out repeats in a row.
 - The input line has no movable cursor: typing and backspace work at the end only.
-- With the keyboard open, the two rows leave little room for the story. Check on the phone, where
-  hiding the quick row in Settings is the first fix to try.
+- With the keyboard open, the two rows leave a thin strip of story (seen in Session 10). Sending
+  closes the keyboard, so replies show in full.
 
 Saves:
 
@@ -372,7 +400,7 @@ They have not been removed by hand. No location permission is present. Our code 
 
 Checked against how Listen is installed (`listen\HOW TO USE.txt` and `listen\kit\kit.ps1`) on
 2026-11-07. Adventure has no install `.cmd` of its own, so these are the same commands typed by hand.
-Nothing has been installed yet.
+First installed 2026-11-07 (Session 10); updates since then used step 6 only.
 
 1. Make sure the APK is built: `tool\build\outputs\apk\release\tool-release.apk` should exist. If
    not, run `.\gradlew.bat :tool:assembleRelease` (about 6 minutes; close other apps first).
@@ -415,9 +443,9 @@ use the SDK dev key, `sdk\keys\lightsdk-dev.jks`.
 - [x] Session 7: Saving and the game menu (not yet seen on the phone)
 - [x] Session 8: Game shelf and add-games script (not yet seen on the phone)
 - [x] Session 9: Settings, safety and a full test run
-- [ ] Session 10: Install on the phone and test
+- [x] Session 10: Install on the phone and test
 
-Next: Session 10.
+All planned sessions are done.
 
 - [x] Session 11: Build the Zork sources with ZILF (see Bestiary mod)
 - [x] Session 12: Shared melee tables and the Forest wolf test monster

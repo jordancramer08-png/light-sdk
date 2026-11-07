@@ -72,8 +72,11 @@ class SaveStore(root: File, key: String, private val clock: () -> Long = System:
 
     fun readAutoText(): String = readOrNull(autoText)?.toString(Charsets.UTF_8) ?: ""
 
-    fun readAutoUpperRows(): List<String> =
-        readOrNull(autoUpper)?.toString(Charsets.UTF_8)?.split('\n') ?: emptyList()
+    /** An empty file means the game had no upper window, not one blank row. */
+    fun readAutoUpperRows(): List<String> {
+        val text = readOrNull(autoUpper)?.toString(Charsets.UTF_8) ?: return emptyList()
+        return if (text.isEmpty()) emptyList() else text.split('\n')
+    }
 
     /** A game that has ended has nothing to resume. */
     fun clearAuto() {

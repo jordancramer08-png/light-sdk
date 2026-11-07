@@ -118,6 +118,16 @@ class SaveMenuTest {
     }
 
     @Test
+    fun aResumedGameWithNoUpperWindowGetsNoBlankBand() {
+        val first = start()
+        play(first, "open mailbox")
+        leave(first)
+
+        val state = prompt(start())
+        assertEquals(emptyList(), state.upperRows)
+    }
+
+    @Test
     fun pausingTheAppSavesWithoutEndingTheGame() {
         val game = start()
         play(game, "north")

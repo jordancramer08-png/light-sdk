@@ -22,6 +22,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -111,6 +112,9 @@ private fun GameBody(
     val picker by game.picker.collectAsState()
     val typing by game.typing.state.collectAsState()
     var keyboardOpen by remember { mutableStateOf(false) }
+    // Sending closes the keyboard, because while it is open the story has no room to show the reply.
+    val submitAndClose = { game.submit(); keyboardOpen = false }
+    val sendAndClose = { command: String -> game.send(command); keyboardOpen = false }
 
     val problem = state.problem
     if (problem != null) {
@@ -128,7 +132,7 @@ private fun GameBody(
                 keyboardOpen = false
             }
         }
-        if (settings.quickRow) QuickRow(state.waitingForInput, game::send)
+        if (settings.quickRow) QuickRow(state.waitingForInput, sendAndClose)
         VerbOrSuggestionRow(typing.suggestions, game.typing::addWord, game.typing::complete)
         InputLine(
             typed = typing.text,
@@ -136,9 +140,9 @@ private fun GameBody(
             textSize = settings.textSize,
             onTap = { keyboardOpen = true },
             onHistory = { game.typing.togglePanel(GamePanel.HISTORY) },
-            onSend = game::submit,
+            onSend = submitAndClose,
         )
-        if (keyboardOpen) GameKeyboard(game)
+        if (keyboardOpen) GameKeyboard(game, submitAndClose)
     }
 }
 
@@ -341,11 +345,12 @@ private fun InputLine(
 }
 
 @Composable
-private fun GameKeyboard(game: GameViewModel) {
+private fun GameKeyboard(game: GameViewModel, onReturn: () -> Unit) {
     val options = rememberKeyboardOptions()
+    val latestOnReturn by rememberUpdatedState(onReturn)
     val keyboard = remember(game) {
         EnQwertyLp3KeyboardViewModel<Unit>(
-            InputLineKeys(game.typing, game::submit),
+            InputLineKeys(game.typing) { latestOnReturn() },
             keyboardOptionsFlow = options,
             optionsForLayout = { LayoutOptions(!it.isRootLayout) },
         )

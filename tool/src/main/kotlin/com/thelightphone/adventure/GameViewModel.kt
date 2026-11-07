@@ -24,6 +24,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -69,9 +70,13 @@ class GameViewModel(
 
     private val gameJob = scope.launch { runGame() }
 
-    /** Passes on a command. Ignored unless the game is waiting for one. */
+    /**
+     * Passes on a command. Ignored unless the game is waiting for one. The game counts as busy from
+     * this moment, so a second Return or SEND tap cannot follow it with a blank line. A blank line
+     * sent at a fresh prompt still goes through, because some games ask for one ("press Enter").
+     */
     fun send(command: String) {
-        val game = mutableState.value
+        val game = mutableState.getAndUpdate { it.copy(waitingForInput = false) }
         if (!game.waitingForInput) return
         if (!game.waitingForKey) typing.rememberCommand(command)
         typing.closePanel()

@@ -167,7 +167,7 @@ Session 9 is fully done. On 2026-11-07 all 152 tests passed and the release APK 
 all Session 9 and Bestiary work (2.2 GB of memory free at the start; Gradle is capped at 2 GB).
 
 Session 10 is done (2026-11-07): installed on the phone and every row of the test checklist passed.
-All 156 tests pass. **All planned sessions are done.**
+All 156 tests pass. **Next: Session 17**, the four suggestions below.
 
 Session 10 fixes, found on the phone:
 
@@ -190,7 +190,7 @@ Session 10 notes for the checklist:
 - The color theme is one row that cycles Lantern, Parchment, Deep Sea on each tap.
 - Phone screenshots: `adb exec-out screencap -p > file.png` (density 480, so 3 px per dp).
 
-Suggestions from Session 10 (not built):
+Suggestions from Session 10 (planned as Session 17):
 
 - Keep command colors in the automatic save, so `>look` stays green after Continue.
 - Scroll the story by whole lines, so the top line is never cut in half.
@@ -444,8 +444,14 @@ use the SDK dev key, `sdk\keys\lightsdk-dev.jks`.
 - [x] Session 8: Game shelf and add-games script (not yet seen on the phone)
 - [x] Session 9: Settings, safety and a full test run
 - [x] Session 10: Install on the phone and test
+- [ ] Session 17: Build the four Session 10 suggestions (Jordan asked for them on 2026-11-07).
+      One at a time, tests first, then one rebuild and a phone check with the phone plugged in:
+      1. Keep command colors in the automatic save, so `>look` stays green after Continue.
+      2. Scroll the story by whole lines, so the top line is never cut in half.
+      3. Join hard-wrapped paragraphs on the Licenses screen.
+      4. Hide the quick row while the keyboard is open.
 
-All planned sessions are done.
+Next: Session 17.
 
 - [x] Session 11: Build the Zork sources with ZILF (see Bestiary mod)
 - [x] Session 12: Shared melee tables and the Forest wolf test monster

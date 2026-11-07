@@ -232,6 +232,19 @@ folders. `zork-source` stays read-only. Build from a game folder with
 - Text still says "his" and "He dies" for every monster, including the fog death message.
 - Editing tip: these sources use CRLF, and `sed -i` strips it. Edit them as bytes.
 
+Sessions 13-15 (`bestiary-mod` has its own git repo, one commit per game):
+
+- Zork I: 18 monsters, 254 objects, 95,070 bytes. Zork II: 18, 255 objects, 102,648 bytes.
+  Zork III: 19, 247 objects, 98,910 bytes. Zork II has no free object slots left.
+- `shared/gen.py` writes each game's monster data from `BESTIARY-ROSTER.csv`. Edit it, not the output.
+- Zork I and II share 4 objects: a row loads into its object when the player arrives (`PLACE-MONSTERS`).
+- Zork II and III had no combat. `shared/port.py` copied it from Zork I.
+- The Eye watcher was dropped: `BEAM-STOPPED?` counts any object, so it would solve the Beam Room.
+- Infocom's Zork III prints garbled text on `take` of anything untakeable (`YUKS`, `HO-HUM`). This is in
+  the prebuilt file too, so the bundled `zork3.dat` has it. Fixed in the mod copy only.
+- Test tools are in `shared/`. Always read `logs\zork*-gaps.txt` too: console output hides engine errors.
+- The modded games are not in the app yet. No game has been played to its end.
+
 ## Known gaps
 
 Game screen:
@@ -379,4 +392,5 @@ Session 10.
 
 - [x] Session 11: Build the Zork sources with ZILF (see Bestiary mod)
 - [x] Session 12: Shared melee tables and the Forest wolf test monster
-- [ ] Sessions 13-16: Bestiary mod
+- [x] Sessions 13-15: All monsters added to Zork I, II and III (see Bestiary mod)
+- [ ] Session 16: Bestiary mod

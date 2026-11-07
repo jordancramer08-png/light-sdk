@@ -44,7 +44,9 @@ Laptop tests, no phone needed (28 tests passed):
 .\gradlew.bat :tool:assembleRelease
 ```
 
-Output: `tool\build\outputs\apk\release\tool-release.apk` (24.2 MB, label "Adventure").
+Output: `tool\build\outputs\apk\release\tool-release.apk` (25.4 MB on 2026-11-07, label
+"Adventure", about 6 minutes). It holds all six `.dat` games and is signed with the SDK dev key
+(`CN=LightSDK Dev`).
 
 It first failed with `PKIX path building failed` while downloading from Maven Central: Java did
 not trust the certificate it was given. The fix is this line in `gradle.properties`, which makes
@@ -134,7 +136,7 @@ SDK plugin's allowlist in `LightToolMetadata.kt` has the same addition Listen ma
 matches Listen's exactly). `Adventure Games.cmd` in the project root copies games over with adb and
 grants the permission. Unlike Listen's sync file, it does not read `local.properties` to find adb.
 
-## Status (end of Session 9, 2026-11-06)
+## Status (end of Session 9, 2026-11-07)
 
 Finished:
 
@@ -161,16 +163,10 @@ Finished:
   changes. Its code is under `tool/src/test` too.
 - Nothing has been installed on the phone.
 
-**Session 9's final APK build is still pending.** All 152 tests pass, but
-`tool\build\outputs\apk\release\tool-release.apk` is an old build from Session 8 and has none of the
-Session 9 work. On 2026-11-06 `.\gradlew.bat :tool:assembleRelease` failed once with its error not
-captured, and new `hs_err` files suggest Java crashed. A second try was stopped for critically low
-memory (814 MB of 7.8 GB free) during shrinking. Close other apps before trying again.
+Session 9 is fully done. On 2026-11-07 all 152 tests passed and the release APK was rebuilt with
+all Session 9 and Bestiary work (2.2 GB of memory free at the start; Gradle is capped at 2 GB).
 
-**Order from here (Jordan's decision):**
-
-1. Finish Session 9's pending final APK build, then check the new APK's permissions.
-2. Session 10, install on the phone and test. Follow "Installing on the phone" below.
+**Next step: Session 10, install on the phone and test.** Follow "Installing on the phone" below.
 
 Sessions 11-16, the Bestiary mod, are done.
 
@@ -360,28 +356,48 @@ Worth knowing:
 
 ## Known issue: permissions from the SDK
 
-`tool/lighttool.toml` asks only for `MANAGE_EXTERNAL_STORAGE`. The Session 8 APK also lists these
-(recheck once the Session 9 APK is built),
-all added by SDK libraries and not by our code: `INTERNET`, `ACCESS_NETWORK_STATE`, `CAMERA`,
-`FOREGROUND_SERVICE`, `RECEIVE_BOOT_COMPLETED`, `VIBRATE` and `WAKE_LOCK`. They have not been removed
-by hand. No location permission is present. Our code has no network or location calls, and
+`tool/lighttool.toml` asks only for `MANAGE_EXTERNAL_STORAGE`. The release APK of 2026-11-07 lists
+these permissions in its merged manifest:
+
+- `MANAGE_EXTERNAL_STORAGE` (ours, for `/sdcard/Adventure/Games`)
+- `INTERNET`, `ACCESS_NETWORK_STATE`, `CAMERA`, `FOREGROUND_SERVICE`, `RECEIVE_BOOT_COMPLETED`,
+  `VIBRATE`, `WAKE_LOCK` (added by SDK libraries, not our code)
+- `com.thelightphone.adventure.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` (added by AndroidX; it
+  only lets the app talk to itself)
+
+They have not been removed by hand. No location permission is present. Our code has no network or location calls, and
 `FinishingTest` fails if any are added.
 
 ## Installing on the phone
 
-Copied from how Listen is installed (`listen\HOW TO USE.txt` and `listen\kit\kit.ps1`). Adventure has
-no install `.cmd` of its own, so these are the same commands typed by hand. Run them from PowerShell
-in the project root. Nothing has been installed yet.
+Checked against how Listen is installed (`listen\HOW TO USE.txt` and `listen\kit\kit.ps1`) on
+2026-11-07. Adventure has no install `.cmd` of its own, so these are the same commands typed by hand.
+Nothing has been installed yet.
 
-1. Build the APK: `.\gradlew.bat :tool:assembleRelease`
-2. Plug in and unlock the phone with a data USB cable. Check it is listed: `adb devices`
-   If adb is not on the PATH, use its full path. Tap "Allow" on the phone if it asks.
-3. Install as an update, which keeps data and never uninstalls:
+1. Make sure the APK is built: `tool\build\outputs\apk\release\tool-release.apk` should exist. If
+   not, run `.\gradlew.bat :tool:assembleRelease` (about 6 minutes; close other apps first).
+2. Open PowerShell: in File Explorer go to `Documents\lp3-adventure`, click the address bar, type
+   `powershell` and press Enter. Every command below is typed there, followed by Enter.
+3. Unplug the tablet and any other Android device, so only the phone is connected.
+4. Plug in the Light Phone with a USB cable that carries data (not a charge-only cable). Unlock it.
+5. Type `adb devices`. If the phone asks "Allow USB debugging?", tap Allow and type it again. One
+   line ending in `device` should appear. `unauthorized` means tap Allow; nothing listed means check
+   the cable and unlock the phone.
+   If PowerShell says `adb` is not recognised, use the full path instead of `adb` in every command:
+   `& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"` (Listen's kit looks there too).
+6. Install as an update, which keeps data and never uninstalls:
    `adb install -r tool\build\outputs\apk\release\tool-release.apk`
-4. Give Adventure storage access. Either use option 4 in `Adventure Games.cmd`, or:
+   Wait for the word `Success`.
+7. Give Adventure storage access:
    `adb shell appops set com.thelightphone.adventure MANAGE_EXTERNAL_STORAGE allow`
-5. Restart the phone, because the launcher only shows a new tool after a restart: `adb reboot`
-6. Add games with `Adventure Games.cmd`, option 2.
+   Check it worked: `adb shell appops get com.thelightphone.adventure MANAGE_EXTERNAL_STORAGE`
+   should say `allow`. (Option 4 in `Adventure Games.cmd` does the same.)
+8. Restart the phone, because the launcher only shows a new tool after a restart: `adb reboot`
+9. When the phone is back on, unlock it and find Adventure in the tool list.
+10. To add your own games, double-click `Adventure Games.cmd` and pick option 2.
+
+Later updates: Listen backs up its data before every install. Adventure has no backup tool yet, so
+an update relies on `-r` keeping the saves.
 
 If the install reports `UPDATE_INCOMPATIBLE` or that signatures do not match, stop. Do not uninstall
 Adventure, because that erases its saves. Keep the error and work out which key signed each APK. Builds
@@ -398,10 +414,10 @@ use the SDK dev key, `sdk\keys\lightsdk-dev.jks`.
 - [x] Session 6: Typing aids (not yet seen on the phone)
 - [x] Session 7: Saving and the game menu (not yet seen on the phone)
 - [x] Session 8: Game shelf and add-games script (not yet seen on the phone)
-- [ ] Session 9: Settings, safety and a full test run (all done except the final APK build)
+- [x] Session 9: Settings, safety and a full test run
 - [ ] Session 10: Install on the phone and test
 
-Work these in the order given under Status: Session 9's APK build, then Session 10.
+Next: Session 10.
 
 - [x] Session 11: Build the Zork sources with ZILF (see Bestiary mod)
 - [x] Session 12: Shared melee tables and the Forest wolf test monster

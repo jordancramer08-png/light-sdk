@@ -216,6 +216,22 @@ How the new parts work:
 - **Gap log:** `GapLog.kt` counts each different gap. Lines begin `unimplemented opcode`, `error:`,
   `stub:` (left out on purpose) or `unusual:` (odd, but handled). `ZIo.log` gets each one once.
 
+## Bestiary mod
+
+Work is in `lp3-adventure-kit\bestiary-mod`, a copy of the three Zork sources without their `.git`
+folders. `zork-source` stays read-only. Build from a game folder with
+`..\..\tools\zilf\bin\zilf.exe zork1.zil`, which runs ZAPF too.
+
+- ZILF builds: Zork I 86,928 bytes, 250 objects; II 92,412, 251; III 87,858, 228.
+- Zork II needed one fix: a misplaced `>` in `DREARY-ROOM-FCN`, checked against Infocom's `2actions.zap`.
+- Zork I with the wolf: 89,950 bytes, 251 objects. New code is in `bestiary.zil`.
+- `HERO-BLOW` kills any villain without a weapon, so natural fighters set `V-NATURAL` to 1.
+- All three `VILLAINS` loops skip the last entry, so the cyclops must stay last.
+- The wolf killed the player in 10 of 40 seeds at score 10. Balance is not settled.
+- Compiling Zork I as version 4 builds but does not play: the parser fails and there is no status line.
+- Text still says "his" and "He dies" for every monster, including the fog death message.
+- Editing tip: these sources use CRLF, and `sed -i` strips it. Edit them as bytes.
+
 ## Known gaps
 
 Game screen:
@@ -361,4 +377,6 @@ use the SDK dev key, `sdk\keys\lightsdk-dev.jks`.
 Work these in the order given under Status: Sessions 11-16 first, then Session 9's APK build, then
 Session 10.
 
-- [ ] Sessions 11-16: Bestiary mod
+- [x] Session 11: Build the Zork sources with ZILF (see Bestiary mod)
+- [x] Session 12: Shared melee tables and the Forest wolf test monster
+- [ ] Sessions 13-16: Bestiary mod

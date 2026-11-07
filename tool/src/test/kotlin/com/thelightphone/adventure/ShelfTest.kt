@@ -22,6 +22,9 @@ class ShelfTest {
     private val data = File(root, "data")
     private val assets = File("src/main/assets")
     private var now = 1_000L
+    private val zorkGames = listOf(
+        "Zork I", "Zork I: Bestiary", "Zork II", "Zork II: Bestiary", "Zork III", "Zork III: Bestiary",
+    )
 
     @AfterTest
     fun cleanUp() {
@@ -65,22 +68,45 @@ class ShelfTest {
     @Test
     fun bundledGamesAreAlwaysThere() {
         val shelf = shelf(access = false)
-        assertEquals(listOf("Zork I", "Zork II", "Zork III"), shelf.titles())
+        assertEquals(zorkGames, shelf.titles())
         assertTrue(shelf.state.value.needsStorageAccess)
         assertEquals(3, shelf.entry("Zork I").version)
+    }
+
+    @Test
+    fun theSixZorkGamesEachHaveTheirOwnSaveFolder() {
+        val entries = shelf(access = false).state.value.entries
+        assertEquals(6, entries.map { it.key }.toSet().size)
+        assertTrue(entries.all { it.source is GameSource.Bundled })
+    }
+
+    @Test
+    fun onlyBuiltGamesAndTextShipInAssets() {
+        val kinds = assets.listFiles().orEmpty().map { it.extension }.toSet()
+        assertEquals(setOf("dat", "txt"), kinds)
+    }
+
+    @Test
+    fun theLicensesScreenSaysTheBestiaryGamesAreUnofficial() {
+        val text = LICENSE_FILES.joinToString(" ") { File(assets, it).readText() }
+            .lines().joinToString(" ") { it.trim() }
+        listOf(
+            "Zork I: Bestiary", "Zork II: Bestiary", "Zork III: Bestiary", "UNOFFICIAL FAN MODIFICATIONS",
+            "not Infocom, Activision or Microsoft products", "Permission is hereby granted",
+        ).forEach { assertTrue(it in text, it) }
     }
 
     @Test
     fun addedGamesJoinInNameOrder() {
         addGame("my_game.z5")
         File(games, "notes.txt").writeText("not a game")
-        assertEquals(listOf("my game", "Zork I", "Zork II", "Zork III"), shelf().titles())
+        assertEquals(listOf("my game") + zorkGames, shelf().titles())
     }
 
     @Test
     fun addedGamesAreLeftOutWithoutStorageAccess() {
         addGame("my_game.z5")
-        assertEquals(3, shelf(access = false).titles().size)
+        assertEquals(6, shelf(access = false).titles().size)
     }
 
     @Test
@@ -88,14 +114,14 @@ class ShelfTest {
         File(games, "broken.z5").writeBytes(ByteArray(10))
         File(games, "version6.z5").writeBytes(ByteArray(100).also { it[0] = 6 })
         val state = shelf().state.value
-        assertEquals(3, state.entries.size)
+        assertEquals(6, state.entries.size)
         assertEquals(listOf("broken.z5", "version6.z5"), state.unreadable.sorted())
     }
 
     @Test
     fun aCopyOfAGameIsShownOnce() {
         File(assets, "zork1.dat").copyTo(File(games, "zork_copy.z3"))
-        assertEquals(3, shelf().titles().size)
+        assertEquals(6, shelf().titles().size)
     }
 
     @Test

@@ -21,6 +21,9 @@ class RealStoryTest {
         Expected("zork1.dat", 3, 119, "880429"),
         Expected("zork2.dat", 3, 63, "860811"),
         Expected("zork3.dat", 3, 25, "860811"),
+        Expected("zork1-bestiary.dat", 3, 1001, "261106"),
+        Expected("zork2-bestiary.dat", 3, 1002, "261106"),
+        Expected("zork3-bestiary.dat", 3, 1003, "261106"),
     )
 
     private val addedGames = listOf(

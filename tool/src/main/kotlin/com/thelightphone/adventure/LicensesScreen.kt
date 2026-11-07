@@ -22,6 +22,9 @@ import com.thelightphone.sdk.ui.LightTheme
 import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 
+/** The files the Licenses screen shows, in order. */
+val LICENSE_FILES = listOf("CREDITS.txt", "LICENSE-MIT-Microsoft.txt")
+
 /** Shows the credits and license that must stay with the bundled games. */
 class LicensesScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Unit>(sealedActivity) {
     private val text: String by lazy {
@@ -57,9 +60,5 @@ class LicensesScreen(sealedActivity: SealedLightActivity) : SimpleLightScreen<Un
                 }
             }
         }
-    }
-
-    private companion object {
-        val LICENSE_FILES = listOf("CREDITS.txt", "LICENSE-MIT-Microsoft.txt")
     }
 }

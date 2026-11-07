@@ -69,3 +69,7 @@ __pycache__/
 ### Console player output ###
 /saves/
 /logs/
+
+### Bestiary mod source stays in lp3-adventure-kit. Only built .dat files ship ###
+*.zil
+*.zap

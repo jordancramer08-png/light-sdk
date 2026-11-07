@@ -105,6 +105,9 @@ The Zork source repos are in `C:\Users\bjc38\Documents\lp3-adventure-kit\zork-so
 | zork1.dat | 86838 | 3 | 119 | 880429 |
 | zork2.dat | 92524 | 3 | 63 | 860811 |
 | zork3.dat | 87984 | 3 | 25 | 860811 |
+| zork1-bestiary.dat | 95070 | 3 | 1001 | 261106 |
+| zork2-bestiary.dat | 102648 | 3 | 1002 | 261106 |
+| zork3-bestiary.dat | 98910 | 3 | 1003 | 261106 |
 | adv550.z8 | 231424 | 8 | 1 | 160307 |
 | advent.z8 | 147456 | 8 | 1 | 160307 |
 | anchor.z8 | 520192 | 8 | 5 | 990206 |
@@ -158,7 +161,7 @@ Finished:
   changes. Its code is under `tool/src/test` too.
 - Nothing has been installed on the phone.
 
-**Session 9's final APK build is still pending.** All 145 tests pass, but
+**Session 9's final APK build is still pending.** All 152 tests pass, but
 `tool\build\outputs\apk\release\tool-release.apk` is an old build from Session 8 and has none of the
 Session 9 work. On 2026-11-06 `.\gradlew.bat :tool:assembleRelease` failed once with its error not
 captured, and new `hs_err` files suggest Java crashed. A second try was stopped for critically low
@@ -166,11 +169,10 @@ memory (814 MB of 7.8 GB free) during shrinking. Close other apps before trying 
 
 **Order from here (Jordan's decision):**
 
-1. Sessions 11-16, the Bestiary mod.
-2. Finish Session 9's pending final APK build, then check the new APK's permissions.
-3. Session 10, install on the phone and test. Follow "Installing on the phone" below.
+1. Finish Session 9's pending final APK build, then check the new APK's permissions.
+2. Session 10, install on the phone and test. Follow "Installing on the phone" below.
 
-**Do not build an APK until Session 16 is done.** Laptop tests are still fine to run.
+Sessions 11-16, the Bestiary mod, are done.
 
 How the new parts work:
 
@@ -243,7 +245,19 @@ Sessions 13-15 (`bestiary-mod` has its own git repo, one commit per game):
 - Infocom's Zork III prints garbled text on `take` of anything untakeable (`YUKS`, `HO-HUM`). This is in
   the prebuilt file too, so the bundled `zork3.dat` has it. Fixed in the mod copy only.
 - Test tools are in `shared/`. Always read `logs\zork*-gaps.txt` too: console output hides engine errors.
-- The modded games are not in the app yet. No game has been played to its end.
+- No Bestiary game has been played to its end.
+
+Session 16 (bundled in the app):
+
+- `zork1-bestiary.dat`, `zork2-` and `zork3-` are the kit's built `.z3` files with only header bytes
+  2-3 changed. ZILF left the release at 0. The kit's own files still say 0, so **after any rebuild,
+  copy the file over and set the release again**: 1001, 1002 or 1003.
+- Keep releases under 2048. Zork's banner prints only the low 11 bits, so 9001 showed as 809.
+- Release bytes are outside the checksum, so the checksum stays valid.
+- The shelf sorts by name, so each Bestiary game sits just after its original.
+- Mod source stays in the kit. `.gitignore` also blocks `*.zil` and `*.zap` here.
+- The banner inside each Bestiary game is still Infocom's, with its copyright and trademark lines and
+  no mention of the mod. `CREDITS.txt` explains this. Changing it means editing the mod source.
 
 ## Known gaps
 
@@ -387,10 +401,9 @@ use the SDK dev key, `sdk\keys\lightsdk-dev.jks`.
 - [ ] Session 9: Settings, safety and a full test run (all done except the final APK build)
 - [ ] Session 10: Install on the phone and test
 
-Work these in the order given under Status: Sessions 11-16 first, then Session 9's APK build, then
-Session 10.
+Work these in the order given under Status: Session 9's APK build, then Session 10.
 
 - [x] Session 11: Build the Zork sources with ZILF (see Bestiary mod)
 - [x] Session 12: Shared melee tables and the Forest wolf test monster
 - [x] Sessions 13-15: All monsters added to Zork I, II and III (see Bestiary mod)
-- [ ] Session 16: Bestiary mod
+- [x] Session 16: Bundle the Bestiary editions in the app (see Bestiary mod)

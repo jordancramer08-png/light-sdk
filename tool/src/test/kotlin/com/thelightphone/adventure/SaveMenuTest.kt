@@ -156,6 +156,88 @@ class SaveMenuTest {
         assertEquals("North of House", prompt(start(zork1)).status?.location)
     }
 
+    private fun asset(name: String) = File("src/main/assets/$name").readBytes()
+
+    /** Each original game beside its Bestiary edition. */
+    private fun editions() = (1..3).map { asset("zork$it.dat") to asset("zork$it-bestiary.dat") }
+
+    private fun slotIsEmpty(game: GameViewModel, slot: Int): Boolean {
+        prompt(game)
+        game.openPicker(SlotMode.RESTORE)
+        val empty = assertNotNull(game.picker.value).slots[slot - 1].savedAt == null
+        game.cancelPicker()
+        return empty
+    }
+
+    @Test
+    fun aBestiaryGameCannotSeeItsOriginalsSaves() {
+        editions().forEach { (original, bestiary) ->
+            val first = start(original)
+            prompt(first)
+            menuSave(first, 1)
+            leave(first)
+
+            val second = start(bestiary)
+            assertTrue(slotIsEmpty(second, 1))
+            menuSave(second, 2)
+            leave(second)
+
+            val again = start(original)
+            assertTrue(slotIsEmpty(again, 2))
+            leave(again)
+        }
+        assertEquals(6, File(folder, "saves").listFiles()?.size)
+    }
+
+    @Test
+    fun zorkIAndItsBestiaryEachRestoreTheirOwnPlace() {
+        val bestiary = asset("zork1-bestiary.dat")
+        val original = start(zork1)
+        play(original, "north")
+        menuSave(original, 1)
+        leave(original)
+        val mod = start(bestiary)
+        play(mod, "south")
+        menuSave(mod, 1)
+        play(mod, "east")
+        menuRestore(mod, 1)
+        assertEquals("South of House", prompt(mod).status?.location)
+        leave(mod)
+
+        val back = start(zork1)
+        play(back, "east")
+        menuRestore(back, 1)
+        assertEquals("North of House", prompt(back).status?.location)
+    }
+
+    /** Zork's banner keeps only 11 bits of the release, so a number over 2047 would print wrong. */
+    @Test
+    fun bestiaryBannersShowTheirHeaderRelease() {
+        (1..3).forEach { number ->
+            val state = prompt(start(asset("zork$number-bestiary.dat")))
+            assertTrue("Release 100$number /" in state.text(), state.text())
+        }
+    }
+
+    @Test
+    fun aBestiarySaveMovedToTheOriginalIsRefused() {
+        editions().forEach { (original, bestiary) ->
+            val mod = start(bestiary)
+            prompt(mod)
+            menuSave(mod, 1)
+            leave(mod)
+            val from = File(folder, "saves/${gameKey(Story(bestiary))}/slot1.qzl")
+            from.copyTo(File(folder, "saves/${gameKey(Story(original))}/slot1.qzl"))
+
+            val game = start(original)
+            prompt(game)
+            game.openPicker(SlotMode.RESTORE)
+            game.pickSlot(1)
+            awaitMessage(game, "[Could not restore slot 1.]")
+            leave(game)
+        }
+    }
+
     @Test
     fun gameKeyUsesReleaseSerialAndChecksum() {
         val key = gameKey(Story(zork1))

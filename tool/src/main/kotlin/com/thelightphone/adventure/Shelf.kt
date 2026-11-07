@@ -25,6 +25,9 @@ enum class BundledGame(val title: String, val asset: String) {
     ZORK1("Zork I", "zork1.dat"),
     ZORK2("Zork II", "zork2.dat"),
     ZORK3("Zork III", "zork3.dat"),
+    ZORK1_BESTIARY("Zork I: Bestiary", "zork1-bestiary.dat"),
+    ZORK2_BESTIARY("Zork II: Bestiary", "zork2-bestiary.dat"),
+    ZORK3_BESTIARY("Zork III: Bestiary", "zork3-bestiary.dat"),
 }
 
 /** Where a game's file is. */

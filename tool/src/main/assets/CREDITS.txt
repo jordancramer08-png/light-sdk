@@ -20,3 +20,22 @@ IMPORTANT
   Infocom, Activision or Microsoft product.
 - Any game file you build yourself from modified source must say so, and must not be
   titled or presented as an official Zork game.
+
+
+Bundled games: Zork I: Bestiary, Zork II: Bestiary and Zork III: Bestiary
+==========================================================================
+
+These three games are UNOFFICIAL FAN MODIFICATIONS. They are not Infocom, Activision or
+Microsoft products, and none of those companies made, endorsed or supports them.
+
+They were built with ZILF from modified copies of the MIT-licensed source in the three
+repositories listed above. The changes add monsters and combat, and fix text and source
+errors. The title and copyright text shown inside each game is left over from the original
+source and does not mean the game is official.
+
+  Zork I: Bestiary    zork1-bestiary.dat   (release 1001, serial 261106)
+  Zork II: Bestiary   zork2-bestiary.dat   (release 1002, serial 261106)
+  Zork III: Bestiary  zork3-bestiary.dat   (release 1003, serial 261106)
+
+The MIT License text in LICENSE-MIT-Microsoft.txt applies to these files too and must stay
+with them. The MIT License does not grant rights to the Zork name or any other trademark.

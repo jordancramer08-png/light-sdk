@@ -167,7 +167,7 @@ Session 9 is fully done. On 2026-11-07 all 152 tests passed and the release APK 
 all Session 9 and Bestiary work (2.2 GB of memory free at the start; Gradle is capped at 2 GB).
 
 Session 10 is done (2026-11-07): installed on the phone and every row of the test checklist passed.
-All 156 tests pass. **Next: Session 17**, the four suggestions below.
+All 154 tests passed (an earlier note said 156; Gradle reported 154). **Next: Session 17**, below.
 
 Session 10 fixes, found on the phone:
 
@@ -190,7 +190,7 @@ Session 10 notes for the checklist:
 - The color theme is one row that cycles Lantern, Parchment, Deep Sea on each tap.
 - Phone screenshots: `adb exec-out screencap -p > file.png` (density 480, so 3 px per dp).
 
-Suggestions from Session 10 (planned as Session 17):
+Suggestions from Session 10 (built in Session 17):
 
 - Keep command colors in the automatic save, so `>look` stays green after Continue.
 - Scroll the story by whole lines, so the top line is never cut in half.
@@ -445,11 +445,20 @@ use the SDK dev key, `sdk\keys\lightsdk-dev.jks`.
 - [x] Session 9: Settings, safety and a full test run
 - [x] Session 10: Install on the phone and test
 - [ ] Session 17: Build the four Session 10 suggestions (Jordan asked for them on 2026-11-07).
-      One at a time, tests first, then one rebuild and a phone check with the phone plugged in:
-      1. Keep command colors in the automatic save, so `>look` stays green after Continue.
-      2. Scroll the story by whole lines, so the top line is never cut in half.
-      3. Join hard-wrapped paragraphs on the Licenses screen.
-      4. Hide the quick row while the keyboard is open.
+      Built on the laptop 2026-11-07: 160 tests pass and the release APK is rebuilt (7:46 PM).
+      Left to do: plug in the phone, install with step 6 of "Installing on the phone", then check
+      each item on the phone and tick this session.
+      1. Command colors kept after Continue. `auto.txt` marks commands with  and 
+         (`savedStoryText`, `appendSavedStoryText` in `GameText.kt`). Old files load as plain
+         story text. Phone check: send a command, leave, Continue; it should still be green.
+      2. Whole-line story area. `StoryText` cuts its height to a whole number of lines and leaves
+         the spare sliver empty above. Phone check: no half line under the status bar. Only holds
+         while the newest text is in view; scrolling back by hand can still stop mid-line.
+      3. Licenses reflow. `reflowParagraphs` in `LicensesScreen.kt` joins lines that follow a line
+         of 60+ characters, keeps bullets and indented rows, and drops `===` underlines.
+         Phone check: paragraphs wrap evenly.
+      4. Quick row hidden while the keyboard is open (`GameBody` in `GameScreen.kt`).
+         Phone check: open the keyboard and the direction row goes away.
 
 Next: Session 17.
 

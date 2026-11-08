@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -132,7 +133,8 @@ private fun GameBody(
                 keyboardOpen = false
             }
         }
-        if (settings.quickRow) QuickRow(state.waitingForInput, sendAndClose)
+        // While typing, the quick row gives its room to the story; the keyboard has letters anyway.
+        if (settings.quickRow && !keyboardOpen) QuickRow(state.waitingForInput, sendAndClose)
         VerbOrSuggestionRow(typing.suggestions, game.typing::addWord, game.typing::complete)
         InputLine(
             typed = typing.text,
@@ -252,14 +254,22 @@ private fun StoryText(
     LaunchedEffect(lines, textSize, keyboardOpen) {
         if (lines.isNotEmpty()) list.scrollToItem(lines.lastIndex, Int.MAX_VALUE)
     }
-    LazyColumn(
-        state = list,
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 10.dp)
-            .pointerInput(Unit) { detectTapGestures { onTap() } },
-    ) {
-        itemsIndexed(lines) { _, line -> StoryLine(line, style, onWord, onTap) }
+    // Every line is the same height, so a story area a whole number of lines tall never shows half a
+    // line at the top while the newest text is in view. The spare sliver is left empty above it.
+    BoxWithConstraints(modifier.fillMaxWidth().pointerInput(Unit) { detectTapGestures { onTap() } }) {
+        val density = LocalDensity.current
+        val lineHeight = with(density) { style.lineHeight.toPx() }
+        val wholeLines = with(density) { maxHeight.toPx() / lineHeight }.toInt().coerceAtLeast(1)
+        LazyColumn(
+            state = list,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .height(with(density) { (wholeLines * lineHeight).toDp() })
+                .padding(horizontal = 10.dp),
+        ) {
+            itemsIndexed(lines) { _, line -> StoryLine(line, style, onWord, onTap) }
+        }
     }
 }
 

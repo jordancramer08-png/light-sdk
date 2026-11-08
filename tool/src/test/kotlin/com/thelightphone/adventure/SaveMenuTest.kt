@@ -118,6 +118,19 @@ class SaveMenuTest {
     }
 
     @Test
+    fun commandsKeepTheirColorAfterResuming() {
+        val first = start()
+        play(first, "open mailbox")
+        leave(first)
+
+        val state = prompt(start())
+        val commands = state.lines.flatten().filter { it.kind == SpanKind.COMMAND }.map { it.text }
+        assertEquals(listOf("open mailbox"), commands)
+        assertTrue("Opening the small mailbox" in state.text(), state.text())
+        assertTrue(state.lines.flatten().none { '\u0001' in it.text || '\u0002' in it.text })
+    }
+
+    @Test
     fun aResumedGameWithNoUpperWindowGetsNoBlankBand() {
         val first = start()
         play(first, "open mailbox")

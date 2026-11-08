@@ -248,7 +248,7 @@ class GameViewModel(
         }
 
         private fun showResumedScreen() {
-            log.append(store.readAutoText(), StorySpan(""))
+            appendSavedStoryText(log, store.readAutoText())
             val rows = store.readAutoUpperRows()
             upper.resize(rows.size)
             rows.forEachIndexed { index, row ->
@@ -331,8 +331,7 @@ class GameViewModel(
         private fun saveAutomatically() {
             if (!autosaveEnabled()) return
             val data = machine.saveAtInput() ?: return
-            val recent = log.snapshot().takeLast(RESUME_LINES)
-            val text = recent.joinToString("\n") { line -> line.joinToString("") { it.text } }
+            val text = savedStoryText(log.snapshot().takeLast(RESUME_LINES))
             store.writeAuto(data, text, upper.plainRows())
         }
 

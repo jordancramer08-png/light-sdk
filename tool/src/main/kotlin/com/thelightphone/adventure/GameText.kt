@@ -46,6 +46,28 @@ fun statusSummary(status: ZStatusLine): String =
         "Score: ${status.first}  Moves: ${status.second}"
     }
 
+/** Marks a typed command in saved story text. Story text never contains these control characters. */
+private const val COMMAND_START = '\u0001'
+private const val COMMAND_END = '\u0002'
+
+/** Story lines as plain text for the automatic save, with typed commands marked. */
+fun savedStoryText(lines: List<TextLine>): String =
+    lines.joinToString("\n") { line ->
+        line.joinToString("") { span ->
+            if (span.kind == SpanKind.COMMAND) "$COMMAND_START${span.text}$COMMAND_END" else span.text
+        }
+    }
+
+/** Adds saved story text to [log], with marked commands shown as commands again. */
+fun appendSavedStoryText(log: StoryLog, text: String) {
+    var inCommand = false
+    text.split(COMMAND_START, COMMAND_END).forEach { part ->
+        val kind = if (inCommand) SpanKind.COMMAND else SpanKind.STORY
+        if (part.isNotEmpty()) log.append(part, StorySpan("", kind = kind))
+        inCommand = !inCommand
+    }
+}
+
 /** The story so far, as lines of styled spans. Old lines drop off after [MAX_LINES]. */
 class StoryLog {
     private val lines = ArrayList<ArrayList<StorySpan>>()

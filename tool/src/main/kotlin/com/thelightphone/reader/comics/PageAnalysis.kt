@@ -38,6 +38,12 @@ class PageLook(
     val note: String = "",
 )
 
+/** The detector wasn't sure of this page's panels: it's kept whole, and its [PageLook.candidates] are what it found. */
+val PageLook.doubtful: Boolean get() = note == "doubtful"
+
+/** The panels Panels mode steps through: those found, or on a doubtful page what was found (shown after the whole page). */
+val PageLook.panelsToStep: List<PixelRect> get() = if (doubtful) candidates else panels
+
 /** The second look is at this many pixels on the page's long side. */
 const val SECOND_LOOK_LONG_SIDE = 1600
 

@@ -32,6 +32,7 @@ class ComicViewSettingsPreference(private val dataStore: DataStore<Preferences>)
             direction = ReadingDirection.fromSavedName(prefs[seriesKey(folder, "direction")]),
             spreads = SpreadSetting.fromSavedName(prefs[seriesKey(folder, "spreads")]),
             autoAdvance = prefs[AUTO_ADVANCE] ?: false,
+            groupSmallPanels = prefs[GROUP_SMALL_PANELS] ?: true,
         )
     }
 
@@ -47,6 +48,7 @@ class ComicViewSettingsPreference(private val dataStore: DataStore<Preferences>)
             prefs[ROTATE_SPREADS] = settings.rotateSpreads
             prefs[CROP_MARGINS] = settings.cropMargins
             prefs[AUTO_ADVANCE] = settings.autoAdvance
+            prefs[GROUP_SMALL_PANELS] = settings.groupSmallPanels
         }
     }
 
@@ -59,6 +61,7 @@ class ComicViewSettingsPreference(private val dataStore: DataStore<Preferences>)
         private val ROTATE_SPREADS = booleanPreferencesKey("comic_rotate_spreads")
         private val CROP_MARGINS = booleanPreferencesKey("comic_crop_margins")
         private val AUTO_ADVANCE = booleanPreferencesKey("comic_auto_advance")
+        private val GROUP_SMALL_PANELS = booleanPreferencesKey("comic_group_panels")
 
         /** Every per-series key starts with this. */
         const val SERIES_PREFIX = "comic_series:"

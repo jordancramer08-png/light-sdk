@@ -297,6 +297,12 @@ class ComicScreen(
                 nextSymbol = "›",
             )
             HairlineDivider()
+            OnOffRow(
+                label = "Group small panels",
+                isOn = settings.groupSmallPanels,
+                onClick = { viewModel.setGroupSmallPanels(!settings.groupSmallPanels) },
+            )
+            HairlineDivider()
         }
         OnOffRow(
             label = "Crop margins",

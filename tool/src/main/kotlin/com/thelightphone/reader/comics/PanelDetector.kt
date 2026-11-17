@@ -29,7 +29,7 @@ const val PANEL_GRID_LONG_SIDE = 800
  * bridges, bleeding panels, stray ink, slanted gutters, drawn borders, confidence and a second
  * look, page furniture.
  */
-const val PANEL_DETECTOR_VERSION = 3
+const val PANEL_DETECTOR_VERSION = 4
 
 /**
  * The detector's thresholds. The defaults were tuned on real pages (CLAUDE.md 12, part 3);

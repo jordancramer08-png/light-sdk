@@ -23,6 +23,10 @@ import com.thelightphone.reader.comics.PageTap
 import com.thelightphone.reader.comics.PageZoom
 import com.thelightphone.reader.comics.PanelMargin
 import com.thelightphone.reader.comics.PanelStep
+import com.thelightphone.reader.comics.PHONE_SCREEN_HEIGHT
+import com.thelightphone.reader.comics.PHONE_SCREEN_WIDTH
+import com.thelightphone.reader.comics.PlannedPanel
+import com.thelightphone.reader.comics.planViews
 import com.thelightphone.reader.comics.PanelTransition
 import com.thelightphone.reader.comics.PixelRect
 import com.thelightphone.reader.comics.WHOLE_PAGE_PAUSE_MS
@@ -378,6 +382,8 @@ class ComicViewModel(
 
     fun setAutoAdvance(on: Boolean) = changeSettings(_state.value.settings.copy(autoAdvance = on))
 
+    fun setGroupSmallPanels(on: Boolean) = changeSettings(_state.value.settings.copy(groupSmallPanels = on))
+
     /**
      * "This page: spread / single page": the page shown is set by hand to the other way it
      * counts now. Set back to what its shape says, the hand-set choice is dropped.
@@ -467,13 +473,17 @@ class ComicViewModel(
             if (onPanel && !wholePageHeld && !endOfComicHeld && advanceJob?.isActive != true) showPanel(current.panel, animated = false)
         }
         if (settings.rotateSpreads != old.rotateSpreads) relayoutPictures()
+        if (settings.groupSmallPanels != old.groupSmallPanels) restartPanels()
         if (settings.autoAdvance && !old.autoAdvance && _state.value.ended) advanceIfAsked()
         if (settings.margin != old.margin) {
             forgetAhead()
-            // The panel shown is zoomed again with the new margin.
+            // The view shown is zoomed again with the new margin (the views can change with it: never past the last).
             val current = _state.value
             val onPanel = current.mode == ComicReadingMode.PANELS && current.panel >= 0
-            if (onPanel && !wholePageHeld && !endOfComicHeld && advanceJob?.isActive != true) showPanel(current.panel, animated = true)
+            val last = panelsOf(current.pageIndex).size - 1
+            if (onPanel && last >= 0 && !wholePageHeld && !endOfComicHeld && advanceJob?.isActive != true) {
+                showPanel(current.panel.coerceAtMost(last), animated = true)
+            }
         }
     }
 
@@ -516,15 +526,25 @@ class ComicViewModel(
     }
 
     /**
-     * Page [index]'s panels in reading order for the series' direction (a spread's two pages one
-     * after the other); none when it was set to be shown whole or wasn't looked at.
+     * Page [index]'s views (CLAUDE.md 12, "Views"): its panels in reading order for the series'
+     * direction (a spread's two pages one after the other), then small neighbours grouped, long
+     * panels divided, and a doubtful page's whole page first ([planViews]). None when it was set
+     * to be shown whole or wasn't looked at. Panels mode steps through these, and the saved
+     * "panel" is the view's number.
      */
     private fun panelsOf(index: Int): List<PixelRect> {
         val found = analyses[index] ?: return emptyList()
         if (pages[index] in _state.value.overrides.whole) return emptyList()
         val crop = cropFor(index, found.pageWidth, found.pageHeight)
         val spread = spreadFor(index, crop.width, crop.height)
-        return orderPanels(found.rects, found.pageWidth, _state.value.settings.direction, spread)
+        val settings = _state.value.settings
+        val ordered = orderPanels(found.rects, found.pageWidth, settings.direction, spread)
+        val inkOf = found.panels.associate { it.rect to it.ink }
+        val planned = ordered.map { PlannedPanel(it, inkOf[it]) }
+        // Before the page area is measured, the phone's screen stands in.
+        val width = if (screenWidth > 0) screenWidth else PHONE_SCREEN_WIDTH
+        val height = if (screenHeight > 0) screenHeight else PHONE_SCREEN_HEIGHT
+        return planViews(planned, crop, width, height, settings.margin.fraction, settings.groupSmallPanels, found.doubtful)
     }
 
     /** A spread opens at the edge reading starts from: the left edge going forward left to right. */

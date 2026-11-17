@@ -14,13 +14,19 @@ class PanelsFile(
     val cleaned: Boolean,
     val pages: Map<String, PageEntry>,
 ) {
-    /** One page: its size, its panels left to right (none = shown whole), its crop and levels (null = none / not used). */
+    /**
+     * One page: its size, its panels left to right (none = shown whole), its crop and levels
+     * (null = none / not used), each panel's [ink] along its longer side (same order; empty =
+     * not measured) and whether the detector was [doubtful] (the phone then shows the whole page first).
+     */
     class PageEntry(
         val pageWidth: Int,
         val pageHeight: Int,
         val panels: List<PixelRect>,
         val crop: PixelRect?,
         val levels: PageLevels?,
+        val ink: List<List<Int>> = emptyList(),
+        val doubtful: Boolean = false,
     )
 
     fun toJson(): String = buildString {
@@ -38,11 +44,12 @@ class PanelsFile(
             append(",\"panels\":[")
             page.panels.forEachIndexed { j, rect ->
                 if (j > 0) append(',')
-                append(box(rect))
+                append(box(rect, page.ink.getOrNull(j)))
             }
             append(']')
             append(",\"crop\":").append(page.crop?.let(::box) ?: "null")
             append(",\"levels\":").append(page.levels?.let(::levels) ?: "null")
+            if (page.doubtful) append(",\"doubtful\":true")
             append('}')
         }
         append("\n}}\n")
@@ -56,9 +63,12 @@ class PanelsFile(
          * Bump when what the tool does to pages, or how it finds panels, changes: the send
          * script's cache keys include it, so every comic is looked at again.
          */
-        const val TOOL_VERSION = 2
+        const val TOOL_VERSION = 3
 
-        private fun box(r: PixelRect) = "{\"left\":${r.left},\"top\":${r.top},\"right\":${r.right},\"bottom\":${r.bottom}}"
+        private fun box(r: PixelRect, ink: List<Int>? = null): String {
+            val edges = "\"left\":${r.left},\"top\":${r.top},\"right\":${r.right},\"bottom\":${r.bottom}"
+            return if (ink == null) "{$edges}" else "{$edges,\"ink\":[${ink.joinToString(",")}]}"
+        }
 
         private fun levels(l: PageLevels) =
             "{\"black\":[${l.blackRed},${l.blackGreen},${l.blackBlue}],\"white\":[${l.whiteRed},${l.whiteGreen},${l.whiteBlue}]}"

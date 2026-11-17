@@ -143,6 +143,8 @@ reader/
                         enteringPanel, openingPanelIndex / savedPanelNumber, panelZoom (a panel
                         filling the screen), between (the animated move between two zooms),
                         nextPanelSpot (where the next tap lands, to read it sharply ahead)
+    ViewPlanner.kt      planViews (§12 "Views": small panels grouped, long ones divided, a doubtful
+                        page whole first), cutAt (the emptiest line), panelInk
   data/
     LibraryStore.kt     scans shared/books/*.epub, caches parsed books (and their covers);
                         removalBytes / remove (Remove from phone), isOnPhone
@@ -671,10 +673,12 @@ code as on the phone. Run with Java (`JAVA_HOME`, Android Studio's `jbr`, or PAT
   final page (`PanelFinder`, below).
 - `--samples`: for 3 pages spread through the comic (`samplePageNumbers`: 2nd, middle, 80%),
   `<folder>/<comic>/<page>-1-before.jpg`, `-2-after.jpg`, `-3-panels.jpg` (boxes numbered).
-- Output `<name>.panels.json` (`PanelsFile`): `version` 1, `tool` (`TOOL_VERSION`, now 2: bump
+- Output `<name>.panels.json` (`PanelsFile`): `version` 1, `tool` (`TOOL_VERSION`, now 3: bump
   when what the tool does changes), `fileSize` (of the CBZ sent), `cropped`, `cleaned`, `pages`
   keyed by entry name → `pageWidth`, `pageHeight`, `panels` (left to right, as found), `crop`
-  (null = none), `levels` (null when cleaned on the PC, so the phone's Clean up does nothing).
+  (null = none), `levels` (null when cleaned on the PC, so the phone's Clean up does nothing);
+  each panel box may carry `ink` (its ink along its longer side, `panelInk`), and a doubtful page
+  `"doubtful": true` with the panels it found (Views, below).
 - **Cache**: the script keeps each comic's panels file in `%LOCALAPPDATA%\LightReader\
   comic-panels\<sha1>.panels.json`, the key being the comic's full path, size, modified time,
   the choices and `TOOL_VERSION`; a cached comic is run with `--known-panels` (pages are still
@@ -787,6 +791,27 @@ waits a moment to be sure it isn't a double-tap.
   whole, and the next tap turns the page. Double-tap shows the whole page until the next tap,
   which returns to the panel. Pinch and drag do nothing in Panels mode. Switching to Full
   page zooms out to the whole page; switching to Panels goes to the page's first panel.
+  Everything here that says "panel" steps through the page's **views** (below), and the saved
+  `panel` is the view's number.
+- **Views** (`comics/ViewPlanner.kt`, `planViews`; the merge-and-divide idea is from chika,
+  github.com/batunii/chika, MPL: idea only, no code). Between the detector and the viewer
+  (`ComicViewModel.panelsOf`), each page's panels, in reading order, become views, worked out
+  for the screen (1080 × 1240 until the page area is measured) and the Panel margin:
+  - **Group small panels** (overlay, "All comics", Panels mode; key `comic_group_panels`, a
+    boolean; missing = On): neighbours in reading order that would each be shown at over 2.5×
+    (`SMALL_PANEL_ZOOM`), in one row (heights overlapping by half the smaller), become one view
+    while the group still shows at 2× or more (`GROUP_READABLE_ZOOM`) and covers no other panel
+    (10% of it). Turning it on or off goes back to the page's first view.
+  - **Divide**: a panel that fits whole at under 2× (`DIVIDE_UNLESS_ZOOM`) and is at least 1.8×
+    taller or wider than the screen's shape (`DIVIDE_SHAPE`) becomes 2 views along its long side,
+    3 from 2.8× (`THREE_VIEWS_SHAPE`). Each cut is at the emptiest of 48 slices (`INK_SLICES`)
+    within 12% (`CUT_REACH`) of the even split, each slice counted with its two neighbours so a
+    balloon's gap between lines of lettering never looks empty; ties go nearest the even split.
+    The ink (`panelInk`: the share of pixels darker than 100 in each slice, per thousand, on the
+    800 px page) is measured when the page is looked at and cached with each panel (`PanelBox.ink`);
+    without it the cut is even.
+  - **Doubtful pages** (Page analysis step 6): instead of no panels, the page keeps what was found
+    with `doubtful` set; its first view is the whole page (its crop), then its panels.
 - **Panels off the main thread**: `ComicStore.panels` (panels.json, else detected) runs on its
   own one-at-a-time dispatcher, beside the picture decoding: the page shown first, then the
   next page in the reading direction, then the one before, so turning either way doesn't wait.
@@ -880,8 +905,9 @@ waits a moment to be sure it isn't a double-tap.
   Direction (`direction`, `ReadingDirection`: Left to right / Right to left) and Spreads
   (`spreads`, `SpreadSetting`: Auto / Off), plus Clean up scans as before. A series with nothing
   saved starts with the mode, margin and Rotate spreads used last (the old global keys, still
-  written on every change), left to right and spreads Auto. Panel transition, Crop margins and
-  Auto-advance (`comic_auto_advance`) stay one setting for every comic.
+  written on every change), left to right and spreads Auto. Panel transition, Crop margins,
+  Auto-advance (`comic_auto_advance`) and Group small panels (`comic_group_panels`) stay one
+  setting for every comic.
 - **Right to left** (manga): `pageTap(rightToLeft = true)` mirrors the tap zones (the right 30%
   goes back); panels are read from the right in each row (`orderPanels` mirrors the page, runs
   `readingOrder`, mirrors back; panels are stored left to right and ordered when shown, so a
@@ -944,7 +970,9 @@ phone by `ComicPageImages.findPanels` and on the PC by the report). A page is de
    (`SECOND_LOOK_LONG_SIDE`; `analysePage(larger = …)`, decoded only then — on the phone a
    second `BitmapFactory` decode in `ComicPageImages.findPanels`, on the PC and in the report
    from the page itself). A second look with panels and no doubt wins ("second look");
-   otherwise the page is kept whole ("doubtful"; also with no `larger`).
+   otherwise the page is kept whole ("doubtful"; also with no `larger`). A doubtful page's panels
+   are kept as its `candidates` (`PageLook.doubtful`, `panelsToStep`): the phone and the PC
+   tool save them with `doubtful`, and Panels mode shows the whole page first (Views).
 
 **Region detector** (`RegionPanelDetector.kt`, `findRegionPanels`): gutter-colored pixels
 (`isGutterLevel`, same tolerance as the XY-cut) are flooded from the crop's border; everything
@@ -1022,8 +1050,8 @@ shrunk by averaging to 800 px on its long side (`shrinkToLongSide`, `PANEL_GRID_
   strip), together covering ≥ 60% (`minCoverage`).
 - Panels come back in the page's own pixels (`PixelRect`, rounded outward).
 - **Cache**: `ComicStore.panels(meta, page)` reads `comic-library/<id>/panels.json`
-  (`ComicPanels`: `version` = `PANEL_DETECTOR_VERSION`, now 3, `pages` keyed by the page's name
-  in the CBZ → `PagePanels(pageWidth, pageHeight, panels, crop, levels)`: panels in page pixels,
+  (`ComicPanels`: `version` = `PANEL_DETECTOR_VERSION`, now 4 (views: ink and doubtful pages), `pages` keyed by the page's name
+  in the CBZ → `PagePanels(pageWidth, pageHeight, panels, crop, levels, doubtful)`: panels in page pixels,
   an empty list = whole page; `crop` a `PanelBox`, null = nothing cropped; `levels` a
   `LevelsBox(black [r, g, b], white [r, g, b])`), else looks and adds the page (written to a
   temp file, then moved over). A page that can't be read isn't cached. Bump

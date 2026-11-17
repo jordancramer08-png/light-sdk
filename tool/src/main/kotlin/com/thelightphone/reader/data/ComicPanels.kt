@@ -21,7 +21,8 @@ data class ComicPanels(
  * What was found on one page, in the page's own pixels ([pageWidth] × [pageHeight]): its
  * panels in reading order (none means the page is shown whole), the part left once the blank
  * border is cropped off ([crop]; null = the whole page), and its [levels] for scan clean-up
- * (null = not known, drawn as it is).
+ * (null = not known, drawn as it is). [doubtful]: the detector wasn't sure, so Panels mode shows
+ * the whole page first, then [panels] (CLAUDE.md 12, "Views").
  */
 @Serializable
 data class PagePanels(
@@ -30,6 +31,7 @@ data class PagePanels(
     val panels: List<PanelBox>,
     val crop: PanelBox? = null,
     val levels: LevelsBox? = null,
+    val doubtful: Boolean = false,
 ) {
     val rects: List<PixelRect> get() = panels.map { it.rect }
 }
@@ -70,12 +72,15 @@ data class LevelsBox(val black: List<Int>, val white: List<Int>) {
     }
 }
 
-/** One panel's edges, in page pixels (right and bottom just past the panel, as [PixelRect]). */
+/**
+ * One panel's edges, in page pixels (right and bottom just past the panel, as [PixelRect]), and
+ * its [ink] along its longer side ([panelInk]; null = not measured: a long panel is cut evenly).
+ */
 @Serializable
-data class PanelBox(val left: Int, val top: Int, val right: Int, val bottom: Int) {
+data class PanelBox(val left: Int, val top: Int, val right: Int, val bottom: Int, val ink: List<Int>? = null) {
     val rect: PixelRect get() = PixelRect(left, top, right, bottom)
 
     companion object {
-        fun of(rect: PixelRect) = PanelBox(rect.left, rect.top, rect.right, rect.bottom)
+        fun of(rect: PixelRect, ink: List<Int>? = null) = PanelBox(rect.left, rect.top, rect.right, rect.bottom, ink)
     }
 }

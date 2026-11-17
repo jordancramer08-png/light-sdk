@@ -12,6 +12,9 @@ import com.thelightphone.reader.comics.SECOND_LOOK_LONG_SIDE
 import com.thelightphone.reader.comics.PixelRect
 import com.thelightphone.reader.comics.analysePage
 import com.thelightphone.reader.comics.cropWithinPage
+import com.thelightphone.reader.comics.doubtful
+import com.thelightphone.reader.comics.panelInk
+import com.thelightphone.reader.comics.panelsToStep
 import com.thelightphone.reader.comics.fittedSize
 import com.thelightphone.reader.comics.shrinkColorToLongSide
 import java.io.IOException
@@ -124,7 +127,9 @@ object ComicPageImages {
         // A doubtful page is looked at again, bigger (decoded only then).
         val look = analysePage(small, width, height, larger = { decodeForAnalysis(bytes, width, height, SECOND_LOOK_LONG_SIDE) })
         val crop = look.crop.takeUnless { it == PixelRect(0, 0, width, height) }
-        return PagePanels(width, height, look.panels.map(PanelBox::of), crop?.let(PanelBox::of), LevelsBox.of(look.levels))
+        val gray = small.gray()
+        val panels = look.panelsToStep.map { PanelBox.of(it, panelInk(gray, width, height, it)) }
+        return PagePanels(width, height, panels, crop?.let { PanelBox.of(it) }, LevelsBox.of(look.levels), look.doubtful)
     }
 
     /** The page decoded small (a power-of-2 sample keeping at least [longSide] px), then shrunk to [longSide]. */

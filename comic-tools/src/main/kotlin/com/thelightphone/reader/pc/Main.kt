@@ -3,6 +3,9 @@ package com.thelightphone.reader.pc
 import com.thelightphone.reader.comics.ColorImage
 import com.thelightphone.reader.comics.PixelRect
 import com.thelightphone.reader.comics.comicPages
+import com.thelightphone.reader.comics.doubtful
+import com.thelightphone.reader.comics.panelInk
+import com.thelightphone.reader.comics.panelsToStep
 import com.thelightphone.reader.comics.findCrop
 import com.thelightphone.reader.comics.openComicZip
 import com.thelightphone.reader.comics.rectToPage
@@ -216,5 +219,8 @@ private fun panelsOf(image: ColorImage, cleaned: Boolean, firstPage: Boolean): P
     val small = shrinkColorToLongSide(image)
     val look = PanelFinder.find(small, image.width, image.height, firstPage, larger = { shrinkColorToLongSide(image, SECOND_LOOK_LONG_SIDE) }).look
     val crop = look.crop.takeUnless { it == PixelRect(0, 0, image.width, image.height) }
-    return PanelsFile.PageEntry(image.width, image.height, look.panels, crop, if (cleaned) null else look.levels)
+    val panels = look.panelsToStep
+    val gray = small.gray()
+    val ink = panels.map { panelInk(gray, image.width, image.height, it) }
+    return PanelsFile.PageEntry(image.width, image.height, panels, crop, if (cleaned) null else look.levels, ink, look.doubtful)
 }

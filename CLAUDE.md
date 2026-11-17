@@ -131,7 +131,10 @@ reader/
     PanelDetector.kt    panel detection (§12 part 3): GrayImage, grayFromArgb, shrinkToLongSide,
                         gutterLevel, searchPanels / detectPanels / cutPanels (XY-cut), PanelTuning
                         (thresholds for both detectors), PANEL_DETECTOR_VERSION
-    PageAnalysis.kt     analysePage (§12 part 6): crop, levels, then region detector, XY-cut, or none
+    PageAnalysis.kt     analysePage (§12 part 6): crop, levels, then region detector, XY-cut, drawn
+                        borders, or none; furniture check, confidence, second look; tilesItsArea
+    PanelChecks.kt      PaperMask, frameEdges (drift-following), PanelDoubt / panelDoubts / isDoubtful,
+                        looksLikeFurnitureLayout (ported from PanelsPlus), isMostlyTextOutside
     PageCrop.kt         findCrop (auto-crop), cropWithinPage, PixelRect.within / movedBy
     ScanCleanUp.kt      ColorImage, shrinkColorToLongSide, PageLevels / measureLevels, CleanUp
                         (Off/Auto/Strong), channelStretches, cleanUpMatrix, leveledGray (detector's gray)
@@ -668,7 +671,7 @@ code as on the phone. Run with Java (`JAVA_HOME`, Android Studio's `jbr`, or PAT
   final page (`PanelFinder`, below).
 - `--samples`: for 3 pages spread through the comic (`samplePageNumbers`: 2nd, middle, 80%),
   `<folder>/<comic>/<page>-1-before.jpg`, `-2-after.jpg`, `-3-panels.jpg` (boxes numbered).
-- Output `<name>.panels.json` (`PanelsFile`): `version` 1, `tool` (`TOOL_VERSION`, now 1: bump
+- Output `<name>.panels.json` (`PanelsFile`): `version` 1, `tool` (`TOOL_VERSION`, now 2: bump
   when what the tool does changes), `fileSize` (of the CBZ sent), `cropped`, `cleaned`, `pages`
   keyed by entry name → `pageWidth`, `pageHeight`, `panels` (left to right, as found), `crop`
   (null = none), `levels` (null when cleaned on the PC, so the phone's Clean up does nothing).
@@ -922,17 +925,48 @@ phone by `ComicPageImages.findPanels` and on the PC by the report). A page is de
    strongly colored pixels (more than 40 between brightest and dullest channel) pulled down
    toward middle gray, so yellow art is never paper. Dark colors are left (navy gutters). The
    gutter gray is read off the whole leveled page's border (`gutterLevel`), else white then black.
-4. **Panels**, inside the crop: the region detector first, then the XY-cut, each with every
-   gutter gray; the first result passing `isReliableSplit` wins, else the page has no panels.
-   (`PageLook.method`: REGIONS, XY_CUT, NONE.)
+4. **Panels**, inside the crop: the region detector first, then the XY-cut (straight, then
+   slanted gutters), each with every gutter gray, then (light gutters only) the XY-cut along
+   drawn border lines; the first result passing `isReliableSplit` wins (a border split must also
+   tile its area: panels ≥ 85% of the box round them, `tilesItsArea`), else the page has no
+   panels. (`PageLook.method`: REGIONS, XY_CUT, BORDERS, NONE.)
+5. **Page furniture** (`PanelChecks.kt`): the winning split is dropped and the page kept whole
+   (`PageLook.note` "page furniture" / "text page") when it's a contents / credits layout
+   (`looksLikeFurnitureLayout`, ported from PanelsPlus, MIT, see `THIRD_PARTY_NOTICES.md`: ≥ 6
+   pieces, one strip ≥ 90% of the height and 20–50% of the width holding ≥ 75% of the ink and
+   ≥ 60% ink itself, every other piece beside it and together < 30% ink) or a text page (over
+   35% of the ink outside every panel, `isMostlyTextOutside`).
+6. **Confidence and second look**: each panel is scored (`panelDoubts`, factors multiplied):
+   BLANK_INSIDE ≥ 95% paper (0.45), INNER_GUTTER a band of gutter lines with solid lines both
+   sides crossing it (0.4), WEAK_BORDER < 50% ink on the line 2 px inside its box, sides on the
+   picture's edge left out (0.75), OVERSIZED > half the page with other panels (0.75). Any panel
+   under 0.5 (`DOUBT_LIMIT`) makes the page doubtful: it's looked at again from scratch at 1600 px
+   (`SECOND_LOOK_LONG_SIDE`; `analysePage(larger = …)`, decoded only then — on the phone a
+   second `BitmapFactory` decode in `ComicPageImages.findPanels`, on the PC and in the report
+   from the page itself). A second look with panels and no doubt wins ("second look");
+   otherwise the page is kept whole ("doubtful"; also with no `larger`).
 
 **Region detector** (`RegionPanelDetector.kt`, `findRegionPanels`): gutter-colored pixels
 (`isGutterLevel`, same tolerance as the XY-cut) are flooded from the crop's border; everything
 the flood doesn't reach is content, and each 4-connected piece of it a candidate. Needs no
 straight gutter across the page, so tilted scans and uneven rows split. Then:
+- interiors are already filled (the flood can't get inside a frame). A region over 2% of the
+  page is eroded by 2 px (a square, scaled at 1600 px): when that breaks it into two or more
+  parts of ≥ 0.5% of the page, each also ≥ 80% the region's own pixels, each part (grown back
+  2 px) is a candidate (panels touching through a thin tail or corner) (`erodedParts`);
 - a region that is two panels joined by a balloon is cut across the gutter: ≥ 2 lines where
-  the region fills ≤ 50% (`bridgeShare`), with lines ≥ 70% (`edgeShare`) within 3 lines on
-  both sides (the panels' edges); cut in the run's middle; rows first, then columns, 4 deep;
+  the region fills ≤ 50% (`bridgeShare`), with lines ≥ 70% (`edgeShare`) within 3 lines plus
+  1° of drift across the box (a skewed scan's frame edge) on both sides (the panels' edges);
+  rows first, then columns, 4 deep. The balloon isn't cut in the gutter (`balloonSideCut`):
+  when the run's first line is > 10% fuller than its last (the balloon bulges toward its middle),
+  the whole run goes to that side, and the other way round; else the cut is in the middle;
+- **bleeding panels**: frame edges (`frameEdges`: ink with 3 px of paper outside, followed
+  as they drift up to ~1.2°, gaps ≤ 3 px bridged, ≥ 15% of the side) give spans: a horizontal
+  and a vertical edge meeting at a corner (within 1.5% of the long side), or two opposite edges
+  overlapping by 80%, reaching the picture's edge on an open side, and holding no other long
+  frame edge (over half the span) inside. Two or more pieces ≥ 80% inside a span, together
+  filling ≤ 60% of it (the rest flooded paper; real panels would tile it), become one panel
+  (span ∪ pieces), exempt from the fill check below (`mergeBleedingPanels`);
 - if any region big enough for a panel fills < 80% of its box (`minPanelFill`), nothing is
   kept: figures on a dark cover the flood ran round;
 - specks (< 0.05% of the page, `speckShare`) are dropped; balloons, captions and strips (under
@@ -944,6 +978,13 @@ straight gutter across the page, so tilted scans and uneven rows split. Then:
   the page's edge) is cut the same way as a balloon's bridge, but on lines ≥ 95% gutter color
   with solid edges both sides (a row of white balloons has no solid edges), only if every
   piece is panel-sized;
+- **stray ink** (`attachStrayInk`): content pieces of ≥ 12 px (at 800) outside every panel and
+  not touching the picture's edge (scan shadow) are grouped into blocks (gaps ≤ 1.2% of the
+  width across, ≤ 0.6% of the height down: letters into words, lines into paragraphs). Each
+  panel's cell is its box grown to the middle of the gap to its nearest neighbour each way (one
+  overlapping it across), else to the edge; a block joins the panel whose cell holds its middle,
+  unless that adds overlap with another panel. Running heads and page numbers (≤ 3% tall, in
+  the top or bottom 5%) are left out;
 - `readingOrder`: panels grouped into rows (heights overlapping by half the smaller, the band
   growing as panels join), top to bottom; each row into columns the same way, left to right;
   each column into rows again (6 deep). A tilted row still reads left to right; a tall panel
@@ -965,6 +1006,14 @@ shrunk by averaging to 800 px on its long side (`shrinkToLongSide`, `PANEL_GRID_
   panel corner) at least 2 px thick (0.25% of 800, `minGutterShare`: old scans' gutters are
   that thin); if no rows, into columns; each piece again (8 levels at most). Rows top to
   bottom, left to right inside a row = Western reading order.
+- **Slanted gutters** (from PanelsPlus's shear ladder): a piece with no straight gutter either
+  way tries lines at 2, 3, … 8° each way, rows then columns at each slope; a line counts when
+  ≥ 80% of it lies in the piece and ≥ 95% of that is gutter; a run ≥ 2 px thick, both sides at
+  least 6% of the page thick, cuts it in two, each side getting the whole slanted band (a thin
+  wedge of its neighbour, never a lost corner).
+- **Drawn borders** (`cutPanels(borders = true)`, tried last, light gutters only): a piece with
+  no gutter is cut at the thinnest run of lines ≥ 97% dark (≤ 60) that is ≤ 1.2% of the long
+  side thick (thicker = a dark panel) and ≥ 6% of the page from the piece's edges.
 - **Slivers**: a piece thinner than 6% of the page across the cut (`minPanelShare`) is dropped
   when under 2% of it is ink (`speckInkShare`: page numbers, specks), else joined to the
   neighbour across the narrower gutter (caption strips).
@@ -973,7 +1022,7 @@ shrunk by averaging to 800 px on its long side (`shrinkToLongSide`, `PANEL_GRID_
   strip), together covering ≥ 60% (`minCoverage`).
 - Panels come back in the page's own pixels (`PixelRect`, rounded outward).
 - **Cache**: `ComicStore.panels(meta, page)` reads `comic-library/<id>/panels.json`
-  (`ComicPanels`: `version` = `PANEL_DETECTOR_VERSION`, now 2, `pages` keyed by the page's name
+  (`ComicPanels`: `version` = `PANEL_DETECTOR_VERSION`, now 3, `pages` keyed by the page's name
   in the CBZ → `PagePanels(pageWidth, pageHeight, panels, crop, levels)`: panels in page pixels,
   an empty list = whole page; `crop` a `PanelBox`, null = nothing cropped; `levels` a
   `LevelsBox(black [r, g, b], white [r, g, b])`), else looks and adds the page (written to a
@@ -999,12 +1048,19 @@ shrunk by averaging to 800 px on its long side (`shrinkToLongSide`, `PANEL_GRID_
   Android test classpath has no `javax.imageio`, so pages are decoded by the PC helper
   `scripts/panel-report/PagePictures.java` (run with the JDK's `java`; outside `tool/src`,
   where `.java` files are banned), which shrinks each page by a power of 2 as the phone does and
-  hands over its colors; CBRs are unpacked with 7-Zip. Run one Gradle command at a time (8 GB
-  laptop). Last run (part 6 defaults): Earth-One, first 15 comics, panels on 114 of 150 pages
-  (76%; 105 by regions, 9 by XY-cut) against 101 (67%) for the old detector; Rebirth, first 10,
-  44 of 100 against 44. Fallbacks are mostly covers, splashes, slanted layouts and (Rebirth)
-  borderless art bleeding into black gutters. Beyond the counts, the region detector fixed
-  over- and under-splits the XY-cut made on Golden Age pages (12 → 8, 4 → 9 on real pages).
+  hands over its colors (at 800 px, then again at 1600 px for the second look); CBRs are
+  unpacked with 7-Zip. Run one Gradle command at a time (8 GB laptop). Part 6 run: Earth-One,
+  first 15 comics, panels on 114 of 150 pages (76%; 105 by regions, 9 by XY-cut); Rebirth,
+  first 10, 44 of 100. Last run (the PanelChecks upgrade, PANEL_DETECTOR_VERSION 3): Earth-One
+  114 of 150 (76%; 106 regions, 8 XY-cut) — same pages, but 5 split better (687 panels against
+  680: panels a balloon joined are now apart, e.g. 4 → 6, 3 → 5); Rebirth 44 of 100 (32
+  regions, 11 XY-cut, 1 drawn borders) — gained a 4-row page split along black lines and a
+  partial split of a slanted page, one spread 6 → 8 correct panels, lost a bad split (slivers,
+  now whole) and a partial one. No page was doubtful, furniture or a second look in either set:
+  the confidence check hasn't fired on real pages yet. The "old" column now includes the
+  slanted gutters (Earth-One 99, Rebirth 42). Fallbacks are mostly covers, splashes, slanted
+  layouts and (Rebirth) borderless art bleeding into black gutters. The part 6 run's summaries
+  and overlays are kept in `tool/build/panel-report-before/` for comparison.
 
 **Comic details** (`comics/ComicDetails.kt`, plain Kotlin). `ComicDetails`: series, issue,
 volume, title (the story's), year + month, writer, artists, publisher, summary, page count,

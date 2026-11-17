@@ -53,8 +53,8 @@ object PanelFinder {
      * Looks at one page: [small] is the page shrunk to about 800 px; [pageWidth] × [pageHeight]
      * its full size. [firstPage]: the comic's first page (its cover) gets the usual analysis only.
      */
-    fun find(small: ColorImage, pageWidth: Int, pageHeight: Int, firstPage: Boolean = false): Found {
-        val usual = analysePage(small, pageWidth, pageHeight)
+    fun find(small: ColorImage, pageWidth: Int, pageHeight: Int, firstPage: Boolean = false, larger: (() -> ColorImage?)? = null): Found {
+        val usual = analysePage(small, pageWidth, pageHeight, larger = larger)
         if (usual.panels.isNotEmpty()) return Found(usual, How.USUAL)
         if (firstPage || usual.gutter < LIGHT_GUTTER) return Found(usual, How.NONE)
         looser(small, pageWidth, pageHeight)?.let { return Found(it, How.LOOSER) }

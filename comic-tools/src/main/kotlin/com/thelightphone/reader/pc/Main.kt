@@ -6,6 +6,7 @@ import com.thelightphone.reader.comics.comicPages
 import com.thelightphone.reader.comics.findCrop
 import com.thelightphone.reader.comics.openComicZip
 import com.thelightphone.reader.comics.rectToPage
+import com.thelightphone.reader.comics.SECOND_LOOK_LONG_SIDE
 import com.thelightphone.reader.comics.shrinkColorToLongSide
 import java.io.File
 import java.util.zip.CRC32
@@ -213,7 +214,7 @@ fun cleanedUp(image: ColorImage): ColorImage {
 /** The final page looked at: panels (left to right), its remaining crop, and its levels unless it was cleaned up already. */
 private fun panelsOf(image: ColorImage, cleaned: Boolean, firstPage: Boolean): PanelsFile.PageEntry {
     val small = shrinkColorToLongSide(image)
-    val look = PanelFinder.find(small, image.width, image.height, firstPage).look
+    val look = PanelFinder.find(small, image.width, image.height, firstPage, larger = { shrinkColorToLongSide(image, SECOND_LOOK_LONG_SIDE) }).look
     val crop = look.crop.takeUnless { it == PixelRect(0, 0, image.width, image.height) }
     return PanelsFile.PageEntry(image.width, image.height, look.panels, crop, if (cleaned) null else look.levels)
 }

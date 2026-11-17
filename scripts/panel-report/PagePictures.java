@@ -14,11 +14,13 @@ import javax.imageio.ImageIO;
  * For picture number i (0-based) it writes <outDir>/<i>.page: the picture's full width and
  * height (ints), then the picture shrunk the way the phone decodes it for panel detection
  * (by the biggest power of 2 that keeps it at least 800 px on its long side, each pixel the
- * average of the block it covers): its width and height, then its colors as ARGB ints.
+ * average of the block it covers): its width and height, then its colors as ARGB ints. Then
+ * the same again for 1600 px (the second look on a doubtful page).
  * A picture ImageIO can't read gets no file.
  */
 public class PagePictures {
     private static final int GRID_LONG_SIDE = 800;
+    private static final int SECOND_LOOK_LONG_SIDE = 1600;
 
     public static void main(String[] args) throws Exception {
         File outDir = new File(args[0]);
@@ -37,19 +39,26 @@ public class PagePictures {
     }
 
     private static void write(BufferedImage picture, File file) throws Exception {
+        try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(file)))) {
+            out.writeInt(picture.getWidth());
+            out.writeInt(picture.getHeight());
+            writeSample(picture, GRID_LONG_SIDE, out);
+            writeSample(picture, SECOND_LOOK_LONG_SIDE, out);
+        }
+    }
+
+    private static void writeSample(BufferedImage picture, int longSide, DataOutputStream out) throws Exception {
         int width = picture.getWidth();
         int height = picture.getHeight();
-        // As ComicPageImages.findPanels: fitted to 800 px, then the power-of-2 sample size that keeps at least that.
-        double scale = Math.min(1.0, (double) GRID_LONG_SIDE / Math.max(width, height));
+        // As ComicPageImages.findPanels: fitted to the long side, then the power-of-2 sample size that keeps at least that.
+        double scale = Math.min(1.0, (double) longSide / Math.max(width, height));
         int gridWidth = Math.max(1, (int) Math.round(width * scale));
         int gridHeight = Math.max(1, (int) Math.round(height * scale));
         int sample = 1;
         while (width / (sample * 2) >= gridWidth && height / (sample * 2) >= gridHeight) sample *= 2;
         int sampledWidth = width / sample;
         int sampledHeight = height / sample;
-        try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(file)))) {
-            out.writeInt(width);
-            out.writeInt(height);
+        {
             out.writeInt(sampledWidth);
             out.writeInt(sampledHeight);
             int[] rows = new int[width * sample];

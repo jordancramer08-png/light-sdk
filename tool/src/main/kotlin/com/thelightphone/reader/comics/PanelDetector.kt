@@ -1,9 +1,11 @@
 package com.thelightphone.reader.comics
 
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlin.math.tan
 
 /**
  * Finds the panels on a comic page (CLAUDE.md 12, part 3), in plain Kotlin so it runs in
@@ -23,9 +25,11 @@ const val PANEL_GRID_LONG_SIDE = 800
 
 /**
  * Bump when the page analysis changes (crop, levels or either panel detector), so cached pages
- * are looked at again. 2: auto-crop, scan levels and the connected-region detector.
+ * are looked at again. 2: auto-crop, scan levels and the connected-region detector. 3: balloon
+ * bridges, bleeding panels, stray ink, slanted gutters, drawn borders, confidence and a second
+ * look, page furniture.
  */
-const val PANEL_DETECTOR_VERSION = 2
+const val PANEL_DETECTOR_VERSION = 3
 
 /**
  * The detector's thresholds. The defaults were tuned on real pages (CLAUDE.md 12, part 3);
@@ -154,9 +158,14 @@ fun searchPanels(image: GrayImage, tuning: PanelTuning = PanelTuning()): PanelSe
 fun gutterCandidates(image: GrayImage, tuning: PanelTuning = PanelTuning()): List<Int> =
     gutterLevel(image, tuning)?.let { listOf(it) } ?: listOf(WHITE, BLACK)
 
-/** The XY-cut's pieces along gutters of the gray [gutter], in reading order (not yet checked for [isReliableSplit]). */
-fun cutPanels(image: GrayImage, gutter: Int, tuning: PanelTuning = PanelTuning()): List<PixelRect> =
-    PanelCutter(image, gutter, tuning).panels()
+/**
+ * The XY-cut's pieces along gutters of the gray [gutter], in reading order (not yet checked for
+ * [isReliableSplit]). Where no straight gutter crosses a piece, slanted ones (2 to 8 degrees
+ * either way) are tried. With [borders], a piece with no gutter at all is also cut along a thin
+ * drawn black line right across it (panels with no blank gutter between them).
+ */
+fun cutPanels(image: GrayImage, gutter: Int, tuning: PanelTuning = PanelTuning(), borders: Boolean = false): List<PixelRect> =
+    PanelCutter(image, gutter, tuning, borders).panels()
 
 /** True when [level] is the gutter's color: within the tolerance of [gutter], or past it away from the ink. */
 fun isGutterLevel(level: Int, gutter: Int, tuning: PanelTuning): Boolean =
@@ -234,22 +243,37 @@ fun rectToPage(rect: PixelRect, imageWidth: Int, imageHeight: Int, pageWidth: In
 }
 
 /** The XY-cut itself, on one small picture, along gutters of the gray [gutter]. */
-private class PanelCutter(private val image: GrayImage, gutter: Int, private val tuning: PanelTuning) {
+private class PanelCutter(
+    private val image: GrayImage,
+    gutter: Int,
+    private val tuning: PanelTuning,
+    private val borders: Boolean,
+) {
     private val width = image.width
     private val height = image.height
     private val longSide = max(width, height)
     private val minGutter = max(2, (longSide * tuning.minGutterShare).roundToInt())
+    private val gutterAt = BooleanArray(width * height) { isGutterLevel(image.pixels[it].toInt() and 0xFF, gutter, tuning) }
 
     // For each row, how many gutter pixels lie left of each x; for each column, above each y.
     private val rowSums = IntArray((width + 1) * height)
     private val columnSums = IntArray((height + 1) * width)
 
+    // The same for dark (drawn border line) pixels, only when [borders].
+    private val darkRowSums = IntArray(if (borders) (width + 1) * height else 0)
+    private val darkColumnSums = IntArray(if (borders) (height + 1) * width else 0)
+
     init {
         for (y in 0 until height) {
             for (x in 0 until width) {
-                val isGutter = if (isGutterLevel(image[x, y], gutter, tuning)) 1 else 0
+                val isGutter = if (gutterAt[y * width + x]) 1 else 0
                 rowSums[y * (width + 1) + x + 1] = rowSums[y * (width + 1) + x] + isGutter
                 columnSums[x * (height + 1) + y + 1] = columnSums[x * (height + 1) + y] + isGutter
+                if (borders) {
+                    val dark = if (image[x, y] <= BORDER_LINE_LEVEL) 1 else 0
+                    darkRowSums[y * (width + 1) + x + 1] = darkRowSums[y * (width + 1) + x] + dark
+                    darkColumnSums[x * (height + 1) + y + 1] = darkColumnSums[x * (height + 1) + y] + dark
+                }
             }
         }
     }
@@ -264,8 +288,115 @@ private class PanelCutter(private val image: GrayImage, gutter: Int, private val
         if (rows.size >= 2) return rows.flatMap { split(it, depth + 1) }
         val columns = pieces(trimmed, acrossRows = false)
         if (columns.size >= 2) return columns.flatMap { split(it, depth + 1) }
+        shearedPieces(trimmed)?.let { pieces -> return pieces.flatMap { split(it, depth + 1) } }
+        if (borders) borderPieces(trimmed)?.let { pieces -> return pieces.flatMap { split(it, depth + 1) } }
         return listOf(trimmed)
     }
+
+    // --- slanted gutters --------------------------------------------------------------------
+
+    /**
+     * [area] cut in two along a slanted gutter (a skewed scan, or panels drawn at a slant): lines
+     * at 2, 3, … 8 degrees either way, rows first at each slope, then columns. Each piece gets the
+     * whole slanted band, so neither loses a corner (each gains a thin wedge of its neighbour).
+     */
+    private fun shearedPieces(area: PixelRect): List<PixelRect>? {
+        for (degrees in SHEAR_DEGREES) {
+            for (sign in intArrayOf(1, -1)) {
+                val slope = sign * tan(Math.toRadians(degrees.toDouble()))
+                shearCut(area, slope, acrossRows = true)?.let { return it }
+                shearCut(area, slope, acrossRows = false)?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun shearCut(area: PixelRect, slope: Double, acrossRows: Boolean): List<PixelRect>? {
+        val start = if (acrossRows) area.top else area.left
+        val end = if (acrossRows) area.bottom else area.right
+        val length = if (acrossRows) area.width else area.height
+        val drift = ceil(abs(slope) * length / 2).toInt()
+        val minThickness = tuning.minPanelShare * (if (acrossRows) height else width)
+        var runStart = -1
+        for (k in start..end) {
+            val gutter = k < end && isShearedGutterLine(area, k, slope, acrossRows)
+            if (gutter && runStart < 0) runStart = k
+            if (!gutter && runStart >= 0) {
+                val cut = (runStart + k) / 2
+                if (k - runStart >= minGutter && cut - drift - start >= minThickness && end - (cut + drift) >= minThickness) {
+                    return if (acrossRows) {
+                        listOf(PixelRect(area.left, area.top, area.right, cut + drift), PixelRect(area.left, cut - drift, area.right, area.bottom))
+                    } else {
+                        listOf(PixelRect(area.left, area.top, cut + drift, area.bottom), PixelRect(cut - drift, area.top, area.right, area.bottom))
+                    }
+                }
+                runStart = -1
+            }
+        }
+        return null
+    }
+
+    /** True when the line through [k] (at the middle of [area]) with [slope] is almost all gutter, inside [area]. */
+    private fun isShearedGutterLine(area: PixelRect, k: Int, slope: Double, acrossRows: Boolean): Boolean {
+        val from = if (acrossRows) area.left else area.top
+        val to = if (acrossRows) area.right else area.bottom
+        val lo = if (acrossRows) area.top else area.left
+        val hi = if (acrossRows) area.bottom else area.right
+        val middle = (from + to) / 2.0
+        val length = to - from
+        val allowedMisses = (1 - tuning.gutterShare) * length
+        var inside = 0
+        var misses = 0
+        for (t in from until to) {
+            val other = (k + slope * (t - middle)).roundToInt()
+            if (other < lo || other >= hi) continue
+            inside++
+            val isGutter = if (acrossRows) gutterAt[other * width + t] else gutterAt[t * width + other]
+            if (!isGutter && ++misses > allowedMisses) return false
+        }
+        return inside >= SHEAR_MIN_INSIDE * length
+    }
+
+    // --- drawn borders ----------------------------------------------------------------------
+
+    /**
+     * [area] cut along a drawn border line between two panels with no blank gutter: a run of
+     * lines at least [BORDER_LINE_SHARE] dark, no thicker than [BORDER_LINE_MAX_SHARE] of the long
+     * side (a thicker dark run is a dark panel, not a line), a panel's thickness away from the
+     * area's own edges. The thinnest such run wins.
+     */
+    private fun borderPieces(area: PixelRect): List<PixelRect>? {
+        val maxLength = max(2, (longSide * BORDER_LINE_MAX_SHARE).roundToInt())
+        for (acrossRows in listOf(true, false)) {
+            val start = if (acrossRows) area.top else area.left
+            val end = if (acrossRows) area.bottom else area.right
+            val span = if (acrossRows) area.width else area.height
+            val minChild = tuning.minPanelShare * (if (acrossRows) height else width)
+            var best: IntRange? = null
+            var runStart = -1
+            for (i in start..end) {
+                val dark = i < end && darkIn(i, area, acrossRows) >= BORDER_LINE_SHARE * span
+                if (dark && runStart < 0) runStart = i
+                if (!dark && runStart >= 0) {
+                    val fits = runStart > start && i < end && i - runStart <= maxLength &&
+                        runStart - start >= minChild && end - i >= minChild
+                    if (fits && (best == null || i - runStart < best.last + 1 - best.first)) best = runStart until i
+                    runStart = -1
+                }
+            }
+            val run = best ?: continue
+            return if (acrossRows) {
+                listOf(PixelRect(area.left, start, area.right, run.first), PixelRect(area.left, run.last + 1, area.right, end))
+            } else {
+                listOf(PixelRect(start, area.top, run.first, area.bottom), PixelRect(run.last + 1, area.top, end, area.bottom))
+            }
+        }
+        return null
+    }
+
+    private fun darkIn(line: Int, area: PixelRect, acrossRows: Boolean): Int =
+        if (acrossRows) darkRowSums[line * (width + 1) + area.right] - darkRowSums[line * (width + 1) + area.left]
+        else darkColumnSums[line * (height + 1) + area.bottom] - darkColumnSums[line * (height + 1) + area.top]
 
     private fun gutterInRow(y: Int, left: Int, right: Int): Int =
         rowSums[y * (width + 1) + right] - rowSums[y * (width + 1) + left]
@@ -355,5 +486,20 @@ private class PanelCutter(private val image: GrayImage, gutter: Int, private val
 
     companion object {
         private const val MAX_DEPTH = 8
+
+        /** The slopes tried for slanted gutters, in degrees (each both ways). */
+        private val SHEAR_DEGREES = 2..8
+
+        /** A slanted line must lie at least this share inside the piece to count. */
+        private const val SHEAR_MIN_INSIDE = 0.8
+
+        /** A drawn border line's pixels are at most this gray ... */
+        private const val BORDER_LINE_LEVEL = 60
+
+        /** ... and fill at least this share of the line ... */
+        private const val BORDER_LINE_SHARE = 0.97
+
+        /** ... over a run no thicker than this share of the page's long side. */
+        private const val BORDER_LINE_MAX_SHARE = 0.012
     }
 }

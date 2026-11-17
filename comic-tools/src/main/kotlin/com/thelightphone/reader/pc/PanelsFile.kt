@@ -56,7 +56,7 @@ class PanelsFile(
          * Bump when what the tool does to pages, or how it finds panels, changes: the send
          * script's cache keys include it, so every comic is looked at again.
          */
-        const val TOOL_VERSION = 1
+        const val TOOL_VERSION = 2
 
         private fun box(r: PixelRect) = "{\"left\":${r.left},\"top\":${r.top},\"right\":${r.right},\"bottom\":${r.bottom}}"
 

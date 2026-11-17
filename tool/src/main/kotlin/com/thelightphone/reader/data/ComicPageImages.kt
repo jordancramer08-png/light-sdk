@@ -8,6 +8,7 @@ import android.graphics.Rect
 import com.thelightphone.reader.comics.ColorImage
 import com.thelightphone.reader.comics.PANEL_GRID_LONG_SIDE
 import com.thelightphone.reader.comics.PageLayout
+import com.thelightphone.reader.comics.SECOND_LOOK_LONG_SIDE
 import com.thelightphone.reader.comics.PixelRect
 import com.thelightphone.reader.comics.analysePage
 import com.thelightphone.reader.comics.cropWithinPage
@@ -119,15 +120,21 @@ object ComicPageImages {
         val width = bounds.outWidth
         val height = bounds.outHeight
         if (width <= 0 || height <= 0) return null
-        val (gridWidth, gridHeight) = fittedSize(width, height, PANEL_GRID_LONG_SIDE, PANEL_GRID_LONG_SIDE)
+        val small = decodeForAnalysis(bytes, width, height, PANEL_GRID_LONG_SIDE) ?: return null
+        // A doubtful page is looked at again, bigger (decoded only then).
+        val look = analysePage(small, width, height, larger = { decodeForAnalysis(bytes, width, height, SECOND_LOOK_LONG_SIDE) })
+        val crop = look.crop.takeUnless { it == PixelRect(0, 0, width, height) }
+        return PagePanels(width, height, look.panels.map(PanelBox::of), crop?.let(PanelBox::of), LevelsBox.of(look.levels))
+    }
+
+    /** The page decoded small (a power-of-2 sample keeping at least [longSide] px), then shrunk to [longSide]. */
+    private fun decodeForAnalysis(bytes: ByteArray, width: Int, height: Int, longSide: Int): ColorImage? {
+        val (gridWidth, gridHeight) = fittedSize(width, height, longSide, longSide)
         val options = BitmapFactory.Options().apply { inSampleSize = sampleSize(width, height, gridWidth, gridHeight) }
         val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return null
         val argb = IntArray(decoded.width * decoded.height)
         decoded.getPixels(argb, 0, decoded.width, 0, 0, decoded.width, decoded.height)
-        val small = shrinkColorToLongSide(ColorImage(decoded.width, decoded.height, argb))
         decoded.recycle()
-        val look = analysePage(small, width, height)
-        val crop = look.crop.takeUnless { it == PixelRect(0, 0, width, height) }
-        return PagePanels(width, height, look.panels.map(PanelBox::of), crop?.let(PanelBox::of), LevelsBox.of(look.levels))
+        return shrinkColorToLongSide(ColorImage(decoded.width, decoded.height, argb), longSide)
     }
 }

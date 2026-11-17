@@ -146,18 +146,23 @@ class PanelReportTest {
         DataInputStream(pageFile.inputStream().buffered()).use { input ->
             val width = input.readInt()
             val height = input.readInt()
-            val sampledWidth = input.readInt()
-            val sampledHeight = input.readInt()
-            val argb = IntArray(sampledWidth * sampledHeight) { input.readInt() }
+            fun readSample(): ColorImage {
+                val sampledWidth = input.readInt()
+                val sampledHeight = input.readInt()
+                return ColorImage(sampledWidth, sampledHeight, IntArray(sampledWidth * sampledHeight) { input.readInt() })
+            }
+            val sampled = readSample()
+            val bigger = readSample()
 
             val started = System.nanoTime()
-            val small = shrinkColorToLongSide(ColorImage(sampledWidth, sampledHeight, argb))
-            val look = analysePage(small, width, height, tuning)
+            val small = shrinkColorToLongSide(sampled)
+            val look = analysePage(small, width, height, tuning, larger = { shrinkColorToLongSide(bigger, SECOND_LOOK_LONG_SIDE) })
             val millis = (System.nanoTime() - started) / 1_000_000
             val old = detectPanels(small.gray(), width, height, tuning)
             val crop = look.crop
             val cropped = 1 - crop.width.toDouble() * crop.height / (width.toDouble() * height)
-            val why = if (look.panels.isEmpty()) "${fallbackReason(look.candidates, crop)}: ${look.candidates.size} pieces, " else ""
+            val reason = look.note.takeIf { look.panels.isEmpty() && it.isNotEmpty() } ?: fallbackReason(look.candidates, crop)
+            val why = if (look.panels.isEmpty()) "$reason: ${look.candidates.size} pieces, " else if (look.note.isNotEmpty()) "${look.note}, " else ""
 
             val imageName = "%03d-%s.png".format(comicNumber, File(pageName).nameWithoutExtension.take(40))
                 .replace(Regex("[^A-Za-z0-9._-]"), "_")
@@ -316,7 +321,8 @@ class PanelReportTest {
             append("Panel report\nSource: ${root.path}\n$tuning\n")
             append("$comicCount comics, ${pages.size} pages analysed, ${results.size - pages.size} not readable\n")
             append("New: panels on $withPanels of ${pages.size} pages (${percent(withPanels)}%, ${pages.sumOf { it.panels }} panels): ")
-            append("regions ${pages.count { it.method == PanelMethod.REGIONS }}, XY-cut ${pages.count { it.method == PanelMethod.XY_CUT }}\n")
+            append("regions ${pages.count { it.method == PanelMethod.REGIONS }}, XY-cut ${pages.count { it.method == PanelMethod.XY_CUT }}, ")
+            append("drawn borders ${pages.count { it.method == PanelMethod.BORDERS }}, second look ${pages.count { it.panels > 0 && "second look" in it.note }}\n")
             append("Old (XY-cut only, no crop or levels): panels on $oldWithPanels of ${pages.size} pages (${percent(oldWithPanels)}%)\n")
             append("Cropped: ${pages.count { it.cropped > 0.005 }} pages, on average ${(pages.map { it.cropped }.average().takeIf { !it.isNaN() } ?: 0.0).times(100).roundToInt()}% of the page\n")
             append("${pages.size - withPanels} pages fell back to the whole page\n")

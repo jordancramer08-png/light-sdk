@@ -3,6 +3,7 @@ package com.thelightphone.reader.pc
 import com.thelightphone.reader.comics.analysePage
 import com.thelightphone.reader.comics.comicPages
 import com.thelightphone.reader.comics.openComicZip
+import com.thelightphone.reader.comics.SECOND_LOOK_LONG_SIDE
 import com.thelightphone.reader.comics.shrinkColorToLongSide
 import java.io.File
 
@@ -36,8 +37,9 @@ object Report {
                     val name = pages[index]
                     val image = PageImages.read(zip.getInputStream(zip.getEntry(name)).use { it.readBytes() }) ?: continue
                     val small = shrinkColorToLongSide(image)
-                    val phone = analysePage(small, image.width, image.height).panels.size
-                    val pc = PanelFinder.find(small, image.width, image.height, firstPage = index == 0)
+                    val larger = { shrinkColorToLongSide(image, SECOND_LOOK_LONG_SIDE) }
+                    val phone = analysePage(small, image.width, image.height, larger = larger).panels.size
+                    val pc = PanelFinder.find(small, image.width, image.height, firstPage = index == 0, larger = larger)
                     pagesSeen++
                     if (phone > 0) phoneHits++
                     if (pc.look.panels.isNotEmpty()) pcHits++

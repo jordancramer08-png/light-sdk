@@ -1,5 +1,7 @@
 package com.thelightphone.reader.comics
 
+import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -110,17 +112,224 @@ private class RegionFinder(private val image: GrayImage, private val gutter: Int
         labelContent(queue)
     }
 
+    /** Pixel counts tuned at 800 px are scaled by this on a bigger picture (the second look). */
+    private val scale = max(1.0, max(width, height) / PANEL_GRID_LONG_SIDE.toDouble())
+    private val pageArea = width.toLong() * height
+    private val mask = PaperMask(width, height, gutterPixel)
+
     fun panels(): List<PixelRect> {
-        val pageArea = width.toLong() * height
         val pieces = regions
             .filter { it.pixels >= tuning.speckShare * pageArea }
-            .flatMap { region -> split(region.box, depth = 0, tuning.bridgeShare) { labels[it] == region.label } }
-        val panels = pieces.filter(::isPanelSized).toMutableList()
+            .flatMap { region ->
+                val own = { i: Int -> labels[i] == region.label }
+                erodedParts(region).flatMap { part -> split(part, depth = 0, tuning.bridgeShare, own) }
+            }
+        val (bleeds, rest) = mergeBleedingPanels(pieces)
+        val panels = rest.filter(::isPanelSized).toMutableList()
         // Blobs of art the flood ran round (figures on a dark cover) aren't panels.
         if (panels.any { solidShare(it) < tuning.minPanelFill }) return emptyList()
-        joinSmallPieces(pieces.filterNot(::isPanelSized), panels)
+        panels.addAll(bleeds)
+        joinSmallPieces(rest.filterNot(::isPanelSized), panels)
         mergeOverlaps(panels)
-        return readingOrder(panels.flatMap(::cutAlongClosedGutters))
+        val cut = panels.flatMap(::cutAlongClosedGutters).toMutableList()
+        attachStrayInk(cut)
+        return readingOrder(cut)
+    }
+
+    // --- thin bridges -----------------------------------------------------------------------
+
+    /**
+     * [region]'s box, or, when eroding the region a little (a square of [erosionRadius]) breaks
+     * it into two or more panel-sized parts (panels touching through a thin tail or a corner),
+     * each part's box grown back by the radius. Panel interiors are already filled (the flood
+     * can't reach inside a frame), so a real panel erodes to one slightly smaller part.
+     */
+    private fun erodedParts(region: Region): List<PixelRect> {
+        val box = region.box
+        if (area(box) < 2 * tuning.minPanelArea * pageArea) return listOf(box)
+        val r = max(1, (EROSION_RADIUS * scale).roundToInt())
+        val w = box.width
+        val h = box.height
+        val solid = BooleanArray(w * h) { labels[(box.top + it / w) * width + box.left + it % w] == region.label }
+        val eroded = erode(solid, w, h, r)
+        val parts = components(eroded, w, h).filter { it.second >= tuning.minPanelArea * pageArea / 2 }
+        if (parts.size < 2) return listOf(box)
+        val boxes = parts.map { (part, _) ->
+            PixelRect(
+                max(box.left, box.left + part.left - r), max(box.top, box.top + part.top - r),
+                min(box.right, box.left + part.right + r), min(box.bottom, box.top + part.bottom + r),
+            )
+        }
+        // Each part must be a solid panel of its own; else the region stays whole.
+        return if (boxes.all { regionShare(it, region.label) >= tuning.minPanelFill }) boxes else listOf(box)
+    }
+
+    /** The share of [box] that belongs to region [label]. */
+    private fun regionShare(box: PixelRect, label: Int): Double {
+        var own = 0
+        for (y in box.top until box.bottom) for (x in box.left until box.right) if (labels[y * width + x] == label) own++
+        return own.toDouble() / area(box)
+    }
+
+    // --- panels bleeding off the page ---------------------------------------------------------
+
+    /**
+     * A panel whose art runs off the page has a frame on some sides only; where its art is light,
+     * the flood comes in through the open sides and breaks it into pieces. Its drawn sides still
+     * span it: a horizontal and a vertical frame edge meeting at a corner, or two opposite edges
+     * over the same stretch, reaching the picture's edge on an open side. Two or more pieces
+     * lying inside such a span become one panel (their union with the span). A span with another
+     * long frame edge inside it holds several panels and is left alone. Returns (merged, the rest).
+     */
+    private fun mergeBleedingPanels(pieces: List<PixelRect>): Pair<List<PixelRect>, List<PixelRect>> {
+        val spans = bleedSpans()
+        if (spans.isEmpty()) return emptyList<PixelRect>() to pieces
+        val rest = pieces.toMutableList()
+        val merged = mutableListOf<PixelRect>()
+        for (span in spans.sortedByDescending(::area)) {
+            val inside = rest.filter { overlapArea(it, span) >= BLEED_INSIDE_SHARE * area(it) }
+            // Paper flooded most of a bleeding panel; real panels inside a span would tile it.
+            val solid = inside.sumOf { area(it) * solidShare(it) }
+            if (inside.size < 2 || solid > BLEED_MAX_SOLID * area(span)) continue
+            rest.removeAll(inside)
+            merged.add(inside.fold(span, ::union))
+        }
+        return merged to rest
+    }
+
+    private fun bleedSpans(): List<PixelRect> {
+        val paperRun = max(3, (3 * scale).roundToInt())
+        val horizontal = frameEdges(mask, horizontal = true, minLength = (BLEED_EDGE_SHARE * width).roundToInt(), paperRun = paperRun)
+        val vertical = frameEdges(mask, horizontal = false, minLength = (BLEED_EDGE_SHARE * height).roundToInt(), paperRun = paperRun)
+        val near = max(3, (BLEED_NEAR_SHARE * max(width, height)).roundToInt())
+        val spans = mutableListOf<PixelRect>()
+        // Corners: the vertical edge leaves one end of the horizontal one, on the frame's inner side.
+        for (h in horizontal) {
+            for (v in vertical) {
+                val panelRight = v.out < 0
+                val panelBelow = h.out < 0
+                val cornerX = if (panelRight) abs(v.at - h.lo) <= near else abs(v.at - h.hi) <= near
+                val cornerY = if (panelBelow) abs(h.at - v.lo) <= near else abs(h.at - v.hi) <= near
+                if (!cornerX || !cornerY) continue
+                val span = PixelRect(
+                    if (panelRight) v.at else h.lo, if (panelBelow) h.at else v.lo,
+                    if (panelRight) h.hi else v.at + 1, if (panelBelow) v.hi else h.at + 1,
+                )
+                val openX = if (panelRight) span.right >= width - near else span.left <= near
+                val openY = if (panelBelow) span.bottom >= height - near else span.top <= near
+                if ((openX || openY) && !span.isEmpty) spans.add(span)
+            }
+        }
+        // Opposite sides: an edge with paper before it and one with paper after it, over the same stretch.
+        for (edges in listOf(horizontal, vertical)) {
+            for (a in edges.filter { it.out < 0 }) {
+                for (b in edges.filter { it.out > 0 && it.at > a.at }) {
+                    val lo = max(a.lo, b.lo)
+                    val hi = min(a.hi, b.hi)
+                    if (hi - lo < OPPOSITE_OVERLAP * min(a.length, b.length)) continue
+                    val horizontalPair = a.horizontal
+                    val thickness = b.at - a.at
+                    if (thickness < tuning.minPanelShare * (if (horizontalPair) height else width)) continue
+                    val span = if (horizontalPair) PixelRect(lo, a.at, hi, b.at + 1) else PixelRect(a.at, lo, b.at + 1, hi)
+                    val open = if (horizontalPair) span.left <= near || span.right >= width - near else span.top <= near || span.bottom >= height - near
+                    if (open) spans.add(span)
+                }
+            }
+        }
+        val all = horizontal + vertical
+        return spans.filter { span -> all.none { holdsInnerEdge(span, it, near) } }
+    }
+
+    /** True when [edge] lies inside [span], away from its sides, over half the span's extent: a gutter between panels in it. */
+    private fun holdsInnerEdge(span: PixelRect, edge: FrameEdge, near: Int): Boolean {
+        val (spanLo, spanHi) = if (edge.horizontal) span.left to span.right else span.top to span.bottom
+        val (across0, across1) = if (edge.horizontal) span.top to span.bottom else span.left to span.right
+        if (edge.at <= across0 + near || edge.at >= across1 - near) return false
+        val overlap = min(edge.hi, spanHi) - max(edge.lo, spanLo)
+        return overlap * 2 > spanHi - spanLo
+    }
+
+    // --- stray ink ------------------------------------------------------------------------------
+
+    /**
+     * Ink outside every panel (a caption, a title, loose lettering) joins the panel whose cell
+     * holds it. Each panel's cell is its box grown in every direction to the middle of the gap to
+     * its nearest neighbour that way, or to the picture's edge. Small pieces of content are first
+     * grouped into blocks (letters into words, close lines into paragraphs). A block that would
+     * make its panel overlap another is left out, and so are running heads and page numbers (thin
+     * lines in the top or bottom [EDGE_BAND_SHARE] of the page) and ink touching the picture's edge
+     * (scan shadow).
+     */
+    private fun attachStrayInk(panels: MutableList<PixelRect>) {
+        if (panels.isEmpty()) return
+        val minPixels = max(2, (STRAY_MIN_PIXELS * scale * scale).roundToInt())
+        val stray = regions
+            .filter { r -> r.pixels >= minPixels && panels.none { overlapArea(it, r.box) * 2 >= area(r.box) } }
+            .filterNot { r -> r.box.left == 0 || r.box.top == 0 || r.box.right == width || r.box.bottom == height }
+            .take(MAX_STRAY_PIECES)
+            .map { it.box }
+        val blocks = groupIntoBlocks(stray)
+        val band = EDGE_BAND_SHARE * height
+        val thin = HEAD_LINE_SHARE * height
+        val cells = cells(panels)
+        for (block in blocks.sortedByDescending(::area)) {
+            val runningHead = block.height <= thin && (block.bottom <= band || block.top >= height - band)
+            if (runningHead) continue
+            val cx = (block.left + block.right) / 2
+            val cy = (block.top + block.bottom) / 2
+            for (i in panels.indices.sortedBy { gapBetween(panels[it], block) }) {
+                val cell = cells[i]
+                if (cx !in cell.left until cell.right || cy !in cell.top until cell.bottom) continue
+                val grown = union(panels[i], block)
+                val before = panels.indices.filter { it != i }.sumOf { overlapArea(panels[i], panels[it]) }
+                val after = panels.indices.filter { it != i }.sumOf { overlapArea(grown, panels[it]) }
+                if (after <= before) panels[i] = grown
+                break
+            }
+        }
+    }
+
+    /** Pieces whose boxes lie close together (across: [BLOCK_GAP_ACROSS], down: [BLOCK_GAP_DOWN] of the side) become one box. */
+    private fun groupIntoBlocks(pieces: List<PixelRect>): List<PixelRect> {
+        val gapX = max(2, (BLOCK_GAP_ACROSS * width).roundToInt())
+        val gapY = max(1, (BLOCK_GAP_DOWN * height).roundToInt())
+        val blocks = pieces.toMutableList()
+        var merged = true
+        while (merged) {
+            merged = false
+            loop@ for (i in blocks.indices) {
+                for (j in i + 1 until blocks.size) {
+                    val a = blocks[i]
+                    val b = blocks[j]
+                    val dx = max(a.left, b.left) - min(a.right, b.right)
+                    val dy = max(a.top, b.top) - min(a.bottom, b.bottom)
+                    if (dx <= gapX && dy <= gapY) {
+                        blocks[i] = union(a, b)
+                        blocks.removeAt(j)
+                        merged = true
+                        break@loop
+                    }
+                }
+            }
+        }
+        return blocks
+    }
+
+    /** Each box grown to the middle of the gap to its nearest neighbour in every direction (one overlapping it across), else to the edge. */
+    private fun cells(boxes: List<PixelRect>): List<PixelRect> = boxes.map { b ->
+        val others = boxes.filter { it !== b }
+        fun overlapsAcross(o: PixelRect) = min(o.right, b.right) > max(o.left, b.left)
+        fun overlapsDown(o: PixelRect) = min(o.bottom, b.bottom) > max(o.top, b.top)
+        val up = others.filter { overlapsAcross(it) && it.bottom <= b.top }.maxOfOrNull { it.bottom }
+        val down = others.filter { overlapsAcross(it) && it.top >= b.bottom }.minOfOrNull { it.top }
+        val left = others.filter { overlapsDown(it) && it.right <= b.left }.maxOfOrNull { it.right }
+        val right = others.filter { overlapsDown(it) && it.left >= b.right }.minOfOrNull { it.left }
+        PixelRect(
+            left?.let { (it + b.left) / 2 } ?: 0,
+            up?.let { (it + b.top) / 2 } ?: 0,
+            right?.let { (it + b.right + 1) / 2 } ?: width,
+            down?.let { (it + b.bottom + 1) / 2 } ?: height,
+        )
     }
 
     /** The share of [box] that is content, not gutter the flood reached. */
@@ -254,14 +463,16 @@ private class RegionFinder(private val image: GrayImage, private val gutter: Int
         val own = IntArray(end - start) { i -> inkInLine(box, start + i, acrossRows, ink) }
         fun solidNear(from: Int, to: Int) = (from until to).any { it - start in own.indices && own[it - start] >= tuning.edgeShare * length }
         val minThickness = tuning.minPanelShare * (if (acrossRows) height else width)
+        // A frame edge on a skewed scan drifts up to about a degree across the box: look that much further.
+        val reach = (EDGE_REACH * scale).roundToInt() + ceil(length * SKEW_SLOPE).toInt()
         val cuts = mutableListOf<Int>()
         var runStart = -1
         for (i in start..end) {
             val bridged = i < end && own[i - start] <= maxInkShare * length
             if (bridged && runStart < 0) runStart = i
             if (!bridged && runStart >= 0) {
-                val cut = (runStart + i) / 2
-                val edges = runStart > start && i < end && solidNear(runStart - EDGE_REACH, runStart) && solidNear(i, i + EDGE_REACH)
+                val cut = balloonSideCut(own, start, runStart, i)
+                val edges = runStart > start && i < end && solidNear(runStart - reach, runStart) && solidNear(i, i + reach)
                 val thickEnough = cut - (cuts.lastOrNull() ?: start) >= minThickness && end - cut >= minThickness
                 if (i - runStart >= minGutter && edges && thickEnough) cuts.add(cut)
                 runStart = -1
@@ -271,6 +482,24 @@ private class RegionFinder(private val image: GrayImage, private val gutter: Int
         val bounds = listOf(start) + cuts + listOf(end)
         return bounds.zipWithNext { a, b ->
             if (acrossRows) PixelRect(box.left, a, box.right, b) else PixelRect(a, box.top, b, box.bottom)
+        }
+    }
+
+    /**
+     * Where to cut across the gutter run [runStart] until [runEnd]: a balloon crossing it isn't cut
+     * in the gutter. A balloon bulges toward its middle, so it crosses the gutter thicker on the
+     * side its middle is on: when the run's first line is clearly ([BALLOON_SIDE_DIFFERENCE])
+     * fuller than its last, the whole run goes to the first side (cut at its far end), and the
+     * other way round; else (centred, or nothing crossing) the cut is in its middle.
+     */
+    private fun balloonSideCut(own: IntArray, start: Int, runStart: Int, runEnd: Int): Int {
+        val first = own[runStart - start]
+        val last = own[runEnd - 1 - start]
+        val clear = BALLOON_SIDE_DIFFERENCE * max(first, last)
+        return when {
+            first - last > clear && first > 0 -> runEnd
+            last - first > clear && last > 0 -> runStart
+            else -> (runStart + runEnd) / 2
         }
     }
 
@@ -331,7 +560,110 @@ private class RegionFinder(private val image: GrayImage, private val gutter: Int
         private const val OUTSIDE = -1
         private const val MAX_SPLIT_DEPTH = 4
 
-        /** A panel's edge must be solid within this many lines of the gutter a balloon crosses. */
+        /** A panel's edge must be solid within this many lines of the gutter a balloon crosses (plus the skew allowance). */
         private const val EDGE_REACH = 3
+
+        /** About a degree: how far a frame edge may drift on a skewed scan. */
+        private val SKEW_SLOPE = kotlin.math.tan(Math.toRadians(1.0))
+
+        /** Thin bridges between panels break when a region is eroded by this many pixels (at 800 px). */
+        private const val EROSION_RADIUS = 2
+
+        /** Frame edges spanning a bleeding panel are at least this share of the picture's side ... */
+        private const val BLEED_EDGE_SHARE = 0.15
+
+        /** ... meet at a corner, or reach the picture's edge, within this share of its long side ... */
+        private const val BLEED_NEAR_SHARE = 0.015
+
+        /** ... and a piece is inside the span when this share of it is. */
+        private const val BLEED_INSIDE_SHARE = 0.8
+
+        /** A bleeding panel's pieces fill at most this share of its span (the rest is flooded paper). */
+        private const val BLEED_MAX_SOLID = 0.6
+
+        /** Opposite frame edges overlap by this share of the shorter one. */
+        private const val OPPOSITE_OVERLAP = 0.8
+
+        /** A balloon's side of a gutter: its first and last lines differ by this share of the fuller. */
+        private const val BALLOON_SIDE_DIFFERENCE = 0.1
+
+        /** Stray ink: pieces of at least this many pixels (at 800 px; a letter, not a speck) ... */
+        private const val STRAY_MIN_PIXELS = 12
+
+        /** ... (at most this many looked at) ... */
+        private const val MAX_STRAY_PIECES = 3000
+
+        /** ... grouped when this close across (share of the width) ... */
+        private const val BLOCK_GAP_ACROSS = 0.012
+
+        /** ... and down (share of the height). */
+        private const val BLOCK_GAP_DOWN = 0.006
+
+        /** Running heads and page numbers: blocks in this share of the page at its top or bottom ... */
+        private const val EDGE_BAND_SHARE = 0.05
+
+        /** ... no taller than this share of it. */
+        private const val HEAD_LINE_SHARE = 0.03
     }
+}
+
+/** [mask] ([w] × [h]) eroded by a square of radius [r]: a pixel stays when every pixel within [r] is set (outside counts as unset). */
+private fun erode(mask: BooleanArray, w: Int, h: Int, r: Int): BooleanArray {
+    val across = BooleanArray(w * h)
+    for (y in 0 until h) {
+        var run = 0
+        for (x in 0 until w) {
+            run = if (mask[y * w + x]) run + 1 else 0
+            // The pixel r to the left of x stays when x - 2r .. x are all set.
+            if (run >= 2 * r + 1) across[y * w + x - r] = true
+        }
+    }
+    val out = BooleanArray(w * h)
+    for (x in 0 until w) {
+        var run = 0
+        for (y in 0 until h) {
+            run = if (across[y * w + x]) run + 1 else 0
+            if (run >= 2 * r + 1) out[(y - r) * w + x] = true
+        }
+    }
+    return out
+}
+
+/** The 4-connected pieces of [mask] ([w] × [h]): each one's box and pixel count. */
+private fun components(mask: BooleanArray, w: Int, h: Int): List<Pair<PixelRect, Int>> {
+    val seen = BooleanArray(w * h)
+    val queue = IntArray(w * h)
+    val out = mutableListOf<Pair<PixelRect, Int>>()
+    for (start in mask.indices) {
+        if (!mask[start] || seen[start]) continue
+        seen[start] = true
+        queue[0] = start
+        var head = 0
+        var tail = 1
+        var left = w
+        var top = h
+        var right = 0
+        var bottom = 0
+        while (head < tail) {
+            val i = queue[head++]
+            val x = i % w
+            val y = i / w
+            left = min(left, x)
+            right = max(right, x + 1)
+            top = min(top, y)
+            bottom = max(bottom, y + 1)
+            fun visit(j: Int) {
+                if (mask[j] && !seen[j]) {
+                    seen[j] = true
+                    queue[tail++] = j
+                }
+            }
+            if (x > 0) visit(i - 1)
+            if (x < w - 1) visit(i + 1)
+            if (y > 0) visit(i - w)
+            if (y < h - 1) visit(i + w)
+        }
+        out.add(PixelRect(left, top, right, bottom) to tail)
+    }
+    return out
 }

@@ -173,6 +173,29 @@ fun LazyListScope.artistRows(artists: List<Artist>, onOpen: (Artist) -> Unit, on
     }
 }
 
+/** Genre rows: one of its albums' covers, the name, and album and song counts. Press and hold for [onHold]. */
+fun LazyListScope.genreRows(genres: List<Genre>, onOpen: (Genre) -> Unit, onHold: ((Genre) -> Unit)? = null) {
+    itemsIndexed(genres, key = { _, genre -> "genre:" + genre.key }) { index, genre ->
+        UniformRow(
+            heightGridUnits = ALBUM_ROW_GRID_UNITS,
+            showDivider = index != genres.lastIndex,
+            modifier = Modifier.tapOrHold(onHold = onHold?.let { { it(genre) } }) { onOpen(genre) },
+        ) {
+            ArtAndText(
+                art = { size -> ArtImage(genre.albums.firstOrNull()?.artSource(), ArtSize.THUMB, artLetter(genre.name), size) },
+                artGridUnits = ALBUM_ART_GRID_UNITS,
+            ) {
+                OneLine(text = genre.name, variant = LightTextVariant.Copy)
+                OneLine(
+                    text = albumCount(genre.albums.size) + " · " + songCount(genre.songs.size),
+                    variant = LightTextVariant.Detail,
+                    lighten = true,
+                )
+            }
+        }
+    }
+}
+
 /** A square cover (drawn by [art] into the box it's given) at the left, its text beside it. */
 @Composable
 fun ArtAndText(

@@ -5,8 +5,9 @@ data class SearchResults(
     val songs: List<Song> = emptyList(),
     val artists: List<Artist> = emptyList(),
     val albums: List<Album> = emptyList(),
+    val genres: List<Genre> = emptyList(),
 ) {
-    val isEmpty: Boolean get() = songs.isEmpty() && artists.isEmpty() && albums.isEmpty()
+    val isEmpty: Boolean get() = songs.isEmpty() && artists.isEmpty() && albums.isEmpty() && genres.isEmpty()
 }
 
 /**
@@ -14,20 +15,21 @@ data class SearchResults(
  * once in [searchText] form, so each key press only compares plain strings (well under a
  * millisecond for 1,400 songs).
  */
-class MusicSearchIndex(songs: List<Song>, artists: List<Artist>, albums: List<Album>) {
+class MusicSearchIndex(songs: List<Song>, artists: List<Artist>, albums: List<Album>, genres: List<Genre> = emptyList()) {
     private val songs = songs.map { Entry(searchText(it.title), sortKey(it.title), it.path, it) }
     private val artists = artists.map { Entry(searchText(it.name), sortKey(it.name), it.key, it) }
     private val albums = albums.map { Entry(searchText(it.title), sortKey(it.title), it.key, it) }
+    private val genres = genres.map { Entry(searchText(it.name), sortKey(it.name), it.key, it) }
 
     /**
-     * Songs by title, artists by name and albums by title that contain every word of [query],
+     * Songs by title, artists by name, albums by title and genres by name that contain every word of [query],
      * anywhere and in any order, ignoring capitals, accents and apostrophes ("getty" finds
      * Keith & Kristyn Getty, "well" finds It Is Well). A blank query finds nothing.
      */
     fun search(query: String): SearchResults {
         val words = searchText(query).split(' ').filter { it.isNotEmpty() }
         if (words.isEmpty()) return SearchResults()
-        return SearchResults(songs = find(songs, words), artists = find(artists, words), albums = find(albums, words))
+        return SearchResults(songs = find(songs, words), artists = find(artists, words), albums = find(albums, words), genres = find(genres, words))
     }
 
     private class Entry<T>(val text: String, val sortKey: String, val tieBreak: String, val item: T)

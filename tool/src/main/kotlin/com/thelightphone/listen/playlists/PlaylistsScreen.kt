@@ -23,13 +23,13 @@ import com.thelightphone.listen.ui.OneLine
 import com.thelightphone.listen.ui.RowIconButton
 import com.thelightphone.listen.ui.ThemedScreen
 import com.thelightphone.listen.ui.UpdatingLine
+import com.thelightphone.listen.ui.tapOrHold
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.ui.LightBarButton
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.gridUnitsAsDp
-import com.thelightphone.sdk.ui.lightClickable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -76,6 +76,7 @@ class PlaylistsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealed
                                 name = summary.playlist.name,
                                 detail = if (library.loaded) songCount(summary.songsOnPhone) else "",
                                 onOpen = { openPlaylist(summary.playlist.id) },
+                                onHold = { showActions(summary.playlist) },
                                 onRename = { openRename(summary.playlist) },
                                 onDelete = { openDelete(summary.playlist) },
                             )
@@ -122,12 +123,12 @@ class PlaylistsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealed
 
 /** The name and song count (tap to open), then rename and delete buttons. */
 @Composable
-private fun PlaylistRow(name: String, detail: String, onOpen: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit) {
+private fun PlaylistRow(name: String, detail: String, onOpen: () -> Unit, onHold: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(
             modifier = Modifier
                 .weight(1f)
-                .lightClickable(onClick = onOpen)
+                .tapOrHold(onHold = onHold, onClick = onOpen)
                 .padding(vertical = 0.75f.gridUnitsAsDp()),
         ) {
             OneLine(text = name, variant = LightTextVariant.Copy)

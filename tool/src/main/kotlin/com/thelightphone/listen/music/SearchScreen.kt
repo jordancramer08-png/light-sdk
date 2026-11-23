@@ -46,8 +46,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Music search: a box with the phone's keyboard, and as you type the matching Songs, Artists
- * and Albums under it, from the index already in memory. DONE (or Return) puts the keyboard
+ * Music search: a box with the phone's keyboard, and as you type the matching Songs, Artists,
+ * Albums and Genres under it, from the index already in memory. DONE (or Return) puts the keyboard
  * away so the results fill the screen; tapping the box brings it back. Back, or emptying the
  * box, closes search.
  */
@@ -122,15 +122,19 @@ class SearchScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedAct
     private fun LazyListScope.resultRows(results: SearchResults, library: MusicLibraryState) {
         if (results.songs.isNotEmpty()) {
             item(key = "heading:songs") { Heading("Songs") }
-            songRows(results.songs, library, onPlay = { songs, index -> play(songs[index], library) }, onHold = { addToPlaylist(it) })
+            songRows(results.songs, library, onPlay = { songs, index -> play(songs[index], library) }, onHold = { leaveFor { showActions(it) } })
         }
         if (results.artists.isNotEmpty()) {
             item(key = "heading:artists") { Heading("Artists") }
-            artistRows(results.artists, onOpen = { leaveFor { openArtist(it) } }, onHold = { addToPlaylist(it) })
+            artistRows(results.artists, onOpen = { leaveFor { openArtist(it) } }, onHold = { leaveFor { showActions(it) } })
         }
         if (results.albums.isNotEmpty()) {
             item(key = "heading:albums") { Heading("Albums") }
-            albumRows(results.albums, onOpen = { leaveFor { openAlbum(it) } }, onHold = { addToPlaylist(it) })
+            albumRows(results.albums, onOpen = { leaveFor { openAlbum(it) } }, onHold = { leaveFor { showActions(it) } }, lastHasDivider = results.genres.isNotEmpty())
+        }
+        if (results.genres.isNotEmpty()) {
+            item(key = "heading:genres") { Heading("Genres") }
+            genreRows(results.genres, onOpen = { leaveFor { openGenre(it) } }, onHold = { leaveFor { showActions(it) } })
         }
     }
 
@@ -160,7 +164,7 @@ private const val UNDERLINE_THICKNESS_PX = 3f
  * [placeholder] while it's empty. Tap to type. (Podcast search uses it too.)
  */
 @Composable
-fun SearchBox(typed: String, keyboardShown: Boolean, placeholder: String = "Songs, artists, albums", onTap: () -> Unit) {
+fun SearchBox(typed: String, keyboardShown: Boolean, placeholder: String = "Songs, artists, albums, genres", onTap: () -> Unit) {
     val colors = LightThemeTokens.colors
     Column(
         modifier = Modifier
@@ -211,7 +215,7 @@ private fun Cursor() {
     )
 }
 
-/** A group heading in the results: Songs, Artists, Albums. */
+/** A group heading in the results: Songs, Artists, Albums, Genres. */
 @Composable
 private fun Heading(text: String) {
     LightText(

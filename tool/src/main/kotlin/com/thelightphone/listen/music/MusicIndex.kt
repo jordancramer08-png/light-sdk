@@ -18,7 +18,8 @@ data class MusicIndex(
 ) {
     companion object {
         /** Bump when [Song] changes meaning, so old caches are thrown away and rebuilt. */
-        const val VERSION = 1
+        /** 2: songs carry their genre. */
+        const val VERSION = 2
     }
 }
 
@@ -27,15 +28,18 @@ class MusicIndexStore(private val file: File) {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    /** The saved index, or an empty one when it's missing, broken or from an older version. */
+    /**
+     * The saved index, or an empty one when it's missing or broken. An index from an older
+     * version is returned as it is (its [MusicIndex.version] tells): its songs can be shown
+     * while every file is read again.
+     */
     fun load(): MusicIndex {
         val text = AtomicFile.readTextOrNull(file) ?: return MusicIndex()
-        val index = try {
+        return try {
             json.decodeFromString(MusicIndex.serializer(), text)
         } catch (e: Exception) {
-            return MusicIndex()
+            MusicIndex()
         }
-        return if (index.version == MusicIndex.VERSION) index else MusicIndex()
     }
 
     fun save(index: MusicIndex) {

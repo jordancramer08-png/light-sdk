@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import com.thelightphone.listen.ListenScreen
 import com.thelightphone.listen.storage.Settings
@@ -33,8 +34,10 @@ class AlbumsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedAct
             when {
                 !library.loaded || !settingsLoaded || sorted == null -> Box(modifier = listArea)
                 sorted.items.isNotEmpty() -> Box(modifier = listArea) {
-                    MusicLazyList(tag = sorted.tag, rowGridUnits = ALBUM_ROW_GRID_UNITS) {
-                        albumRows(sorted.items, onOpen = { openAlbum(it) }, onHold = { addToPlaylist(it) })
+                    val byArtist = sort.fieldOr(AlbumSortField.ALBUM) == AlbumSortField.ARTIST
+                    val letters = remember(sorted) { sorted.items.map { indexLetter(if (byArtist) it.artist else it.title) } }
+                    IndexedMusicList(sorted.tag, ALBUM_ROW_GRID_UNITS, letters, sort.descending) {
+                        albumRows(sorted.items, onOpen = { openAlbum(it) }, onHold = { showActions(it) })
                     }
                 }
                 library.updating -> CenteredMessage("Reading your music…", modifier = listArea)
@@ -73,8 +76,9 @@ class ArtistsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedAc
             when {
                 !library.loaded || !settingsLoaded || sorted == null -> Box(modifier = listArea)
                 sorted.items.isNotEmpty() -> Box(modifier = listArea) {
-                    MusicLazyList(tag = sorted.tag, rowGridUnits = ALBUM_ROW_GRID_UNITS) {
-                        artistRows(sorted.items, onOpen = { openArtist(it) }, onHold = { addToPlaylist(it) })
+                    val letters = remember(sorted) { sorted.items.map { indexLetter(it.name) } }
+                    IndexedMusicList(sorted.tag, ALBUM_ROW_GRID_UNITS, letters, sort.descending) {
+                        artistRows(sorted.items, onOpen = { openArtist(it) }, onHold = { showActions(it) })
                     }
                 }
                 library.updating -> CenteredMessage("Reading your music…", modifier = listArea)

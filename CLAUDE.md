@@ -65,7 +65,7 @@ My PC script `Listen-Phone-Sync.cmd` copies files onto the phone like this:
 
 - **Read tags on the phone** with `MediaMetadataRetriever` (or Media3's
   `MetadataRetriever`): title, artist, album artist, album, track number, disc number,
-  year, duration and embedded picture. Fall back to the folder names (Artist\Album) and
+  year, genre, duration and embedded picture. Fall back to the folder names (Artist\Album) and
   the file name when a tag is missing.
 - **Group albums by album artist + album**, never by track artist. An album with several
   performing artists (for example Avengers: Age of Ultron with two composers) must stay
@@ -77,23 +77,48 @@ My PC script `Listen-Phone-Sync.cmd` copies files onto the phone like this:
   each list, the same way the Reader's library sort works. Remember the choice per list.
   Ignore a leading "The ", "A " or "An " when sorting (Keith Green and The Corner Room
   sort under K and C). Compare case- and accent-insensitively.
-- **Screens.** Music home shows Songs / Artists / Albums / Playlists. An artist opens to
+- **Screens.** Music home shows Songs / Artists / Albums / Genres / Playlists. An artist opens to
   their albums (with art), then "All songs". An album shows its art, title, artist, year,
   track list, and Play and Shuffle buttons.
+
+- **A–Z jump bar** (added 2026-11-23). A thin A–Z letter bar runs down the right edge of
+  the Songs, Artists, Albums and Genres lists. Tapping or sliding along it jumps to the
+  first item under that letter, by the list's own sort rules (no leading The/A/An, no
+  accents). Names starting with a number or symbol go under "#" (at the top of A–Z lists,
+  at the bottom of Z–A ones). Z–A lists run the bar Z–A. When Songs is sorted by Artist
+  or Album, or Albums by Artist, the letters follow that column. Letters with nothing
+  under them are dimmed and jump to the next letter that has items. While a finger is on
+  the bar, the letter shows large in the middle of the screen. Lists shorter than one
+  screen have no bar.
+
+## Genres
+
+(Added 2026-11-23.)
+
+- The music scan reads each song's genre tag into the index. Genres that differ only by
+  capitals, accents or spaces are one genre (shown with the spelling most songs use).
+  Songs without a genre go under "No Genre", always last.
+- **Genres** on Music home lists each genre with its song count and the art of one of its
+  albums, A–Z, with the A–Z bar when it's long.
+- A genre opens to Play and Shuffle buttons, its albums (with art), and "All songs".
+- Long-press a genre for the usual menu (below). "Add to playlist..." adds a live
+  **Genre** entry (like Artist and Album entries): songs sent later with that genre join
+  the playlist; it shows greyed "not on phone" when nothing matches.
+- Search has a fourth heading, **Genres**.
 
 ## Music search
 
 - A **Search** button (magnifier) sits at the top right of the Music section. It opens a
   search screen with a text box and the phone's keyboard.
-- As I type, results appear under three headings: **Songs** (by title), **Artists** and
-  **Albums** (by title). Matching ignores capitals, accents and apostrophes, and finds
+- As I type, results appear under four headings: **Songs** (by title), **Artists**,
+  **Albums** (by title) and **Genres**. Matching ignores capitals, accents and apostrophes, and finds
   partial words anywhere in the name. Every typed word must appear, in any order ("getty"
   finds Keith & Kristyn Getty, "well" finds "It Is Well"). Names that start with what I
   typed come first, then A–Z.
 - Search uses the music index already in memory, so results appear instantly on 1,400
   songs. Never read files or tags while searching.
 - Tapping a song plays it, then the rest of its album. Tapping an artist or album opens its
-  screen. Long-pressing any result offers "Add to playlist...", like everywhere else.
+  screen. Long-pressing any result opens the long-press menu, like everywhere else.
 - Results show album art thumbnails, like the other lists.
 - DONE (or Return) puts the keyboard away so the results fill the screen; tapping the box
   brings it back. Clearing the box or pressing back closes search. Coming back from a
@@ -115,10 +140,11 @@ My PC script `Listen-Phone-Sync.cmd` copies files onto the phone like this:
 
 ## Playlists
 
-- A playlist is an **ordered list of entries**. Each entry is one of three kinds:
+- A playlist is an **ordered list of entries**. Each entry is one of four kinds:
   - **Song**: a file path relative to `/sdcard/Listen/Music`
   - **Album**: album artist + album name
   - **Artist**: artist name (matched on album artist, and also on track artist)
+  - **Genre**: genre name (matched ignoring capitals and spaces; "" means No Genre)
 - Entries are **live**. When a playlist plays, each entry expands against the *current*
   library. Adding "Shane & Shane" includes Shane & Shane songs I send later. An album
   expands in track order. An artist expands album by album (by year, then title).
@@ -127,11 +153,35 @@ My PC script `Listen-Phone-Sync.cmd` copies files onto the phone like this:
   keep it and show it greyed as "not on phone". It works again when the music comes back.
 - Actions:
   - Create, rename and delete a playlist.
-  - "Add to playlist..." from any song, album or artist (long-press or a menu button), and
-    from Now Playing.
+  - "Add to playlist..." from any song, album, artist or genre (long-press or a menu
+    button), and from Now Playing.
   - Remove an entry, move an entry up or down, play or shuffle a playlist.
 - The playlist detail screen lists its entries: Artist and Album entries show their art
   and a song count, and you can tap one to see the songs it expands to.
+
+## Play next, Add to queue, and the Queue
+
+(Added 2026-11-23.)
+
+- **Long-press menu.** Long-pressing any song, album, artist, genre or playlist (in lists,
+  search results, and album, artist and genre screens) offers "Play next", "Add to queue"
+  and "Add to playlist..." (playlists offer only the first two).
+- "Play next" puts the songs right after the current song; "Add to queue" puts them at
+  the end. Neither interrupts what's playing or clears the queue. If no music is playing,
+  either one starts a new queue with those songs, paused, ready to play. (While an
+  audiobook plays, they join music's saved queue for when music comes back.) A short
+  message says what happened ("Added 12 songs to queue").
+- Queue changes are saved in `music_state.json`, so they survive closing the app.
+- **Queue screen** (the list button on music Now Playing): the current song at the top,
+  highlighted, then "Up next" in play order with small art, title and artist. Songs
+  already played hide behind a "Show played" row. Tap a song to jump to it. Each up-next
+  row has move up / move down / remove buttons, like the playlist screen. At the bottom:
+  "Clear up next" (asks first) and "Save queue as playlist...".
+- **Shuffle is done by Listen, not the player**: turning it on mixes up every song but
+  the current one, and the queue (and the Queue screen) shows the shuffled order, so
+  editing it works the same. Turning it off goes back to the order before, keeping any
+  edits. `music_state.json` saves the play order in `paths` and, while shuffled, the order
+  to go back to in `unshuffledPaths`.
 
 ## Audiobooks
 
@@ -183,8 +233,8 @@ My PC script `Listen-Phone-Sync.cmd` copies files onto the phone like this:
 - **Music attributes:** `USAGE_MEDIA` / `AUDIO_CONTENT_TYPE_MUSIC`. **Audiobook
   attributes:** `AUDIO_CONTENT_TYPE_SPEECH`.
 - **Music controls:** big album art, title, artist and album, a seek bar with times,
-  previous / play-pause / next, shuffle, repeat (off, all, one), the queue, and Add to
-  playlist.
+  previous / play-pause / next, shuffle, repeat (off, all, one), the Queue button, and Add
+  to playlist.
 - **Audiobook controls:** cover, book title, chapter name, a seek bar for the chapter
   (with the whole-book position underneath), back 15 s, forward 30 s, previous/next
   chapter, the chapter list, a speed button (0.75, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0; pitch

@@ -2,6 +2,8 @@ package com.thelightphone.listen.playlists
 
 import com.thelightphone.listen.music.Album
 import com.thelightphone.listen.music.MusicLibraryState
+import com.thelightphone.listen.music.NO_GENRE
+import com.thelightphone.listen.music.genreKey
 import com.thelightphone.listen.music.Song
 import com.thelightphone.listen.music.albumKey
 import com.thelightphone.listen.music.groupKey
@@ -19,6 +21,7 @@ data class EntryMatch(val entry: PlaylistEntry, val songs: List<Song>, val album
  * Matches [entry] against the current [library]:
  * - a song: that file, if it's still there
  * - an album: its songs in disc and track order
+ * - a genre: its songs, album by album (A–Z), each in track order
  * - an artist: every album whose album artist is them, all its songs; plus, on other
  *   albums, the songs they perform (track artist). Album by album, by year, then title.
  */
@@ -49,6 +52,10 @@ fun matchEntry(entry: PlaylistEntry, library: MusicLibraryState): EntryMatch =
             }
             EntryMatch(entry, songs, albums)
         }
+        PlaylistEntry.KIND_GENRE -> {
+            val genre = library.genre(genreKey(entry.genre))
+            EntryMatch(entry, genre?.songs.orEmpty(), genre?.albums.orEmpty())
+        }
         else -> EntryMatch(entry, emptyList(), emptyList())
     }
 
@@ -71,6 +78,7 @@ fun entryTitle(match: EntryMatch): String {
         PlaylistEntry.KIND_SONG -> (match.songs.firstOrNull() ?: songFromPath(entry.path)).title
         PlaylistEntry.KIND_ALBUM -> entry.album
         PlaylistEntry.KIND_ARTIST -> entry.artist
+        PlaylistEntry.KIND_GENRE -> entry.genre.ifEmpty { NO_GENRE }
         else -> entry.album.ifEmpty { entry.artist.ifEmpty { entry.path } }
     }
 }
@@ -82,6 +90,7 @@ fun entryKindLine(match: EntryMatch): String {
         PlaylistEntry.KIND_SONG -> "Song · " + (match.songs.firstOrNull() ?: songFromPath(entry.path)).artist
         PlaylistEntry.KIND_ALBUM -> "Album · " + entry.artist
         PlaylistEntry.KIND_ARTIST -> "Artist"
+        PlaylistEntry.KIND_GENRE -> "Genre"
         else -> "Unknown"
     }
 }

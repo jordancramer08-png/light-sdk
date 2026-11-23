@@ -23,11 +23,14 @@ data class MusicLibraryState(
     val songs: List<Song> = emptyList(),
     val albums: List<Album> = emptyList(),
     val artists: List<Artist> = emptyList(),
+    /** A–Z, with "No Genre" last. */
+    val genres: List<Genre> = emptyList(),
     val loaded: Boolean = false,
     val updating: Boolean = false,
 ) {
     private val albumsByKey: Map<String, Album> by lazy { albums.associateBy { it.key } }
     private val artistsByKey: Map<String, Artist> by lazy { artists.associateBy { it.key } }
+    private val genresByKey: Map<String, Genre> by lazy { genres.associateBy { it.key } }
     private val songsByPath: Map<String, Song> by lazy { songs.associateBy { it.path } }
 
     /** Albums in the order an artist's albums play (year, then title), sorted once per library. */
@@ -39,7 +42,7 @@ data class MusicLibraryState(
     }
 
     /** The library ready for Search, built the first time it's needed (off the main thread). */
-    val searchIndex: MusicSearchIndex by lazy { MusicSearchIndex(songs, artists, albums) }
+    val searchIndex: MusicSearchIndex by lazy { MusicSearchIndex(songs, artists, albums, genres) }
 
     /** [groupKey] of an artist [name], from the library's cache when it's one of its names. */
     fun artistKey(name: String): String = artistKeys[name] ?: groupKey(name)
@@ -48,6 +51,7 @@ data class MusicLibraryState(
     fun song(path: String): Song? = songsByPath[path]
     fun album(key: String): Album? = albumsByKey[key]
     fun artist(key: String): Artist? = artistsByKey[key]
+    fun genre(key: String): Genre? = genresByKey[key]
 
     /** The album [song] is on, or null if it isn't in the library (any more). */
     fun albumOf(song: Song): Album? = albumsByKey[song.albumKey]
@@ -103,14 +107,17 @@ object MusicLibrary {
         val scanner = MusicScanner(ListenPaths.music, ListenPaths.lastSync, TagReader::read)
         // Taken before the scan, so a change made during the scan is caught next time.
         val stamp = scanner.stamp()
-        if (stamp == known.stamp) {
+        val upgrading = known.version != MusicIndex.VERSION
+        if (stamp == known.stamp && !upgrading) {
             Log.i("Listen", "Music: unchanged (checked in ${System.currentTimeMillis() - started} ms)")
             return
         }
 
         _state.update { it.copy(updating = true) }
         try {
-            val songs = scanner.scan(known.songs, onProgress = ::publish)
+            // An index from an older Listen lacks new tags (genres): every file is read again,
+            // while the old list stays on screen rather than filling up from nothing.
+            val songs = if (upgrading) scanner.scan(emptyList()) else scanner.scan(known.songs, onProgress = ::publish)
             val updated = MusicIndex(stamp = stamp, songs = songs)
             index = updated
             publish(songs)
@@ -126,6 +133,7 @@ object MusicLibrary {
         val sorted = sortedByTitle(songs)
         val albums = groupAlbums(sorted)
         val artists = groupArtists(albums)
-        _state.update { it.copy(songs = sorted, albums = albums, artists = artists, loaded = true) }
+        val genres = groupGenres(albums)
+        _state.update { it.copy(songs = sorted, albums = albums, artists = artists, genres = genres, loaded = true) }
     }
 }

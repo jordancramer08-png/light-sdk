@@ -16,9 +16,9 @@ import com.thelightphone.listen.ui.OneLine
 import com.thelightphone.listen.ui.ThemedScreen
 import com.thelightphone.listen.ui.UniformRow
 import com.thelightphone.listen.ui.UpdatingLine
+import com.thelightphone.listen.ui.tapOrHold
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.ui.LightTextVariant
-import com.thelightphone.sdk.ui.lightClickable
 
 /** An artist: their albums with covers (by year, then title), then "All songs". */
 class ArtistScreen(sealedActivity: SealedLightActivity, private val artistKey: String) : ListenScreen(sealedActivity) {
@@ -39,12 +39,12 @@ class ArtistScreen(sealedActivity: SealedLightActivity, private val artistKey: S
                 artist == null -> CenteredMessage(NOT_ON_PHONE, modifier = listArea)
                 else -> Box(modifier = listArea) {
                     MusicLazyList(tag = artist.key, rowGridUnits = ALBUM_ROW_GRID_UNITS) {
-                        albumRows(artist.albums, onOpen = { openAlbum(it) }, onHold = { addToPlaylist(it) }, lastHasDivider = true)
+                        albumRows(artist.albums, onOpen = { openAlbum(it) }, onHold = { showActions(it) }, lastHasDivider = true)
                         item(key = "all-songs") {
                             UniformRow(
                                 heightGridUnits = ALBUM_ROW_GRID_UNITS,
                                 showDivider = false,
-                                modifier = Modifier.lightClickable { openAllSongs(artist) },
+                                modifier = Modifier.tapOrHold(onHold = { showActions(artist) }) { openAllSongs(artist) },
                             ) {
                                 Column(modifier = Modifier.fillMaxWidth()) {
                                     OneLine(text = "All songs", variant = LightTextVariant.Copy)
@@ -95,7 +95,7 @@ class ArtistSongsScreen(sealedActivity: SealedLightActivity, private val artistK
                             artist.songs,
                             library,
                             onPlay = { songs, index -> play(artist, songs, index) },
-                            onHold = { addToPlaylist(it) },
+                            onHold = { showActions(it) },
                         ) { it.album }
                     }
                 }

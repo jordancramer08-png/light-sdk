@@ -27,19 +27,24 @@ class MusicIndexStoreTest {
     }
 
     @Test
-    fun `missing, broken or old index loads empty`() {
+    fun `missing or broken index loads empty`() {
         assertEquals(MusicIndex(), store.load())
         file.parentFile.mkdirs()
         file.writeText("{ not json")
         assertEquals(MusicIndex(), store.load())
-        file.writeText("""{"version":0,"stamp":"x","songs":[]}""")
-        assertEquals(MusicIndex(), store.load())
+    }
+
+    @Test
+    fun `an old index loads with its version, so it can be shown while it is read again`() {
+        file.parentFile.mkdirs()
+        file.writeText("""{"version":1,"stamp":"x","songs":[]}""")
+        assertEquals(1, store.load().version)
     }
 
     @Test
     fun `unknown fields are ignored`() {
         file.parentFile.mkdirs()
-        file.writeText("""{"version":1,"stamp":"x","extra":true,"songs":[]}""")
+        file.writeText("""{"version":2,"stamp":"x","extra":true,"songs":[]}""")
         assertEquals("x", store.load().stamp)
     }
 }

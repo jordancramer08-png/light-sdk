@@ -31,13 +31,13 @@ import com.thelightphone.listen.ui.NowPlayingBar
 import com.thelightphone.listen.ui.OneLine
 import com.thelightphone.listen.ui.ThemedScreen
 import com.thelightphone.listen.ui.UpdatingLine
+import com.thelightphone.listen.ui.tapOrHold
 import com.thelightphone.sdk.SealedLightActivity
 import com.thelightphone.sdk.ui.LightIcons
 import com.thelightphone.sdk.ui.LightScrollView
 import com.thelightphone.sdk.ui.LightText
 import com.thelightphone.sdk.ui.LightTextVariant
 import com.thelightphone.sdk.ui.gridUnitsAsDp
-import com.thelightphone.sdk.ui.lightClickable
 import kotlin.random.Random
 
 /** The album cover at the top of the album screen (grid units square). */
@@ -97,7 +97,7 @@ class AlbumScreen(sealedActivity: SealedLightActivity, private val albumKey: Str
                     )
                     HairlineDivider()
                 }
-                TrackRow(song, showArtist = groupKey(song.artist) != groupKey(album.artist)) {
+                TrackRow(song, showArtist = groupKey(song.artist) != groupKey(album.artist), onHold = { showActions(song) }) {
                     play(album, index, shuffle = false)
                 }
                 if (index != album.songs.lastIndex) HairlineDivider()
@@ -139,11 +139,11 @@ private fun Header(album: Album) {
 
 /** Track number, title (and the performer when it isn't the album artist), and length. */
 @Composable
-private fun TrackRow(song: Song, showArtist: Boolean, onClick: () -> Unit) {
+private fun TrackRow(song: Song, showArtist: Boolean, onHold: () -> Unit, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .lightClickable(onClick = onClick)
+            .tapOrHold(onHold = onHold, onClick = onClick)
             .padding(vertical = 0.75f.gridUnitsAsDp()),
         verticalAlignment = Alignment.CenterVertically,
     ) {

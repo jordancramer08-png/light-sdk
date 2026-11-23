@@ -91,6 +91,14 @@ object Playlists {
         return id
     }
 
+    /** Makes a playlist holding [entries] (a song named twice is kept once) and returns its id. */
+    fun createWith(name: String, entries: List<PlaylistEntry>): String {
+        val id = UUID.randomUUID().toString()
+        val playlist = entries.fold(Playlist(id = id, name = name)) { list, entry -> list.adding(entry) }
+        change { it + playlist }
+        return id
+    }
+
     fun rename(id: String, name: String) = changePlaylist(id) { it.copy(name = name) }
 
     fun delete(id: String) = change { list -> list.filterNot { it.id == id } }

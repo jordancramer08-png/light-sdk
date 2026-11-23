@@ -40,3 +40,15 @@ fun sortedByTitle(songs: List<Song>): List<Song> =
         .map { Triple(sortKey(it.title), sortKey(it.artist), it) }
         .sortedWith(compareBy({ it.first }, { it.second }, { it.third.path }))
         .map { it.third }
+
+/** The A–Z bar's heading for anything other than a plain letter (numbers, symbols, other scripts). */
+const val OTHER_LETTER = '#'
+
+/**
+ * The A–Z bar letter [name] files under, by the same rules the lists sort by (no leading
+ * The/A/An, no accents): "The Corner Room" → 'C', "Élan" → 'E', "10,000 Reasons" → '#'.
+ */
+fun indexLetter(name: String): Char {
+    val first = sortKey(name).firstOrNull() ?: return OTHER_LETTER
+    return if (first in 'a'..'z') first.uppercaseChar() else OTHER_LETTER
+}

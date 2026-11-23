@@ -21,6 +21,8 @@ data class Song(
     val disc: Int = 0,
     val year: Int = 0,
     val durationMs: Long = 0,
+    /** The genre tag as written ("" when there is none); [genreKey] merges spellings. */
+    val genre: String = "",
 )
 
 /**
@@ -36,6 +38,7 @@ data class RawTags(
     val disc: String? = null,
     val year: String? = null,
     val durationMs: String? = null,
+    val genre: String? = null,
 )
 
 const val UNKNOWN_ARTIST = "Unknown artist"
@@ -67,6 +70,7 @@ fun songFrom(path: String, size: Long, modified: Long, tags: RawTags?): Song {
         disc = leadingNumber(tags?.disc),
         year = yearOf(tags?.year),
         durationMs = tags?.durationMs?.trim()?.toLongOrNull() ?: 0,
+        genre = cleanGenre(tags?.genre),
     )
 }
 
@@ -90,3 +94,13 @@ fun leadingNumber(value: String?): Int =
 /** The first four-digit year in "2015", "2015-04-28" or "20150428T000000.000Z"; else 0. */
 fun yearOf(value: String?): Int =
     value?.let { Regex("""\d{4}""").find(it)?.value?.toIntOrNull() } ?: 0
+
+/**
+ * A genre tag tidied: spaces collapsed, and an ID3v1 number in brackets dropped when a name
+ * follows it ("(20)Alternative" → "Alternative"). "" when there's no genre.
+ */
+fun cleanGenre(value: String?): String {
+    val trimmed = value?.trim()?.replace(Regex("""\s+"""), " ").orEmpty()
+    val named = trimmed.replaceFirst(Regex("""^\(\d+\)\s*(?=\S)"""), "")
+    return named.trim()
+}

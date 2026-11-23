@@ -111,6 +111,43 @@ private class VolumeBar(private val level: LightVolumeLevel) : LightModal {
     }
 }
 
+/** A short note ("Added 12 songs to queue") in the volume bar's box, for about 2 seconds. */
+fun showNotice(text: String) {
+    LightModalManager.show(Notice(text))
+}
+
+private class Notice(private val text: String) : LightModal {
+    private val dismissed = CompletableDeferred<Unit>()
+
+    override val onExpired: () -> Unit = {}
+    override fun dismiss() { dismissed.complete(Unit) }
+    override suspend fun awaitDismiss() { dismissed.await() }
+
+    @Composable
+    override fun Content() {
+        val settings by Settings.settings.collectAsState()
+        val theme = ListenTheme.fromSavedName(settings.theme)
+        LightTheme(colors = theme.colors) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 2f.gridUnitsAsDp(), vertical = 7f.gridUnitsAsDp()),
+                contentAlignment = Alignment.TopCenter,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(LightThemeTokens.colors.background)
+                        .border(1.dp, LightThemeTokens.colors.contentSecondary)
+                        .padding(horizontal = 1.5f.gridUnitsAsDp(), vertical = 1f.gridUnitsAsDp()),
+                ) {
+                    OneLine(text = text, variant = LightTextVariant.Detail)
+                }
+            }
+        }
+    }
+}
+
 /** "Volume 7 of 15", or "Volume off" at the bottom. */
 internal fun volumeText(level: LightVolumeLevel): String =
     if (level.step <= 0) "Volume off" else "Volume ${level.step} of ${level.maxStep}"

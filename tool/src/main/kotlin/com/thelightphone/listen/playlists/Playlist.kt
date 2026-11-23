@@ -1,6 +1,7 @@
 package com.thelightphone.listen.playlists
 
 import com.thelightphone.listen.music.albumKey
+import com.thelightphone.listen.music.genreKey
 import com.thelightphone.listen.music.groupKey
 import kotlinx.serialization.Serializable
 
@@ -10,6 +11,7 @@ import kotlinx.serialization.Serializable
  * - [KIND_SONG]: [path] relative to /sdcard/Listen/Music
  * - [KIND_ALBUM]: [artist] (the album artist) and [album]
  * - [KIND_ARTIST]: [artist]
+ * - [KIND_GENRE]: [genre] (matched however its capitals and spaces are written)
  * An unknown kind (from a newer Listen) is kept as it is and matches nothing.
  */
 @Serializable
@@ -18,6 +20,7 @@ data class PlaylistEntry(
     val path: String = "",
     val artist: String = "",
     val album: String = "",
+    val genre: String = "",
 ) {
     /** Entries that name the same music have the same key (names compared like the library does). */
     val matchKey: String
@@ -25,6 +28,7 @@ data class PlaylistEntry(
             KIND_SONG -> "song:$path"
             KIND_ALBUM -> "album:" + albumKey(artist, album)
             KIND_ARTIST -> "artist:" + groupKey(artist)
+            KIND_GENRE -> "genre:" + genreKey(genre)
             else -> "$kind:$path|$artist|$album"
         }
 
@@ -32,10 +36,12 @@ data class PlaylistEntry(
         const val KIND_SONG = "song"
         const val KIND_ALBUM = "album"
         const val KIND_ARTIST = "artist"
+        const val KIND_GENRE = "genre"
 
         fun song(path: String) = PlaylistEntry(KIND_SONG, path = path)
         fun album(albumArtist: String, album: String) = PlaylistEntry(KIND_ALBUM, artist = albumArtist, album = album)
         fun artist(name: String) = PlaylistEntry(KIND_ARTIST, artist = name)
+        fun genre(name: String) = PlaylistEntry(KIND_GENRE, genre = name)
     }
 }
 

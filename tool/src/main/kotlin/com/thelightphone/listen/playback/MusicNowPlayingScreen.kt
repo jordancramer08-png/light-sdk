@@ -38,7 +38,9 @@ import com.thelightphone.listen.artwork.songArtSource
 import com.thelightphone.listen.music.MusicLibrary
 import com.thelightphone.listen.music.Song
 import com.thelightphone.listen.ui.CenteredMessage
+import com.thelightphone.listen.ui.IconTopBar
 import com.thelightphone.listen.ui.LocalListenAccent
+import com.thelightphone.listen.ui.TopBarIcon
 import com.thelightphone.listen.ui.ScrollingLine
 import com.thelightphone.listen.ui.ThemedScreen
 import com.thelightphone.sdk.SealedLightActivity
@@ -57,7 +59,8 @@ import com.thelightphone.sdk.ui.lightClickable
 
 /**
  * Music Now Playing: album art, title, artist and album, a seek bar with times, and
- * shuffle / previous / play-pause / next / repeat. "+" at the top adds the song to a playlist.
+ * shuffle / previous / play-pause / next / repeat. At the top: the queue, and "+" to add the
+ * song to a playlist.
  */
 class MusicNowPlayingScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedActivity) {
 
@@ -67,14 +70,16 @@ class MusicNowPlayingScreen(sealedActivity: SealedLightActivity) : ListenScreen(
         val book by PlaybackHub.book.collectAsState()
         val message by PlaybackHub.message.collectAsState()
         ThemedScreen {
-            LightTopBar(
-                leftButton = LightBarButton.LightIcon(icon = LightIcons.BACK, onClick = { goBack() }),
-                center = LightTopBarCenter.Text("Now Playing"),
-                rightButton = song?.let { playing ->
-                    LightBarButton.LightIcon(
-                        icon = LightIcons.ADD,
-                        onClick = { addToPlaylist(playing) },
-                        contentDescription = "Add to playlist",
+            val playing = song
+            IconTopBar(
+                title = "Now Playing",
+                onBack = { goBack() },
+                icons = if (playing == null) {
+                    emptyList()
+                } else {
+                    listOf(
+                        TopBarIcon(LightIcons.LIST, "Queue") { navigateTo(screenFactory = { QueueScreen(it) }) },
+                        TopBarIcon(LightIcons.ADD, "Add to playlist") { addToPlaylist(playing) },
                     )
                 },
             )

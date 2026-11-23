@@ -57,7 +57,7 @@ class PlaylistEntryScreen(
                             current.match.songs,
                             library,
                             onPlay = { songs, index -> play(playlist, current, songs[index]) },
-                            onHold = { addToPlaylist(it) },
+                            onHold = { showActions(it) },
                             detail = if (entry.kind == PlaylistEntry.KIND_ALBUM) {
                                 { it.artist }
                             } else {

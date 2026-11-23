@@ -23,7 +23,7 @@ import com.thelightphone.sdk.ui.LightTopBar
 import com.thelightphone.sdk.ui.LightTopBarCenter
 import com.thelightphone.sdk.ui.gridUnitsAsDp
 
-/** Music: Songs, Artists, Albums and Playlists, with Search at the top right. */
+/** Music: Songs, Artists, Albums, Genres and Playlists, with Search at the top right. */
 class MusicHomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedActivity) {
 
     @Composable
@@ -71,6 +71,11 @@ class MusicHomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealed
                     onClick = ::openAlbums,
                 )
                 MenuRow(
+                    title = "Genres",
+                    detail = if (library.loaded) genreCount(library.genres.size) else null,
+                    onClick = ::openGenres,
+                )
+                MenuRow(
                     title = "Playlists",
                     detail = if (playlistsLoaded) playlistCount(playlists.size) else null,
                     onClick = ::openPlaylists,
@@ -101,6 +106,10 @@ class MusicHomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealed
         navigateTo(screenFactory = { AlbumsScreen(it) })
     }
 
+    private fun openGenres() {
+        navigateTo(screenFactory = { GenresScreen(it) })
+    }
+
     private fun openPlaylists() {
         navigateTo(screenFactory = { PlaylistsScreen(it) })
     }
@@ -108,6 +117,9 @@ class MusicHomeScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealed
 
 /** "1 playlist", "4 playlists". */
 fun playlistCount(count: Int): String = if (count == 1) "1 playlist" else "%,d playlists".format(count)
+
+/** "1 genre", "24 genres". */
+fun genreCount(count: Int): String = if (count == 1) "1 genre" else "%,d genres".format(count)
 
 /** "1 song", "1,412 songs". */
 fun songCount(count: Int): String =

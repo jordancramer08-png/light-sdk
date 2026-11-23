@@ -16,6 +16,7 @@ import com.thelightphone.listen.books.locate
 import com.thelightphone.listen.books.rewindMs
 import com.thelightphone.listen.music.MusicLibrary
 import com.thelightphone.listen.music.Song
+import com.thelightphone.listen.music.songCount
 import com.thelightphone.listen.music.songFrom
 import com.thelightphone.listen.podcasts.Podcasts
 import com.thelightphone.listen.storage.ListenPaths
@@ -56,8 +57,11 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
-/** The loaded music queue, in its own (unshuffled) order. */
-data class MusicQueue(val songs: List<Song>, val source: QueueSource)
+/**
+ * The loaded music queue in the order it plays (Listen shuffles it itself), where it came
+ * from, and while shuffled the order shuffle-off goes back to.
+ */
+data class MusicQueue(val songs: List<Song>, val source: QueueSource, val unshuffled: List<Song>? = null)
 
 /** A running sleep timer: pause at [endsAt] (wall clock), or at the end of the chapter. */
 sealed interface SleepTimer {
@@ -212,23 +216,123 @@ object PlaybackHub {
      * With shuffle on, the tapped song plays first and every other song still plays once.
      */
     fun playSongs(songs: List<Song>, startIndex: Int, source: QueueSource, shuffle: Boolean? = null) {
+        startQueue(songs, startIndex, source, shuffle, playNow = true)
+    }
+
+    private fun startQueue(songs: List<Song>, startIndex: Int, source: QueueSource, shuffle: Boolean?, playNow: Boolean) {
         if (songs.isEmpty() || startIndex !in songs.indices) return
         restoreJob?.cancel()
         val player = ensurePlayer() ?: return
         leaveBook(player)
-        _queue.value = MusicQueue(songs, source)
-        _index.value = startIndex
+        if (shuffle != null) _shuffle.value = shuffle
+        val plain = QueueOrder(songs, startIndex)
+        val order = if (_shuffle.value) plain.shuffled() else plain
+        _queue.value = MusicQueue(order.songs, source, order.unshuffled)
+        _index.value = order.index
         _positionMs.value = 0
         _durationMs.value = 0
         failuresInARow = 0
-        wantsToPlay = true
-        if (shuffle != null) {
-            _shuffle.value = shuffle
-            player.setShuffleEnabled(shuffle)
-        }
-        player.setMediaQueue(songs.map(::itemFor), startIndex)
-        player.play()
+        wantsToPlay = playNow
+        player.setMediaQueue(order.songs.map(::itemFor), order.index)
+        if (playNow) player.play()
         saveMusic()
+    }
+
+    // ---- Queue (Play next, Add to queue, the Queue screen) ----
+
+    /** The loaded queue as a [QueueOrder], or null when no music is loaded. */
+    private fun order(): QueueOrder? {
+        val queue = _queue.value ?: return null
+        if (_book.value != null) return null
+        val index = _index.value.takeIf { it in queue.songs.indices } ?: return null
+        return QueueOrder(queue.songs, index, queue.unshuffled)
+    }
+
+    private fun setOrder(order: QueueOrder) {
+        val queue = _queue.value ?: return
+        _queue.value = queue.copy(songs = order.songs, unshuffled = order.unshuffled)
+        _index.value = order.index
+        saveMusic()
+    }
+
+    /**
+     * "Play next" ([next]) or "Add to queue" for [songs], without stopping what plays. When
+     * nothing is playing, they become a new queue, paused, ready to play. While an audiobook
+     * plays they join music's saved queue, for when music comes back. Returns what to tell
+     * the user ("Added 12 songs to queue").
+     */
+    fun enqueue(songs: List<Song>, next: Boolean, source: QueueSource): String {
+        if (songs.isEmpty()) return "Nothing to add"
+        val count = songCount(songs.size)
+        val book = _book.value
+        if (book != null && _isPlaying.value) {
+            val spot = (_musicSpot.value ?: MusicState(source = source)).adding(songs.map { it.path }, next).copy(book = book.id)
+            _musicSpot.value = spot
+            scope.launch(io) { write(spot) }
+            return if (next) "$count will play next in music" else "Added $count to the music queue"
+        }
+        val order = order()
+        if (order == null || !_isPlaying.value) {
+            startQueue(songs, 0, source, shuffle = null, playNow = false)
+            return "Ready to play: $count"
+        }
+        val player = ensurePlayer() ?: return "Nothing to add"
+        if (next) {
+            player.addMediaItems(order.index + 1, songs.map(::itemFor))
+            setOrder(order.insertingNext(songs))
+        } else {
+            player.addMediaItems(order.songs.size, songs.map(::itemFor))
+            setOrder(order.appending(songs))
+        }
+        return if (next) "$count will play next" else "Added $count to queue"
+    }
+
+    /** Plays the queue's song at [at] (a tap on the Queue screen). */
+    fun jumpTo(at: Int, expectedPath: String) {
+        val order = order() ?: return
+        if (order.songs.getOrNull(at)?.path != expectedPath) return
+        val player = ensurePlayer() ?: return
+        _index.value = at
+        _positionMs.value = 0
+        player.seekTo(at, 0)
+        play()
+        saveSoon()
+    }
+
+    /** Takes the song at [at] out of the queue, if it's still [expectedPath] (never the current song). */
+    fun removeFromQueue(at: Int, expectedPath: String) {
+        val order = order() ?: return
+        if (at == order.index || order.songs.getOrNull(at)?.path != expectedPath) return
+        val player = ensurePlayer() ?: return
+        player.removeMediaItems(at, at + 1)
+        setOrder(order.removingAt(at))
+    }
+
+    /** Moves the song at [at] one place up or down, if it's still [expectedPath]. */
+    fun moveInQueue(at: Int, up: Boolean, expectedPath: String) {
+        val order = order() ?: return
+        if (order.songs.getOrNull(at)?.path != expectedPath) return
+        val moved = order.moving(at, up)
+        if (moved == order) return
+        val player = ensurePlayer() ?: return
+        player.moveMediaItem(at, if (up) at - 1 else at + 1)
+        setOrder(moved)
+    }
+
+    /** Everything after the current song is taken out. */
+    fun clearUpNext() {
+        val order = order() ?: return
+        val player = ensurePlayer() ?: return
+        player.removeMediaItems(order.index + 1, order.songs.size)
+        setOrder(order.clearingUpNext())
+    }
+
+    /** Puts [new] on the player around the current song, which keeps playing undisturbed. */
+    private fun reorderAroundCurrent(player: LightAudioPlayer, old: QueueOrder, new: QueueOrder) {
+        player.removeMediaItems(old.index + 1, old.songs.size)
+        player.removeMediaItems(0, old.index)
+        player.addMediaItems(0, new.songs.take(new.index).map(::itemFor))
+        player.addMediaItems(new.index + 1, new.songs.drop(new.index + 1).map(::itemFor))
     }
 
     /** Back from a book to the music spot saved when the book started, and plays it. */
@@ -244,7 +348,7 @@ object PlaybackHub {
                 showMessage("That music isn't on the phone any more")
                 return@launch
             }
-            loadMusic(player, state, songsFor(state.paths), playNow = true)
+            loadMusic(player, state, orderFor(state), playNow = true)
             saveMusic()
         }
     }
@@ -471,13 +575,23 @@ object PlaybackHub {
         saveSoon()
     }
 
+    /**
+     * Shuffle on mixes up everything but the current song, which keeps playing; off goes back
+     * to the order before (with any songs added since).
+     */
     fun toggleShuffle() {
         if (_book.value != null) return
         val player = ensurePlayer() ?: return
         val on = !_shuffle.value
         _shuffle.value = on
-        player.setShuffleEnabled(on)
-        saveSoon()
+        val order = order()
+        if (order != null) {
+            val new = if (on) order.shuffled() else order.unshuffledOrder()
+            reorderAroundCurrent(player, order, new)
+            setOrder(new)
+        } else {
+            saveSoon()
+        }
     }
 
     /** Off → All → One → Off. */
@@ -501,10 +615,24 @@ object PlaybackHub {
 
     // ---- Loading ----
 
-    private fun loadMusic(player: LightAudioPlayer, state: MusicState, songs: List<Song>, playNow: Boolean) {
+    /**
+     * The saved queue's songs in play order. A version-1 spot saved with shuffle on held the
+     * unshuffled order (the player shuffled it), so it's shuffled here around its song.
+     */
+    private suspend fun orderFor(state: MusicState): QueueOrder {
+        val songs = songsFor(state.paths)
+        val index = state.index.coerceIn(0, songs.lastIndex)
+        if (!state.shuffle) return QueueOrder(songs, index)
+        val unshuffled = state.unshuffledPaths ?: return QueueOrder(songs, index).shuffled()
+        return QueueOrder(songs, index, songsFor(unshuffled))
+    }
+
+    private fun loadMusic(player: LightAudioPlayer, saved: MusicState, order: QueueOrder, playNow: Boolean) {
         leaveBook(player)
+        val state = saved.copy(index = order.index)
+        val songs = order.songs
         val repeat = repeatFrom(state.repeat)
-        _queue.value = MusicQueue(songs, state.source)
+        _queue.value = MusicQueue(songs, state.source, order.unshuffled)
         _index.value = state.index
         _positionMs.value = state.positionMs
         _durationMs.value = 0
@@ -513,7 +641,7 @@ object PlaybackHub {
         failuresInARow = 0
         wantsToPlay = playNow
         _musicSpot.value = state.copy(book = null)
-        player.setShuffleEnabled(state.shuffle)
+        player.setShuffleEnabled(false)
         player.setRepeatMode(repeat)
         player.setMediaQueue(songs.map(::itemFor), state.index, state.positionMs)
         if (playNow) player.play()
@@ -531,7 +659,8 @@ object PlaybackHub {
         setUsage(player, LightAudioUsage.Music)
         player.speed = 1f
         applyAudioOffload()
-        player.setShuffleEnabled(_shuffle.value)
+        // Listen shuffles music's queue itself; the player always plays it in order.
+        player.setShuffleEnabled(false)
         player.setRepeatMode(_repeat.value)
     }
 
@@ -712,7 +841,7 @@ object PlaybackHub {
         val state = withContext(Dispatchers.IO) {
             saved.restorable { File(ListenPaths.music, it).isFile }
         } ?: return
-        loadMusic(player, state, songsFor(state.paths), playNow = false)
+        loadMusic(player, state, orderFor(state), playNow = false)
     }
 
     /** Loads book [id] paused at its saved place; false when it isn't on the phone. */
@@ -781,8 +910,7 @@ object PlaybackHub {
             }
             launch { player.positionMs.collect { if (hasQueue()) _positionMs.value = it } }
             launch { player.durationMs.collect { if (hasQueue()) _durationMs.value = it } }
-            // While a book plays, these keep music's shuffle and repeat for when music comes back.
-            launch { player.shuffleEnabled.collect { if (hasQueue() && _book.value == null) _shuffle.value = it } }
+            // While a book plays, this keeps music's repeat for when music comes back.
             launch { player.repeatMode.collect { if (hasQueue() && _book.value == null) _repeat.value = it } }
             launch { player.error.collect { error -> if (error != null) onError(player, error) } }
             launch { player.currentFormat.collect { _format.value = it } }
@@ -817,7 +945,7 @@ object PlaybackHub {
         val isBook = _book.value != null
         val size = _queue.value?.songs?.size ?: _book.value?.files?.size ?: return
         failuresInARow++
-        val atEnd = _index.value >= size - 1 && (isBook || (_repeat.value == LightRepeatMode.Off && !_shuffle.value))
+        val atEnd = _index.value >= size - 1 && (isBook || _repeat.value == LightRepeatMode.Off)
         if (failuresInARow >= size || atEnd) return
         player.skipToNext()
         if (wantsToPlay) player.play() else player.prepare()
@@ -917,6 +1045,7 @@ object PlaybackHub {
             positionMs = _positionMs.value,
             shuffle = _shuffle.value,
             repeat = repeatName(_repeat.value),
+            unshuffledPaths = queue.unshuffled?.takeIf { _shuffle.value }?.map { it.path },
         )
         _musicSpot.value = state
         scope.launch(io) { write(state) }

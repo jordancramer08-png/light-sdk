@@ -22,6 +22,7 @@ object TagReader {
                 year = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_YEAR)
                     ?: retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DATE),
                 durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION),
+                genre = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_GENRE),
             )
         } catch (e: Exception) {
             Log.w(TAG, "Can't read tags of ${file.path}: $e")

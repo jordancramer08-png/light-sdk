@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import com.thelightphone.listen.ListenScreen
 import com.thelightphone.listen.playback.PlaybackHub
@@ -39,8 +40,20 @@ class SongsScreen(sealedActivity: SealedLightActivity) : ListenScreen(sealedActi
             when {
                 !library.loaded || !settingsLoaded || sorted == null -> Box(modifier = listArea)
                 sorted.items.isNotEmpty() -> Box(modifier = listArea) {
-                    MusicLazyList(tag = sorted.tag, rowGridUnits = SONG_ROW_GRID_UNITS) {
-                        songRows(sorted.items, library, onPlay = ::play, onHold = { addToPlaylist(it) })
+                    val field = sort.fieldOr(SongSortField.TITLE)
+                    val letters = remember(sorted) {
+                        sorted.items.map { song ->
+                            indexLetter(
+                                when (field) {
+                                    SongSortField.TITLE -> song.title
+                                    SongSortField.ARTIST -> song.artist
+                                    SongSortField.ALBUM -> song.album
+                                },
+                            )
+                        }
+                    }
+                    IndexedMusicList(sorted.tag, SONG_ROW_GRID_UNITS, letters, sort.descending) {
+                        songRows(sorted.items, library, onPlay = ::play, onHold = { showActions(it) })
                     }
                 }
                 library.updating -> CenteredMessage("Reading your music…", modifier = listArea)

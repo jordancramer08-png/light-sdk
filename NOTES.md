@@ -4,6 +4,50 @@ Session-by-session notes for the Listen tool. `CLAUDE.md` says what the app does
 `PLAN.md` says how it's built. The older SDK recon below the line is still accurate
 reference for the SDK's UI kit, screens and sandbox rules.
 
+## Music update (2026-11-23): Listen 1.10.0 — works on the phone
+
+Four music features, built in one session, tested by Jordan on the phone, and pushed to
+`listen` (commits "SDK: add, remove and move queue items…" and "Music update: …").
+
+### What it does
+
+- **A–Z jump bar** on Songs, Artists, Albums and Genres: tap or slide to jump; a big
+  letter shows while touching; follows the list's sort (field and A–Z / Z–A); "#" for
+  numbers and symbols; empty letters dimmed; hidden on lists shorter than a screen.
+- **Genres** on Music home: genres merged by capitals, accents and spaces, "No Genre"
+  last; genre screen with Play, Shuffle, albums and All songs; live Genre playlist
+  entries; Genres heading in Search.
+- **Long-press menu** everywhere in Music (songs, albums, artists, genres, playlists):
+  Play next, Add to queue, Add to playlist… A short notice says what happened.
+- **Queue screen** (list icon on music Now Playing): current song highlighted, Up next
+  with move up / down / remove, Show played, tap to jump, Clear up next (asks first),
+  Save queue as playlist…
+
+### How it works
+
+- Genre is read by `TagReader` into `Song.genre`. The music index is now version 2: the
+  first launch re-reads every file once, showing the old list meanwhile.
+- **Listen shuffles music's queue itself** (`playback/QueueOrder.kt`). The player always
+  plays in order, so the Queue screen shows the real shuffled order. `music_state.json`
+  is version 2: `paths` is the play order, `unshuffledPaths` the order shuffle-off goes
+  back to. A version-1 file saved with shuffle on is shuffled again when it loads.
+- Play next / Add to queue: if music is playing, songs are inserted without stopping it.
+  If nothing plays (including paused music), they become a new paused queue, as the spec
+  says. While an audiobook plays, they're added to music's saved spot.
+- New files: `music/AlphabetBar.kt`, `music/Genres.kt`, `music/GenreScreens.kt`,
+  `playback/QueueOrder.kt`, `playback/QueueScreen.kt`, `ui/ActionMenuScreen.kt`;
+  `showNotice()` in `ui/VolumeKeys.kt`.
+
+### SDK change (its own commit)
+
+- `LightAudioPlayer`: `addMediaItems`, `removeMediaItems`, `moveMediaItem` (change the
+  queue without interrupting the playing song).
+
+### Tests
+
+- New: `GenresAndLettersTest`, `QueueOrderTest` (12 tests); `MusicIndexStoreTest`
+  updated. All app and SDK unit tests pass.
+
 ## Podcasts final summary (2026-10-02): Listen 1.9.2 — works on the phone
 
 Built on the `podcasts` branch (sessions P0–P9 of `PODCAST_PLAN.md`), tested by Jordan on

@@ -243,6 +243,49 @@ class LightAudioPlayer internal constructor(
     }
 
     /**
+     * Inserts [items] into the queue before position [index] (the queue's size adds them
+     * at the end) without interrupting what's playing. An empty queue is prepared, so the
+     * new items are ready to play.
+     */
+    fun addMediaItems(index: Int, items: List<LightAudioItem>) {
+        if (items.isEmpty()) return
+        commands.dispatch { player ->
+            val at = index.coerceIn(0, player.mediaItemCount)
+            val wasEmpty = player.mediaItemCount == 0
+            player.addMediaItems(at, items.mapIndexed { i, item -> item.toMediaItem(at + i) })
+            if (wasEmpty) player.prepare()
+            syncIndex(player)
+        }
+    }
+
+    /** Removes the queue items from [fromIndex] (inclusive) to [toIndex] (exclusive). */
+    fun removeMediaItems(fromIndex: Int, toIndex: Int) {
+        commands.dispatch { player ->
+            val from = fromIndex.coerceIn(0, player.mediaItemCount)
+            val to = toIndex.coerceIn(from, player.mediaItemCount)
+            if (from == to) return@dispatch
+            player.removeMediaItems(from, to)
+            syncIndex(player)
+        }
+    }
+
+    /** Moves the queue item at [fromIndex] to [toIndex], without interrupting playback. */
+    fun moveMediaItem(fromIndex: Int, toIndex: Int) {
+        commands.dispatch { player ->
+            val count = player.mediaItemCount
+            if (fromIndex !in 0 until count || toIndex !in 0 until count || fromIndex == toIndex) return@dispatch
+            player.moveMediaItem(fromIndex, toIndex)
+            syncIndex(player)
+        }
+    }
+
+    /** After the queue changed around the playing item, its index may have moved. */
+    private fun syncIndex(player: Player) {
+        _currentMediaItemIndex.value = if (player.mediaItemCount == 0) NO_MEDIA_ITEM else player.currentMediaItemIndex
+        updateDuration(player)
+    }
+
+    /**
      * Start or resume playback if audio focus is available.
      *
      * Observe [isPlaying] for the actual playback state.
